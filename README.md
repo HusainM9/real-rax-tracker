@@ -107,7 +107,9 @@ Use a **private** repository. After pushing, connect it in Vercel for automatic 
 
 1. Open the production URL in an **incognito window** — you should get a browser login prompt.
 2. Confirm routes work after login (`/entry`, `/calendar`, refresh on each).
-3. Enable **Deployment Protection** for **Preview** deployments (Vercel → Project → Deployment Protection) so PR preview URLs are not public.
+3. Enable **Deployment Protection** for **Preview** deployments:
+   - Vercel → **real-rax-tracker** → Settings → **Deployment Protection**
+   - Turn on protection for **Preview** (not required for Production — middleware Basic Auth handles that)
 
 ### Alternative: Vercel Deployment Protection (Pro)
 
