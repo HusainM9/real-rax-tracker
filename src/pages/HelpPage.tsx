@@ -52,11 +52,11 @@ export default function HelpPage() {
             / Meowbot. No Real API key needed.
           </li>
           <li>
-            <strong>Manual paste</strong> — copy earnings JSON from realapp.tools or realapp.com for
-            one card at a time (Advanced section on Entry).
+            <strong>Add card &amp; earnings</strong> — on Entry, set up the pass and paste daily
+            RAX JSON (realapp.tools or realapp.com) in one form.
           </li>
           <li>
-            <strong>Manual entry</strong> — add cards and daily RAX rows yourself.
+            <strong>Manual entry</strong> — use single-day mode in the same form for one-off rows.
           </li>
         </ol>
       </section>
@@ -73,6 +73,14 @@ export default function HelpPage() {
         </p>
         <ol className="help-list ordered">
           <li>
+            Open{' '}
+            <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+              realapp.com
+            </a>{' '}
+            and log in (Real Pro, <strong>desktop</strong> browser — mobile redirects to the app
+            store).
+          </li>
+          <li>
             Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
             earnings.
           </li>
@@ -81,15 +89,16 @@ export default function HelpPage() {
             to open the card earnings screen.
           </li>
           <li>
-            In Network, filter for <code>userpassearnings</code> and open the request whose URL
-            includes <code>playerBoxScoreId</code>.
+            In Network, filter for <code>userpassearnings</code> and click the request whose URL
+            includes <code>playerBoxScoreId</code> (for example{' '}
+            <code>userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…</code>).
           </li>
           <li>
             Copy the full Response JSON (an object with an <code>earnings</code> array).
           </li>
           <li>
-            On <Link to="/entry">Entry</Link>, open <strong>Advanced: paste earnings JSON</strong>,
-            select the player card, paste, and import.
+            On <Link to="/entry">Entry</Link>, use <strong>Add card &amp; earnings</strong> — select
+            the player card (or add a new one), paste the JSON, and save.
           </li>
         </ol>
         <p className="import-hint">
@@ -107,7 +116,7 @@ export default function HelpPage() {
           </div>
           <div>
             <dt>Entry</dt>
-            <dd>Import collection, add cards, edit RAX rows.</dd>
+            <dd>Import collection, add cards with earnings, edit RAX rows.</dd>
           </div>
           <div>
             <dt>Calendar</dt>

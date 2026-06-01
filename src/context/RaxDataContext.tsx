@@ -50,7 +50,7 @@ type ImportFromUsernameOptions = UsernameImportOptions
 type RaxDataContextValue = {
   data: RaxTrackerData
   setSettings: (patch: Partial<AppSettings>) => void
-  addCard: (input: CardInput) => void
+  addCard: (input: CardInput) => string
   upsertCard: (externalKey: string, input: CardInput) => string
   updateCard: (id: string, patch: Partial<CardInput>) => void
   deleteCard: (id: string) => void
@@ -93,20 +93,25 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         }))
       },
       addCard: (input) => {
+        const id = createId('card')
         setData((current) => ({
           ...current,
           cards: [
             ...current.cards,
             {
-              id: createId('card'),
+              id,
               name: input.name.trim(),
               sport: input.sport as Sport,
               season: input.season.trim(),
               notes: input.notes.trim(),
+              rarityLabel: input.rarityLabel?.trim() || undefined,
+              passKind: input.passKind,
+              simulatedRarityLabel: input.simulatedRarityLabel,
               createdAt: nowIso(),
             },
           ],
         }))
+        return id
       },
       upsertCard: (externalKey, input) => {
         let cardId = ''

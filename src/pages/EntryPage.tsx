@@ -19,6 +19,30 @@ function pageCount(count: number, pageSize: number): number {
   return Math.max(1, Math.ceil(count / pageSize))
 }
 
+const CARD_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+
+type CardEntryMode = 'new' | 'existing'
+type EarningsInputMode = 'paste' | 'single'
+
+function emptyCardEntry(cards: { id: string }[], existingCardId = '') {
+  const resolvedCardId = existingCardId || cards[0]?.id || ''
+  return {
+    mode: (resolvedCardId ? 'existing' : 'new') as CardEntryMode,
+    existingCardId: resolvedCardId,
+    name: '',
+    sport: 'NBA' as Sport,
+    season: '',
+    rarityLabel: '',
+    passKind: 'player' as 'player' | 'team',
+    notes: '',
+    earningsInput: 'paste' as EarningsInputMode,
+    rawJson: '',
+    claimDay: todayIsoLocal(),
+    raxEarned: '',
+    singleNote: '',
+  }
+}
+
 export default function EntryPage() {
   const {
     data,
@@ -31,18 +55,9 @@ export default function EntryPage() {
     deletePerformance,
     importFromUsername,
   } = useRaxData()
-  const [newCard, setNewCard] = useState({
-    name: '',
-    sport: 'NBA' as Sport,
-    season: '',
-    notes: '',
-  })
-  const [newPerformance, setNewPerformance] = useState({
-    cardId: '',
-    claimDay: todayIsoLocal(),
-    raxEarned: '',
-    note: '',
-  })
+  const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
+  const [cardEntryStatus, setCardEntryStatus] = useState('')
+  const cardEntryRef = useRef<HTMLElement>(null)
   const [usernameImport, setUsernameImport] = useState({
     username: data.settings.savedUsername ?? '',
   })
@@ -58,12 +73,6 @@ export default function EntryPage() {
   const [usernameImporting, setUsernameImporting] = useState(false)
   const [usernameImportFetchErrors, setUsernameImportFetchErrors] = useState(0)
   const importAbortRef = useRef<AbortController | null>(null)
-  const [showAdvancedPaste, setShowAdvancedPaste] = useState(false)
-  const [bulkImport, setBulkImport] = useState({
-    cardId: '',
-    rawJson: '',
-  })
-  const [bulkImportStatus, setBulkImportStatus] = useState('')
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const sortedPerformances = useMemo(
@@ -86,25 +95,156 @@ export default function EntryPage() {
   const cardsPageTotal = pageCount(data.cards.length, ENTRY_PAGE_SIZE)
   const performancesPageTotal = pageCount(sortedPerformances.length, ENTRY_PAGE_SIZE)
 
-  const submitCard = (event: FormEvent) => {
-    event.preventDefault()
-    if (!newCard.name.trim()) return
-    addCard(newCard)
-    setNewCard({ name: '', sport: newCard.sport, season: '', notes: '' })
+  const openCardEntryForExisting = () => {
+    setCardEntry((current) => ({
+      ...emptyCardEntry(data.cards, current.existingCardId || data.cards[0]?.id || ''),
+      mode: 'existing',
+      existingCardId: current.existingCardId || data.cards[0]?.id || '',
+      earningsInput: 'paste',
+    }))
+    cardEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const submitPerformance = (event: FormEvent) => {
+  const submitCardEntry = (event: FormEvent) => {
     event.preventDefault()
-    const cardId = newPerformance.cardId || data.cards[0]?.id || ''
-    const raxEarned = Number(newPerformance.raxEarned)
-    if (!cardId || !newPerformance.claimDay || !Number.isFinite(raxEarned) || raxEarned <= 0) return
-    addPerformance({
-      cardId,
-      claimDay: newPerformance.claimDay,
-      raxEarned,
-      note: newPerformance.note,
-    })
-    setNewPerformance((current) => ({ ...current, cardId, raxEarned: '', note: '' }))
+    setCardEntryStatus('')
+
+    let cardId = cardEntry.existingCardId
+    let cardMeta: { sport: Sport; rarityLabel?: string; passKind?: 'player' | 'team' }
+
+    if (cardEntry.mode === 'new') {
+      if (!cardEntry.name.trim()) {
+        setCardEntryStatus('Enter a player name.')
+        return
+      }
+      cardId = addCard({
+        name: cardEntry.name,
+        sport: cardEntry.sport,
+        season: cardEntry.season,
+        notes: cardEntry.notes,
+        rarityLabel: cardEntry.rarityLabel || undefined,
+        passKind: cardEntry.passKind,
+      })
+      cardMeta = {
+        sport: cardEntry.sport,
+        rarityLabel: cardEntry.rarityLabel || undefined,
+        passKind: cardEntry.passKind,
+      }
+    } else {
+      if (!cardId) {
+        setCardEntryStatus('Select a player card.')
+        return
+      }
+      const existing = data.cards.find((card) => card.id === cardId)
+      if (!existing) {
+        setCardEntryStatus('Selected card was not found.')
+        return
+      }
+      cardMeta = {
+        sport: existing.sport,
+        rarityLabel: existing.rarityLabel,
+        passKind: existing.passKind,
+      }
+    }
+
+    const hasPaste = cardEntry.earningsInput === 'paste' && cardEntry.rawJson.trim().length > 0
+    const raxEarned = Number(cardEntry.raxEarned)
+    const hasSingle =
+      cardEntry.earningsInput === 'single' &&
+      cardEntry.claimDay.length > 0 &&
+      Number.isFinite(raxEarned) &&
+      raxEarned > 0
+
+    if (!hasPaste && !hasSingle) {
+      if (cardEntry.mode === 'new') {
+        setCardEntryStatus(`Added ${cardEntry.name.trim()}. Paste earnings JSON below when ready.`)
+        setCardEntry((current) => ({
+          ...emptyCardEntry(data.cards, cardId),
+          mode: 'existing',
+          existingCardId: cardId,
+          earningsInput: 'paste',
+        }))
+      } else {
+        setCardEntryStatus('Paste earnings JSON or switch to single day and enter RAX.')
+      }
+      return
+    }
+
+    const messages: string[] = []
+    if (cardEntry.mode === 'new') {
+      messages.push(`Added ${cardEntry.name.trim()}`)
+    }
+
+    if (hasPaste) {
+      try {
+        const parsed = parseRealAppToolsRows(cardEntry.rawJson, {
+          sport: cardMeta.sport,
+          rarityLabel: cardMeta.rarityLabel,
+          applyOtdMultiplier: Boolean(cardMeta.rarityLabel),
+          passKind: cardMeta.passKind ?? 'player',
+        })
+        const existingKeys = new Set(
+          data.performances.map(
+            (performance) =>
+              `${performance.cardId}|${performance.claimDay}|${performance.raxEarned}`,
+          ),
+        )
+        const imported = parsed.rows
+          .map((row) => ({ ...row, cardId }))
+          .filter((row) => !existingKeys.has(`${row.cardId}|${row.claimDay}|${row.raxEarned}`))
+        const duplicateCount = parsed.rows.length - imported.length
+
+        if (imported.length > 0) {
+          addPerformances(imported)
+        }
+
+        messages.push(
+          `imported ${imported.length} RAX row${imported.length === 1 ? '' : 's'}${
+            duplicateCount || parsed.skipped
+              ? ` (skipped ${duplicateCount + parsed.skipped} duplicate/invalid)`
+              : ''
+          }`,
+        )
+      } catch (error) {
+        setCardEntryStatus(
+          cardEntry.mode === 'new'
+            ? `Card was added, but earnings JSON failed: ${
+                error instanceof Error ? error.message : 'Could not parse pasted JSON.'
+              }`
+            : error instanceof Error
+              ? error.message
+              : 'Could not parse pasted JSON.',
+        )
+        if (cardEntry.mode === 'new') {
+          setCardEntry((current) => ({
+            ...emptyCardEntry(data.cards, cardId),
+            mode: 'existing',
+            existingCardId: cardId,
+            rawJson: current.rawJson,
+            earningsInput: 'paste',
+          }))
+        }
+        return
+      }
+    }
+
+    if (hasSingle) {
+      addPerformance({
+        cardId,
+        claimDay: cardEntry.claimDay,
+        raxEarned,
+        note: cardEntry.singleNote,
+      })
+      messages.push('added 1 RAX row')
+    }
+
+    setCardEntryStatus(`${messages.join(' · ')}.`)
+    setCardEntry((current) => ({
+      ...emptyCardEntry(data.cards, cardId),
+      mode: 'existing',
+      existingCardId: cardId,
+      earningsInput: current.earningsInput,
+    }))
   }
 
   const submitUsernameImport = async (event: FormEvent) => {
@@ -132,6 +272,14 @@ export default function EntryPage() {
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
       setUsernameImportFetchErrors(result.errors.length)
+      if (result.errors.length > 0) {
+        setCardEntry((current) => ({
+          ...current,
+          mode: 'existing',
+          existingCardId: current.existingCardId || data.cards[0]?.id || '',
+          earningsInput: 'paste',
+        }))
+      }
       setUsernameImportStatus(
         `Imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from ${
           result.passesFetched
@@ -163,45 +311,14 @@ export default function EntryPage() {
     importAbortRef.current?.abort()
   }
 
-  const submitBulkImport = (event: FormEvent) => {
-    event.preventDefault()
-    const cardId = bulkImport.cardId || data.cards[0]?.id || ''
-    if (!cardId) return
-
-    try {
-      const card = data.cards.find((item) => item.id === cardId)
-      const parsed = parseRealAppToolsRows(bulkImport.rawJson, {
-        sport: card?.sport,
-        rarityLabel: card?.rarityLabel,
-        applyOtdMultiplier: Boolean(card?.sport && card?.rarityLabel),
-        passKind: card?.passKind ?? 'player',
-      })
-      const existingKeys = new Set(
-        data.performances.map(
-          (performance) =>
-            `${performance.cardId}|${performance.claimDay}|${performance.raxEarned}`,
-        ),
-      )
-      const imported = parsed.rows
-        .map((row) => ({ ...row, cardId }))
-        .filter((row) => !existingKeys.has(`${row.cardId}|${row.claimDay}|${row.raxEarned}`))
-      const duplicateCount = parsed.rows.length - imported.length
-
-      addPerformances(imported)
-      setBulkImport((current) => ({ ...current, cardId, rawJson: '' }))
-      setBulkImportStatus(
-        `Imported ${imported.length} row${imported.length === 1 ? '' : 's'}${
-          duplicateCount || parsed.skipped
-            ? ` · skipped ${duplicateCount + parsed.skipped} duplicate/invalid row${
-                duplicateCount + parsed.skipped === 1 ? '' : 's'
-              }`
-            : ''
-        }.`,
-      )
-    } catch (error) {
-      setBulkImportStatus(error instanceof Error ? error.message : 'Could not parse pasted JSON.')
-    }
-  }
+  const cardEntrySubmitLabel =
+    cardEntry.mode === 'new'
+      ? cardEntry.earningsInput === 'paste' && cardEntry.rawJson.trim()
+        ? 'Add card & import earnings'
+        : 'Add card'
+      : cardEntry.earningsInput === 'paste'
+        ? 'Import earnings'
+        : 'Add RAX entry'
 
   return (
     <div className="page-stack">
@@ -273,12 +390,8 @@ export default function EntryPage() {
               realapp.com
             </a>{' '}
             using{' '}
-            <button
-              className="link-button"
-              type="button"
-              onClick={() => setShowAdvancedPaste(true)}
-            >
-              Advanced paste
+            <button className="link-button" type="button" onClick={openCardEntryForExisting}>
+              Add card & earnings
             </button>{' '}
             below.
           </p>
@@ -295,218 +408,280 @@ export default function EntryPage() {
         ) : null}
       </form>
 
-      <section className="content-grid">
-        <form className="panel form-panel" onSubmit={submitCard}>
-          <div className="section-heading">
-            <h2>Add player card</h2>
-            <span>{data.cards.length} saved</span>
-          </div>
-          <label className="field">
-            <span>Player</span>
-            <input
-              value={newCard.name}
-              placeholder="Steph Curry"
-              onChange={(event) => setNewCard((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <div className="form-grid">
-            <label className="field">
-              <span>Sport</span>
-              <select
-                value={newCard.sport}
-                onChange={(event) => setNewCard((current) => ({ ...current, sport: event.target.value as Sport }))}
-              >
-                {SPORTS.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Season/card label</span>
-              <input
-                value={newCard.season}
-                placeholder="2022-23 Rare"
-                onChange={(event) => setNewCard((current) => ({ ...current, season: event.target.value }))}
-              />
-            </label>
-          </div>
-          <label className="field">
-            <span>Notes</span>
-            <input
-              value={newCard.notes}
-              placeholder="Optional"
-              onChange={(event) => setNewCard((current) => ({ ...current, notes: event.target.value }))}
-            />
-          </label>
-          <button className="button primary" type="submit">
-            Add card
-          </button>
-        </form>
-
-        <form className="panel form-panel" onSubmit={submitPerformance}>
-          <div className="section-heading">
-            <h2>Add daily RAX</h2>
-            <span>{data.performances.length} entries</span>
-          </div>
-          <label className="field">
-            <span>Player card</span>
-            <select
-              value={newPerformance.cardId || data.cards[0]?.id || ''}
-              disabled={data.cards.length === 0}
-              onChange={(event) => setNewPerformance((current) => ({ ...current, cardId: event.target.value }))}
-            >
-              {data.cards.length === 0 ? (
-                <option value="">Import your collection or add a card first</option>
-              ) : null}
-              {data.cards.map((card) => (
-                <option key={card.id} value={card.id}>
-                  {card.name} · {card.sport} {card.season}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="form-grid">
-            <label className="field">
-              <span>Claim day</span>
-              <input
-                type="date"
-                value={newPerformance.claimDay}
-                onChange={(event) => setNewPerformance((current) => ({ ...current, claimDay: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>RAX earned</span>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={newPerformance.raxEarned}
-                placeholder="29"
-                onChange={(event) => setNewPerformance((current) => ({ ...current, raxEarned: event.target.value }))}
-              />
-            </label>
-          </div>
-          <label className="field">
-            <span>Note</span>
-            <input
-              value={newPerformance.note}
-              placeholder="Optional performance note"
-              onChange={(event) => setNewPerformance((current) => ({ ...current, note: event.target.value }))}
-            />
-          </label>
-          <button className="button primary" type="submit" disabled={data.cards.length === 0}>
-            Add RAX entry
-          </button>
-        </form>
-      </section>
-
-      <section className="panel form-panel">
+      <form
+        className="panel form-panel"
+        ref={cardEntryRef}
+        id="add-card-earnings"
+        onSubmit={submitCardEntry}
+      >
         <div className="section-heading">
           <div>
-            <h2>Advanced: paste earnings JSON</h2>
+            <h2>Add card & earnings</h2>
             <p>
-              Paste daily RAX for one card at a time from realapp.tools or realapp.com. For cards
-              you do not own yet, use the <Link to="/potential">Potential</Link> tab instead.
+              Set up the player pass and paste daily RAX in one step — or add earnings to a card
+              that username import skipped.
             </p>
           </div>
+          <span>{data.cards.length} cards saved</span>
+        </div>
+
+        <div className="entry-mode-toggle" role="group" aria-label="Card entry mode">
           <button
-            className="button"
+            className={`button${cardEntry.mode === 'new' ? ' active' : ''}`}
             type="button"
-            onClick={() => setShowAdvancedPaste((current) => !current)}
+            onClick={() => setCardEntry((current) => ({ ...current, mode: 'new' }))}
           >
-            {showAdvancedPaste ? 'Hide' : 'Show'}
+            New card
+          </button>
+          <button
+            className={`button${cardEntry.mode === 'existing' ? ' active' : ''}`}
+            type="button"
+            disabled={data.cards.length === 0}
+            onClick={() =>
+              setCardEntry((current) => ({
+                ...current,
+                mode: 'existing',
+                existingCardId: current.existingCardId || data.cards[0]?.id || '',
+              }))
+            }
+          >
+            Existing card
           </button>
         </div>
-        {showAdvancedPaste ? (
+
+        {cardEntry.mode === 'new' ? (
           <>
-            <section className="panel import-hint">
-              <p>
-                <strong>When username import misses daily RAX</strong> — use realapp.com on a{' '}
-                <strong>desktop</strong> browser (Real Pro). Mobile redirects to the app store.
-              </p>
-              <ol className="help-list ordered">
-                <li>
-                  Open{' '}
-                  <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                    realapp.com
-                  </a>{' '}
-                  and log in.
-                </li>
-                <li>
-                  Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
-                  earnings.
-                </li>
-                <li>
-                  Go to the player&apos;s season and open the card earnings screen by clicking the{' '}
-                  <strong>RAX icon</strong> on a performance.
-                </li>
-                <li>
-                  In Network, filter for <code>userpassearnings</code> and click the request whose
-                  URL includes <code>playerBoxScoreId</code> (for example{' '}
-                  <code>
-                    userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…
-                  </code>
-                  ).
-                </li>
-                <li>
-                  Copy the full <strong>Response</strong> JSON — it should contain an{' '}
-                  <code>earnings</code> array with <code>day</code> and <code>earnings</code> fields.
-                </li>
-                <li>
-                  Select the matching player card below, paste the JSON, and click{' '}
-                  <strong>Import pasted rows</strong>. OTD rarity is applied from the card when set.
-                </li>
-              </ol>
-            </section>
-            <form onSubmit={submitBulkImport}>
+            <label className="field">
+              <span>Player</span>
+              <input
+                value={cardEntry.name}
+                placeholder="Steph Curry"
+                onChange={(event) =>
+                  setCardEntry((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </label>
             <div className="form-grid">
               <label className="field">
-                <span>Player card</span>
+                <span>Sport</span>
                 <select
-                  value={bulkImport.cardId || data.cards[0]?.id || ''}
-                  disabled={data.cards.length === 0}
+                  value={cardEntry.sport}
                   onChange={(event) =>
-                    setBulkImport((current) => ({ ...current, cardId: event.target.value }))
+                    setCardEntry((current) => ({
+                      ...current,
+                      sport: event.target.value as Sport,
+                    }))
                   }
                 >
-                  {data.cards.length === 0 ? (
-                    <option value="">Import your collection or add a card first</option>
-                  ) : null}
-                  {data.cards.map((card) => (
-                    <option key={card.id} value={card.id}>
-                      {card.name} · {card.sport} {card.season}
+                  {SPORTS.map((sport) => (
+                    <option key={sport} value={sport}>
+                      {sport}
                     </option>
                   ))}
                 </select>
               </label>
+              <label className="field">
+                <span>Season / card label</span>
+                <input
+                  value={cardEntry.season}
+                  placeholder="2023-24 Legendary"
+                  onChange={(event) =>
+                    setCardEntry((current) => ({ ...current, season: event.target.value }))
+                  }
+                />
+              </label>
             </div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Rarity</span>
+                <select
+                  value={cardEntry.rarityLabel}
+                  onChange={(event) =>
+                    setCardEntry((current) => ({ ...current, rarityLabel: event.target.value }))
+                  }
+                >
+                  <option value="">Unknown (no OTD multiplier)</option>
+                  {CARD_RARITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Pass type</span>
+                <select
+                  value={cardEntry.passKind}
+                  onChange={(event) =>
+                    setCardEntry((current) => ({
+                      ...current,
+                      passKind: event.target.value as 'player' | 'team',
+                    }))
+                  }
+                >
+                  <option value="player">Player</option>
+                  <option value="team">Team</option>
+                </select>
+              </label>
+            </div>
+            <label className="field">
+              <span>Notes</span>
+              <input
+                value={cardEntry.notes}
+                placeholder="Optional"
+                onChange={(event) =>
+                  setCardEntry((current) => ({ ...current, notes: event.target.value }))
+                }
+              />
+            </label>
+          </>
+        ) : (
+          <label className="field">
+            <span>Player card</span>
+            <select
+              value={cardEntry.existingCardId || data.cards[0]?.id || ''}
+              disabled={data.cards.length === 0}
+              onChange={(event) =>
+                setCardEntry((current) => ({ ...current, existingCardId: event.target.value }))
+              }
+            >
+              {data.cards.length === 0 ? (
+                <option value="">Import your collection or add a new card first</option>
+              ) : null}
+              {data.cards.map((card) => (
+                <option key={card.id} value={card.id}>
+                  {card.name} · {card.sport} {card.season}
+                  {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>Daily RAX earnings</h3>
+              <p className="subsection-note">
+                Paste JSON from realapp.tools or realapp.com, or enter a single day manually.
+              </p>
+            </div>
+          </div>
+
+          <section className="panel import-hint">
+            <p>
+              <strong>When username import misses daily RAX</strong> — use realapp.com on a{' '}
+              <strong>desktop</strong> browser (Real Pro). Mobile redirects to the app store.
+            </p>
+            <ol className="help-list ordered">
+              <li>
+                Open{' '}
+                <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                  realapp.com
+                </a>{' '}
+                and log in.
+              </li>
+              <li>
+                Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
+                earnings.
+              </li>
+              <li>
+                Go to the player&apos;s season and open the card earnings screen by clicking the{' '}
+                <strong>RAX icon</strong> on a performance.
+              </li>
+              <li>
+                In Network, filter for <code>userpassearnings</code> and click the request whose URL
+                includes <code>playerBoxScoreId</code> (for example{' '}
+                <code>
+                  userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…
+                </code>
+                ).
+              </li>
+              <li>
+                Copy the full <strong>Response</strong> JSON — an <code>earnings</code> array with{' '}
+                <code>day</code> and <code>earnings</code> fields.
+              </li>
+              <li>Paste below and save. OTD rarity is applied from the card when set.</li>
+            </ol>
+          </section>
+
+          <div className="entry-mode-toggle" role="group" aria-label="Earnings input mode">
+            <button
+              className={`button${cardEntry.earningsInput === 'paste' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setCardEntry((current) => ({ ...current, earningsInput: 'paste' }))}
+            >
+              Paste JSON
+            </button>
+            <button
+              className={`button${cardEntry.earningsInput === 'single' ? ' active' : ''}`}
+              type="button"
+              onClick={() => setCardEntry((current) => ({ ...current, earningsInput: 'single' }))}
+            >
+              Single day
+            </button>
+          </div>
+
+          {cardEntry.earningsInput === 'paste' ? (
             <label className="field">
               <span>Earnings JSON</span>
               <textarea
                 className="bulk-import-textarea"
-                value={bulkImport.rawJson}
-                placeholder='{"rows":[{"day":"2025-08-22","earnings":26}]} or {"earnings":[{"day":"2025-08-22","earnings":26,"playerBoxScoreIds":[123]}]}'
+                value={cardEntry.rawJson}
+                placeholder='{"earnings":[{"day":"2024-01-21","earnings":42,"playerBoxScoreIds":[776499385]}]}'
                 onChange={(event) =>
-                  setBulkImport((current) => ({ ...current, rawJson: event.target.value }))
+                  setCardEntry((current) => ({ ...current, rawJson: event.target.value }))
                 }
               />
             </label>
-            <div className="button-row">
-              <button
-                className="button primary"
-                type="submit"
-                disabled={data.cards.length === 0 || bulkImport.rawJson.trim().length === 0}
-              >
-                Import pasted rows
-              </button>
-              {bulkImportStatus ? <p className="import-status">{bulkImportStatus}</p> : null}
-            </div>
-          </form>
-          </>
-        ) : null}
-      </section>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label className="field">
+                  <span>Claim day</span>
+                  <input
+                    type="date"
+                    value={cardEntry.claimDay}
+                    onChange={(event) =>
+                      setCardEntry((current) => ({ ...current, claimDay: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>RAX earned</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={cardEntry.raxEarned}
+                    placeholder="29"
+                    onChange={(event) =>
+                      setCardEntry((current) => ({ ...current, raxEarned: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span>Note</span>
+                <input
+                  value={cardEntry.singleNote}
+                  placeholder="Optional performance note"
+                  onChange={(event) =>
+                    setCardEntry((current) => ({ ...current, singleNote: event.target.value }))
+                  }
+                />
+              </label>
+            </>
+          )}
+        </div>
+
+        <div className="button-row">
+          <button className="button primary" type="submit">
+            {cardEntrySubmitLabel}
+          </button>
+          {cardEntryStatus ? <p className="import-status">{cardEntryStatus}</p> : null}
+        </div>
+      </form>
 
       <section className="panel">
         <div className="section-heading">
@@ -552,7 +727,7 @@ export default function EntryPage() {
               {data.cards.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="empty-cell">
-                    Import your collection above or add your first player card.
+                    Import your collection above or use Add card & earnings below.
                   </td>
                 </tr>
               ) : (
@@ -674,7 +849,7 @@ export default function EntryPage() {
               {sortedPerformances.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty-cell">
-                    Import your collection or add RAX entries to start seeing overlaps.
+                    Import your collection or add earnings in Add card & earnings above.
                   </td>
                 </tr>
               ) : (
