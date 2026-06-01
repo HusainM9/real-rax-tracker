@@ -8,13 +8,11 @@ import {
 
 describe('authCookie', () => {
   afterEach(() => {
-    delete process.env.BASIC_AUTH_USER
     delete process.env.BASIC_AUTH_PASSWORD
     delete process.env.AUTH_SESSION_SECRET
   })
 
   it('creates and verifies a signed session token', async () => {
-    process.env.BASIC_AUTH_USER = 'rax'
     process.env.BASIC_AUTH_PASSWORD = 'test-password'
     process.env.AUTH_SESSION_SECRET = 'session-secret'
 

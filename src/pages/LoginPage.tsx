@@ -6,7 +6,6 @@ export default function LoginPage() {
   const { status, login } = useAuth()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -33,7 +32,7 @@ export default function LoginPage() {
     setSubmitting(true)
     setError('')
 
-    const message = await login(username.trim(), password)
+    const message = await login(password)
     if (message) {
       setError(message)
       setSubmitting(false)
@@ -52,21 +51,12 @@ export default function LoginPage() {
 
         <form className="auth-form" onSubmit={submit}>
           <label className="field">
-            <span>Username</span>
-            <input
-              value={username}
-              autoComplete="username"
-              placeholder="rax"
-              disabled={submitting}
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          </label>
-          <label className="field">
             <span>Password</span>
             <input
               type="password"
               value={password}
               autoComplete="current-password"
+              autoFocus
               disabled={submitting}
               onChange={(event) => setPassword(event.target.value)}
             />

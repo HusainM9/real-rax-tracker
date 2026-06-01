@@ -9,7 +9,6 @@ export const config = {
 }
 
 type LoginBody = {
-  username?: string
   password?: string
 }
 
@@ -29,13 +28,11 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const expectedUser = process.env.BASIC_AUTH_USER?.trim()
   const expectedPassword = process.env.BASIC_AUTH_PASSWORD?.trim()
-  const username = body.username?.trim() ?? ''
   const password = body.password ?? ''
 
-  if (username !== expectedUser || password !== expectedPassword) {
-    return Response.json({ error: 'Invalid username or password' }, { status: 401 })
+  if (!expectedPassword || password !== expectedPassword) {
+    return Response.json({ error: 'Incorrect password' }, { status: 401 })
   }
 
   const token = await createSessionToken()

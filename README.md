@@ -70,8 +70,8 @@ Defaults are embedded in the app (publishable Meowbot key only). **Never** put p
 For production access control (Vercel only, set in the Vercel dashboard):
 
 ```
-BASIC_AUTH_USER=
 BASIC_AUTH_PASSWORD=
+AUTH_SESSION_SECRET=
 ```
 
 ## Deployment (Vercel)
@@ -86,9 +86,8 @@ This app builds to static files in `dist/`. Production hosting is configured for
    - Framework: **Vite** · Build: `npm run build` · Output: `dist` · Install: `npm ci`
 3. **Connect Git** (after GitHub push): `npx vercel git connect`
 4. **Environment variables** (Vercel → Project → Settings → Environment Variables):
-   - `BASIC_AUTH_USER` — shared username (currently set in Vercel)
-   - `BASIC_AUTH_PASSWORD` — shared password — view/rotate in Vercel dashboard only
-   - `AUTH_SESSION_SECRET` — random string for signing login cookies (required for the in-app login page)
+   - `BASIC_AUTH_PASSWORD` — shared site password — view/rotate in Vercel dashboard only
+   - `AUTH_SESSION_SECRET` — random string for signing login cookies (recommended; falls back to password if unset)
    - Optional: `VITE_MEOWBOT_SUPABASE_URL`, `VITE_MEOWBOT_SUPABASE_KEY`
 5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) + [`/api/auth/*`](api/auth/login.ts) enforce a signed session cookie after users sign in on the [`/login`](src/pages/LoginPage.tsx) page.
 
@@ -106,8 +105,8 @@ Use a **private** repository. After pushing, connect it in Vercel for automatic 
 
 ### Before sharing the live URL
 
-1. Open the production URL in an **incognito window** — you should get a browser login prompt.
-2. Confirm routes work after login (`/entry`, `/calendar`, refresh on each).
+1. Open the production URL in an **incognito window** — you should land on `/login`.
+2. Confirm routes work after sign-in (`/entry`, `/calendar`, refresh on each).
 3. Enable **Deployment Protection** for **Preview** deployments:
    - Vercel → **real-rax-tracker** → Settings → **Deployment Protection**
    - Turn on protection for **Preview** (not required for Production — session middleware handles that)
@@ -122,8 +121,8 @@ If you have Vercel Pro, you can use built-in **Password Protection** on Preview 
 
 - [x] In-app login page at `/login` with server-validated session cookie
 - [x] Edge session gate via [`middleware.ts`](middleware.ts) — credentials only in Vercel env
-- [x] Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` in Vercel before sharing URL
-- [x] Verify incognito login prompt on production URL (returns 401 without credentials)
+- [x] Set `BASIC_AUTH_PASSWORD` (and `AUTH_SESSION_SECRET`) in Vercel before sharing URL
+- [x] Verify incognito redirect to `/login` on production URL
 - [ ] Enable Preview deployment protection in Vercel dashboard
 
 **Do not** ship a client-only password check — anyone can bypass it in the bundle.

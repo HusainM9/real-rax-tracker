@@ -13,7 +13,7 @@ type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 type AuthContextValue = {
   status: AuthStatus
   devBypass: boolean
-  login: (username: string, password: string) => Promise<string | null>
+  login: (password: string) => Promise<string | null>
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -49,12 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh()
   }, [refresh])
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = useCallback(async (password: string) => {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ password }),
     })
 
     if (!response.ok) {

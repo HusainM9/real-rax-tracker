@@ -80,7 +80,6 @@ export function clearSessionCookieHeader(): string {
 }
 
 export function authConfigured(): boolean {
-  const user = process.env.BASIC_AUTH_USER?.trim()
   const password = process.env.BASIC_AUTH_PASSWORD?.trim()
-  return Boolean(user && password && sessionSecret())
+  return Boolean(password && sessionSecret())
 }
