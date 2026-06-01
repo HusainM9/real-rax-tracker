@@ -5,7 +5,7 @@ import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer
 import { sortCards } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRax } from '../lib/format'
-import { analyzeRemovedCard, formatRemoveCardSummary } from '../lib/removeCardAnalysis'
+import { analyzeRemovedCard, computeSaleComparison, formatRemoveCardSummary, formatSignedRax } from '../lib/removeCardAnalysis'
 import { useRaxData } from '../context/RaxDataContext'
 
 const CARD_SEARCH_LIMIT = 50
@@ -78,6 +78,15 @@ export default function SellPage() {
   )
 
   const parsedSalePrice = Number(salePrice.replace(/,/g, ''))
+  const hasSalePrice = Number.isFinite(parsedSalePrice) && parsedSalePrice > 0
+
+  const saleComparison = useMemo(
+    () =>
+      sellAnalysis && hasSalePrice
+        ? computeSaleComparison(sellAnalysis, parsedSalePrice)
+        : null,
+    [hasSalePrice, parsedSalePrice, sellAnalysis],
+  )
 
   const selectCard = (cardId: string) => {
     if (!cardId) {
@@ -211,12 +220,77 @@ export default function SellPage() {
               onChange={(event) => setSalePrice(event.target.value)}
             />
           </label>
-          <p className="import-hint">
-            {formatRemoveCardSummary(
-              sellAnalysis,
-              Number.isFinite(parsedSalePrice) && parsedSalePrice > 0 ? parsedSalePrice : undefined,
-            )}
-          </p>
+          {saleComparison ? (
+            <div
+              className={`sale-comparison${saleComparison.netVsKeeping >= 0 ? ' is-positive' : ' is-negative'}`}
+            >
+              <p className="sale-comparison-heading">Net vs keeping this pass</p>
+              <dl className="sale-comparison-rows">
+                <div className="sale-comparison-row">
+                  <dt>Sale price</dt>
+                  <dd className="sale-positive">
+                    +{formatRax(displayRaxValue(saleComparison.salePrice))}
+                  </dd>
+                </div>
+                <div className="sale-comparison-row">
+                  <dt>Collection claimable change</dt>
+                  <dd
+                    className={
+                      saleComparison.netClaimableDelta >= 0 ? 'sale-positive' : 'sale-negative'
+                    }
+                  >
+                    {formatSignedRax(displayRaxValue(saleComparison.netClaimableDelta))}
+                  </dd>
+                </div>
+              </dl>
+              <div className="sale-comparison-total">
+                <span>Net after sale</span>
+                <strong>{formatSignedRax(displayRaxValue(saleComparison.netVsKeeping))} RAX</strong>
+              </div>
+              <p className="sale-comparison-verdict">
+                {saleComparison.netVsKeeping > 0 ? (
+                  <>
+                    Selling is{' '}
+                    <strong>
+                      {formatRax(displayRaxValue(saleComparison.netVsKeeping))} RAX ahead
+                    </strong>{' '}
+                    of keeping this pass.
+                  </>
+                ) : saleComparison.netVsKeeping < 0 ? (
+                  <>
+                    Keeping is{' '}
+                    <strong>
+                      {formatRax(displayRaxValue(-saleComparison.netVsKeeping))} RAX ahead
+                    </strong>{' '}
+                    at this sale price.
+                  </>
+                ) : (
+                  <>Same as keeping once the collection change is included.</>
+                )}
+                {saleComparison.breakEvenSalePrice > 0 ? (
+                  <>
+                    {' '}
+                    Break-even sale price:{' '}
+                    {formatRax(displayRaxValue(saleComparison.breakEvenSalePrice))} RAX.
+                  </>
+                ) : null}
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="import-hint">{formatRemoveCardSummary(sellAnalysis)}</p>
+              {sellAnalysis.netClaimableDelta < 0 ? (
+                <p className="import-hint">
+                  Break-even sale price:{' '}
+                  {formatRax(displayRaxValue(-sellAnalysis.netClaimableDelta))} RAX — enough to
+                  offset the collection claimable drop from selling.
+                </p>
+              ) : null}
+              <p className="import-hint">
+                Enter a sale price above to see the net RAX vs keeping this pass.
+              </p>
+            </>
+          )}
           {sellAnalysis.gains.length > 0 ? (
             <div className="table-wrap">
               <table>

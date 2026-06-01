@@ -128,3 +128,29 @@ export function formatRemoveCardSummary(result: RemoveCardAnalysisResult, salePr
   }
   return parts.join(' ')
 }
+
+export type SaleComparison = {
+  salePrice: number
+  netClaimableDelta: number
+  netVsKeeping: number
+  breakEvenSalePrice: number
+}
+
+export function computeSaleComparison(
+  result: RemoveCardAnalysisResult,
+  salePrice: number,
+): SaleComparison {
+  return {
+    salePrice,
+    netClaimableDelta: result.netClaimableDelta,
+    netVsKeeping: salePrice + result.netClaimableDelta,
+    breakEvenSalePrice: Math.max(0, -result.netClaimableDelta),
+  }
+}
+
+export function formatSignedRax(value: number): string {
+  const formatted = Math.round(Math.abs(value)).toLocaleString()
+  if (value > 0) return `+${formatted}`
+  if (value < 0) return `-${formatted}`
+  return formatted
+}

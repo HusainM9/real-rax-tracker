@@ -1111,6 +1111,108 @@ button.calendar-day {
   color: var(--accent-soft);
 }
 
+.sale-comparison {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+  padding: 1rem 1.1rem;
+}
+
+.sale-comparison.is-positive {
+  background: linear-gradient(180deg, rgba(62, 207, 158, 0.1), rgba(255, 255, 255, 0.02));
+  border-color: rgba(62, 207, 158, 0.35);
+}
+
+.sale-comparison.is-negative {
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.08), rgba(255, 255, 255, 0.02));
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.sale-comparison-heading {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.sale-comparison-rows {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.sale-comparison-row {
+  align-items: baseline;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.sale-comparison-row dt {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+.sale-comparison-row dd {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin: 0;
+}
+
+.sale-positive {
+  color: #86efcc;
+}
+
+.sale-negative {
+  color: #fca5a5;
+}
+
+.sale-comparison-total {
+  align-items: baseline;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding-top: 0.75rem;
+}
+
+.sale-comparison-total span {
+  color: var(--text-soft);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.sale-comparison-total strong {
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.sale-comparison.is-positive .sale-comparison-total strong {
+  color: #86efcc;
+}
+
+.sale-comparison.is-negative .sale-comparison-total strong {
+  color: #fca5a5;
+}
+
+.sale-comparison-verdict {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.sale-comparison-verdict strong {
+  color: var(--text-soft);
+}
+
 .rarity-filter {
   display: grid;
   gap: 0.65rem;

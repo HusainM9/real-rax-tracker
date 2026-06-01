@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeRemovedCard } from './removeCardAnalysis'
+import { analyzeRemovedCard, computeSaleComparison } from './removeCardAnalysis'
 import { createEmptyData } from './storage'
 import type { PlayerCard, RaxPerformance } from '../types/rax'
 
@@ -79,5 +79,26 @@ describe('analyzeRemovedCard', () => {
     expect(result?.lostClaimableRax).toBe(80)
     expect(result?.freedClaimableRax).toBe(60)
     expect(result?.netClaimableDelta).toBe(-20)
+  })
+})
+
+describe('computeSaleComparison', () => {
+  it('combines sale price with net claimable delta', () => {
+    const data = {
+      ...createEmptyData(),
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('a', 'Alpha'), card('b', 'Bravo'), card('c', 'Charlie')],
+      performances: [
+        perf('p1', 'a', '2025-01-15', 100),
+        perf('p2', 'b', '2025-01-15', 80),
+        perf('p3', 'c', '2025-01-15', 60),
+      ],
+    }
+
+    const analysis = analyzeRemovedCard(data, 'a')
+    expect(analysis).not.toBeNull()
+    const comparison = computeSaleComparison(analysis!, 35000)
+    expect(comparison.netVsKeeping).toBe(34960)
+    expect(comparison.breakEvenSalePrice).toBe(40)
   })
 })
