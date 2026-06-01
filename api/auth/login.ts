@@ -3,6 +3,12 @@ import {
   buildSessionCookieHeader,
   createSessionToken,
 } from '../../lib/authCookie'
+import {
+  checkLoginRateLimit,
+  clearLoginRateLimitHeaders,
+  delayFailedLoginAttempt,
+  recordFailedLoginAttempt,
+} from '../../lib/loginRateLimit'
 
 export const config = {
   runtime: 'edge',
@@ -12,6 +18,20 @@ type LoginBody = {
   password?: string
 }
 
+function mergeSetCookieHeaders(...headerGroups: Record<string, string>[]): HeadersInit {
+  const headers = new Headers()
+  for (const group of headerGroups) {
+    for (const [key, value] of Object.entries(group)) {
+      if (key.toLowerCase() === 'set-cookie') {
+        headers.append('Set-Cookie', value)
+      } else {
+        headers.set(key, value)
+      }
+    }
+  }
+  return headers
+}
+
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
@@ -19,6 +39,19 @@ export default async function handler(request: Request): Promise<Response> {
 
   if (!authConfigured()) {
     return Response.json({ ok: true, devBypass: true })
+  }
+
+  const rateLimit = await checkLoginRateLimit(request)
+  if (!rateLimit.allowed) {
+    return Response.json(
+      { error: 'Too many login attempts. Try again later.' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rateLimit.retryAfterSeconds),
+        },
+      },
+    )
   }
 
   let body: LoginBody
@@ -32,7 +65,15 @@ export default async function handler(request: Request): Promise<Response> {
   const password = body.password ?? ''
 
   if (!expectedPassword || password !== expectedPassword) {
-    return Response.json({ error: 'Incorrect password' }, { status: 401 })
+    await delayFailedLoginAttempt()
+    const failureHeaders = await recordFailedLoginAttempt(request)
+    return Response.json(
+      { error: 'Incorrect password' },
+      {
+        status: 401,
+        headers: failureHeaders.headers,
+      },
+    )
   }
 
   const token = await createSessionToken()
@@ -43,9 +84,10 @@ export default async function handler(request: Request): Promise<Response> {
   return Response.json(
     { ok: true },
     {
-      headers: {
-        'Set-Cookie': buildSessionCookieHeader(token),
-      },
+      headers: mergeSetCookieHeaders(
+        { 'Set-Cookie': buildSessionCookieHeader(token) },
+        clearLoginRateLimitHeaders(),
+      ),
     },
   )
 }

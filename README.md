@@ -47,6 +47,8 @@ See **Help** in the app for the full guide.
 
 Use **Export JSON** on the Dashboard to back up. **Import JSON** restores on another browser or device. **Clear all data** removes everything from this browser.
 
+Treat export files as **sensitive** — they contain your Real username, card list, and RAX history in plain JSON. See **Help → Backup and privacy** in the app.
+
 ## Scripts
 
 ```bash
@@ -107,9 +109,8 @@ Use a **private** repository. After pushing, connect it in Vercel for automatic 
 
 1. Open the production URL in an **incognito window** — you should land on `/login`.
 2. Confirm routes work after sign-in (`/entry`, `/calendar`, refresh on each).
-3. Enable **Deployment Protection** for **Preview** deployments:
-   - Vercel → **real-rax-tracker** → Settings → **Deployment Protection**
-   - Turn on protection for **Preview** (not required for Production — session middleware handles that)
+3. Enable **Deployment Protection** for **Preview** deployments — see [scripts/PREVIEW_LOCKDOWN.md](scripts/PREVIEW_LOCKDOWN.md).
+4. Follow the [site password policy](scripts/PASSWORD_POLICY.md) when sharing access.
 
 ### Alternative: Vercel Deployment Protection (Pro)
 
@@ -123,7 +124,9 @@ If you have Vercel Pro, you can use built-in **Password Protection** on Preview 
 - [x] Edge session gate via [`middleware.ts`](middleware.ts) — credentials only in Vercel env
 - [x] Set `BASIC_AUTH_PASSWORD` (and `AUTH_SESSION_SECRET`) in Vercel before sharing URL
 - [x] Verify incognito redirect to `/login` on production URL
-- [ ] Enable Preview deployment protection in Vercel dashboard
+- [x] Login rate limiting on `/api/auth/login` (5 attempts / 15 min)
+- [x] Static assets require session or `/login` referer ([`middleware.ts`](middleware.ts))
+- [ ] Enable Preview deployment protection in Vercel dashboard — [guide](scripts/PREVIEW_LOCKDOWN.md)
 
 **Do not** ship a client-only password check — anyone can bypass it in the bundle.
 
@@ -131,8 +134,8 @@ If you have Vercel Pro, you can use built-in **Password Protection** on Preview 
 
 - [x] HTTPS (automatic on Vercel)
 - [x] `.env` gitignored; use [`.env.example`](.env.example) for documentation
-- [ ] Restrict preview deployments (Vercel dashboard — manual step)
-- [x] Security headers in [`vercel.json`](vercel.json) (`X-Frame-Options`, `Referrer-Policy`, `X-Content-Type-Options`)
+- [ ] Restrict preview deployments (Vercel dashboard — [guide](scripts/PREVIEW_LOCKDOWN.md))
+- [x] Security headers in [`vercel.json`](vercel.json) (`X-Frame-Options`, `Referrer-Policy`, `X-Content-Type-Options`, `Content-Security-Policy`)
 
 ### Data and privacy (current architecture)
 
@@ -140,7 +143,7 @@ All tracker data lives in **browser `localStorage`** per device:
 
 - No server-side database or multi-user isolation
 - Anyone who passes the site gate only sees their own browser data
-- JSON export/import is **unencrypted** — treat backups as sensitive
+- JSON export/import is **unencrypted** — treat backups as sensitive (documented in Help)
 - Username import calls public Meowbot endpoints from the client
 
 ### Future app-level auth (deferred)
@@ -154,7 +157,8 @@ Only needed if host-level gating is not enough:
 
 ### Operations
 
-- [ ] Document who has the shared password; rotate `BASIC_AUTH_PASSWORD` periodically
+- [x] Site password policy documented — [scripts/PASSWORD_POLICY.md](scripts/PASSWORD_POLICY.md)
+- [ ] Keep a private list of who has the site password; rotate per policy
 - [ ] Review Vercel access/analytics logs for unexpected traffic
 - [x] [`public/robots.txt`](public/robots.txt) and `noindex` in [`index.html`](index.html)
 

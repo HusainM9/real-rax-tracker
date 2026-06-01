@@ -5,6 +5,10 @@ function sessionSecret(): string | undefined {
   return process.env.AUTH_SESSION_SECRET?.trim() || process.env.BASIC_AUTH_PASSWORD?.trim()
 }
 
+export function getSigningSecret(): string | undefined {
+  return sessionSecret()
+}
+
 function toBase64Url(bytes: Uint8Array): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)

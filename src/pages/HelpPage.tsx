@@ -117,6 +117,22 @@ export default function HelpPage() {
           back up or move to another device, then Import JSON there. Clearing site data
           removes your tracker.
         </p>
+        <ul className="help-list">
+          <li>
+            <strong>Export files are sensitive.</strong> Backups are plain JSON and include
+            your saved Real username, card list, and RAX history. Do not post them in public
+            chats, email, or cloud folders others can access.
+          </li>
+          <li>
+            <strong>Device access.</strong> Anyone with access to this browser or an unlocked
+            export file can read your tracker data. Sign out of shared computers when done.
+          </li>
+          <li>
+            <strong>Site password.</strong> The shared login password only controls who can open
+            the app URL. It does not sync or isolate data between people — each browser keeps
+            its own collection.
+          </li>
+        </ul>
       </section>
     </div>
   )
