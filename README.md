@@ -80,17 +80,28 @@ This app builds to static files in `dist/`. Production hosting is configured for
 
 ### One-time setup
 
-1. **GitHub** — push this repo to a private GitHub repository.
-2. **Vercel** — [import the repo](https://vercel.com/new):
-   - Framework: **Vite**
-   - Build command: `npm run build`
-   - Output directory: `dist`
-   - Install command: `npm ci`
-3. **Environment variables** (Vercel → Project → Settings → Environment Variables):
-   - `BASIC_AUTH_USER` — shared username for your group
-   - `BASIC_AUTH_PASSWORD` — shared password (rotate periodically)
+1. **GitHub** — push this repo to a private GitHub repository (see [GitHub setup](#github-setup) below if not done yet).
+2. **Vercel** — project is live at **https://real-rax-tracker.vercel.app**
+   - [Vercel dashboard](https://vercel.com/sniperhusain-9147s-projects/real-rax-tracker)
+   - Framework: **Vite** · Build: `npm run build` · Output: `dist` · Install: `npm ci`
+3. **Connect Git** (after GitHub push): `npx vercel git connect`
+4. **Environment variables** (Vercel → Project → Settings → Environment Variables):
+   - `BASIC_AUTH_USER` — shared username (currently set in Vercel)
+   - `BASIC_AUTH_PASSWORD` — shared password — view/rotate in Vercel dashboard only
    - Optional: `VITE_MEOWBOT_SUPABASE_URL`, `VITE_MEOWBOT_SUPABASE_KEY`
-4. **Deploy** — Vercel deploys on push to `main`. [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) enforces HTTP Basic Auth at the edge when auth env vars are set.
+5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) enforces HTTP Basic Auth at the edge when auth env vars are set.
+
+### GitHub setup
+
+If the repo is not on GitHub yet:
+
+```bash
+gh auth login
+gh repo create real-rax-tracker --private --source=. --remote=origin --push
+npx vercel git connect
+```
+
+Use a **private** repository. After pushing, connect it in Vercel for automatic deploys on every `main` push.
 
 ### Before sharing the live URL
 
@@ -107,8 +118,8 @@ If you have Vercel Pro, you can use built-in **Password Protection** or **Vercel
 ### Access control
 
 - [x] Edge Basic Auth via [`middleware.ts`](middleware.ts) — credentials only in Vercel env
-- [ ] Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` in Vercel before sharing URL
-- [ ] Verify incognito login prompt on production URL
+- [x] Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` in Vercel before sharing URL
+- [x] Verify incognito login prompt on production URL (returns 401 without credentials)
 - [ ] Enable Preview deployment protection in Vercel dashboard
 
 **Do not** ship a client-only password check — anyone can bypass it in the bundle.
