@@ -52,13 +52,50 @@ export default function HelpPage() {
             / Meowbot. No Real API key needed.
           </li>
           <li>
-            <strong>Manual paste</strong> — copy JSON rows from realapp.tools for one card at a
-            time (Advanced section on Entry).
+            <strong>Manual paste</strong> — copy earnings JSON from realapp.tools or realapp.com for
+            one card at a time (Advanced section on Entry).
           </li>
           <li>
             <strong>Manual entry</strong> — add cards and daily RAX rows yourself.
           </li>
         </ol>
+      </section>
+
+      <section className="panel help-section">
+        <h2>When username import misses daily RAX</h2>
+        <p>
+          Some passes return no daily earnings from realapp.tools. You can fill them in from{' '}
+          <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+            realapp.com
+          </a>{' '}
+          on a <strong>desktop</strong> browser with Real Pro — the mobile site redirects to the app
+          store.
+        </p>
+        <ol className="help-list ordered">
+          <li>
+            Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
+            earnings.
+          </li>
+          <li>
+            Go to the player&apos;s season and click the <strong>RAX icon</strong> on a performance
+            to open the card earnings screen.
+          </li>
+          <li>
+            In Network, filter for <code>userpassearnings</code> and open the request whose URL
+            includes <code>playerBoxScoreId</code>.
+          </li>
+          <li>
+            Copy the full Response JSON (an object with an <code>earnings</code> array).
+          </li>
+          <li>
+            On <Link to="/entry">Entry</Link>, open <strong>Advanced: paste earnings JSON</strong>,
+            select the player card, paste, and import.
+          </li>
+        </ol>
+        <p className="import-hint">
+          realapp.tools JSON uses a <code>rows</code> array; realapp.com uses <code>earnings</code>.
+          Both formats are accepted.
+        </p>
       </section>
 
       <section className="panel help-section">

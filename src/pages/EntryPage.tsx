@@ -56,6 +56,7 @@ export default function EntryPage() {
     null,
   )
   const [usernameImporting, setUsernameImporting] = useState(false)
+  const [usernameImportFetchErrors, setUsernameImportFetchErrors] = useState(0)
   const importAbortRef = useRef<AbortController | null>(null)
   const [showAdvancedPaste, setShowAdvancedPaste] = useState(false)
   const [bulkImport, setBulkImport] = useState({
@@ -117,6 +118,7 @@ export default function EntryPage() {
     setUsernameImporting(true)
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
+    setUsernameImportFetchErrors(0)
 
     try {
       const result = await importFromUsername(username, {
@@ -129,6 +131,7 @@ export default function EntryPage() {
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
+      setUsernameImportFetchErrors(result.errors.length)
       setUsernameImportStatus(
         `Imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from ${
           result.passesFetched
@@ -166,7 +169,13 @@ export default function EntryPage() {
     if (!cardId) return
 
     try {
-      const parsed = parseRealAppToolsRows(bulkImport.rawJson)
+      const card = data.cards.find((item) => item.id === cardId)
+      const parsed = parseRealAppToolsRows(bulkImport.rawJson, {
+        sport: card?.sport,
+        rarityLabel: card?.rarityLabel,
+        applyOtdMultiplier: Boolean(card?.sport && card?.rarityLabel),
+        passKind: card?.passKind ?? 'player',
+      })
       const existingKeys = new Set(
         data.performances.map(
           (performance) =>
@@ -253,6 +262,27 @@ export default function EntryPage() {
           </p>
         ) : null}
         {usernameImportStatus ? <p className="import-status">{usernameImportStatus}</p> : null}
+        {usernameImportFetchErrors > 0 && !usernameImporting ? (
+          <p className="import-hint">
+            <strong>
+              {usernameImportFetchErrors} pass{usernameImportFetchErrors === 1 ? '' : 'es'} had no
+              daily RAX from realapp.tools.
+            </strong>{' '}
+            Paste earnings from{' '}
+            <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+              realapp.com
+            </a>{' '}
+            using{' '}
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => setShowAdvancedPaste(true)}
+            >
+              Advanced paste
+            </button>{' '}
+            below.
+          </p>
+        ) : null}
         {usernameImportStatus && !usernameImporting ? (
           <div className="button-row">
             <Link className="button primary" to="/">
@@ -375,11 +405,10 @@ export default function EntryPage() {
       <section className="panel form-panel">
         <div className="section-heading">
           <div>
-            <h2>Advanced: paste realapp.tools JSON</h2>
+            <h2>Advanced: paste earnings JSON</h2>
             <p>
-              Paste JSON rows for one card at a time. Each row uses its claim date from
-              realapp.tools. For cards you do not own yet, use the{' '}
-              <Link to="/potential">Potential</Link> tab instead.
+              Paste daily RAX for one card at a time from realapp.tools or realapp.com. For cards
+              you do not own yet, use the <Link to="/potential">Potential</Link> tab instead.
             </p>
           </div>
           <button
@@ -391,7 +420,47 @@ export default function EntryPage() {
           </button>
         </div>
         {showAdvancedPaste ? (
-          <form onSubmit={submitBulkImport}>
+          <>
+            <section className="panel import-hint">
+              <p>
+                <strong>When username import misses daily RAX</strong> — use realapp.com on a{' '}
+                <strong>desktop</strong> browser (Real Pro). Mobile redirects to the app store.
+              </p>
+              <ol className="help-list ordered">
+                <li>
+                  Open{' '}
+                  <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                    realapp.com
+                  </a>{' '}
+                  and log in.
+                </li>
+                <li>
+                  Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
+                  earnings.
+                </li>
+                <li>
+                  Go to the player&apos;s season and open the card earnings screen by clicking the{' '}
+                  <strong>RAX icon</strong> on a performance.
+                </li>
+                <li>
+                  In Network, filter for <code>userpassearnings</code> and click the request whose
+                  URL includes <code>playerBoxScoreId</code> (for example{' '}
+                  <code>
+                    userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…
+                  </code>
+                  ).
+                </li>
+                <li>
+                  Copy the full <strong>Response</strong> JSON — it should contain an{' '}
+                  <code>earnings</code> array with <code>day</code> and <code>earnings</code> fields.
+                </li>
+                <li>
+                  Select the matching player card below, paste the JSON, and click{' '}
+                  <strong>Import pasted rows</strong>. OTD rarity is applied from the card when set.
+                </li>
+              </ol>
+            </section>
+            <form onSubmit={submitBulkImport}>
             <div className="form-grid">
               <label className="field">
                 <span>Player card</span>
@@ -414,11 +483,11 @@ export default function EntryPage() {
               </label>
             </div>
             <label className="field">
-              <span>realapp.tools JSON</span>
+              <span>Earnings JSON</span>
               <textarea
                 className="bulk-import-textarea"
                 value={bulkImport.rawJson}
-                placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
+                placeholder='{"rows":[{"day":"2025-08-22","earnings":26}]} or {"earnings":[{"day":"2025-08-22","earnings":26,"playerBoxScoreIds":[123]}]}'
                 onChange={(event) =>
                   setBulkImport((current) => ({ ...current, rawJson: event.target.value }))
                 }
@@ -435,6 +504,7 @@ export default function EntryPage() {
               {bulkImportStatus ? <p className="import-status">{bulkImportStatus}</p> : null}
             </div>
           </form>
+          </>
         ) : null}
       </section>
 

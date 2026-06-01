@@ -11,6 +11,7 @@ type RealAppToolsRow = {
   day?: unknown
   earnings?: unknown
   player_box_score_id?: unknown
+  playerBoxScoreIds?: unknown
 }
 
 export type RealAppToolsParseResult = {
@@ -27,18 +28,27 @@ export type DailyRowImportOptions = {
 
 function getRows(input: unknown): unknown[] {
   if (Array.isArray(input)) return input
-  if (
-    typeof input === 'object' &&
-    input !== null &&
-    Array.isArray((input as { rows?: unknown }).rows)
-  ) {
-    return (input as { rows: unknown[] }).rows
-  }
+  if (typeof input !== 'object' || input === null) return []
+
+  const record = input as { rows?: unknown; earnings?: unknown }
+  if (Array.isArray(record.rows)) return record.rows
+  if (Array.isArray(record.earnings)) return record.earnings
+
   return []
 }
 
 function parseClaimDay(day: string): string | null {
-  return /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)?.[0] ?? null
+  return /^(\d{4}-\d{2}-\d{2})/.exec(day)?.[1] ?? null
+}
+
+function boxScoreIdFromRow(row: RealAppToolsRow): string {
+  if (row.player_box_score_id !== undefined && row.player_box_score_id !== null) {
+    return String(row.player_box_score_id)
+  }
+  if (Array.isArray(row.playerBoxScoreIds) && row.playerBoxScoreIds.length > 0) {
+    return String(row.playerBoxScoreIds[0])
+  }
+  return ''
 }
 
 function parseDailyRow(
@@ -53,10 +63,8 @@ function parseDailyRow(
     return null
   }
 
-  const boxScoreId =
-    row.player_box_score_id === undefined || row.player_box_score_id === null
-      ? ''
-      : String(row.player_box_score_id)
+  const boxScoreId = boxScoreIdFromRow(row)
+  const sourceLabel = Array.isArray(row.playerBoxScoreIds) ? 'realapp.com' : 'realapp.tools'
 
   const raxEarned =
     options.applyOtdMultiplier && options.sport
@@ -74,7 +82,7 @@ function parseDailyRow(
     claimDay,
     raxEarned,
     baseRaxEarned: baseEarnings,
-    note: `realapp.tools source ${claimDay}${
+    note: `${sourceLabel} source ${claimDay}${
       boxScoreId ? ` · box score ${boxScoreId}` : ''
     }${options.applyOtdMultiplier ? ' · OTD adjusted' : ''}`,
   }
@@ -99,14 +107,19 @@ function parseDailyRows(
   return { rows, skipped }
 }
 
-export function parseRealAppToolsRows(rawJson: string): RealAppToolsParseResult {
+export function parseRealAppToolsRows(
+  rawJson: string,
+  options: DailyRowImportOptions = {},
+): RealAppToolsParseResult {
   const parsed = JSON.parse(rawJson) as unknown
   const inputRows = getRows(parsed)
   if (inputRows.length === 0) {
-    throw new Error('Paste either a JSON array of rows or an object with a rows array.')
+    throw new Error(
+      'Paste a JSON array, or an object with a rows or earnings array (realapp.tools or realapp.com).',
+    )
   }
 
-  return parseDailyRows(inputRows as RealAppToolsRow[])
+  return parseDailyRows(inputRows as RealAppToolsRow[], options)
 }
 
 export function parseRealAppToolsDailyRows(
