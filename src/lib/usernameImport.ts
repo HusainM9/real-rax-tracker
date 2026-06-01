@@ -13,7 +13,7 @@ import {
 } from './meowbotApi'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
-import { passMetadataKey, seasonLabelFromPass } from './seasonLabel'
+import { passMetadataKey, seasonLabelFromPass, isGolfSport } from './seasonLabel'
 import type { PlayerCard, RaxPerformance, RaxTrackerData, Sport } from '../types/rax'
 
 export type UsernameImportProgress = {
@@ -56,6 +56,22 @@ function nowIso(): string {
 function passLabel(pass: MeowbotPlayerPass): string {
   if (pass.playerName) return pass.playerName
   return pass.passKind === 'team' ? `Team ${pass.entityId}` : `Player ${pass.entityId}`
+}
+
+function resolvePassSeasonLabel(
+  pass: MeowbotPlayerPass,
+  seasonLabelByKey: Map<string, string>,
+  metaKey: string,
+): string {
+  if (isGolfSport(pass.sportRaw)) {
+    return String(pass.season)
+  }
+
+  return (
+    seasonLabelByKey.get(metaKey) ??
+    pass.seasonLabel ??
+    seasonLabelFromPass(pass.season, pass.sportRaw)
+  ).trim()
 }
 
 function upsertCards(
@@ -230,10 +246,7 @@ export async function importFromUsername(
     const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
     const rarityNote = pass.rarityLabel ? ` · ${pass.rarityLabel}` : ''
     const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
-    const seasonLabel =
-      seasonLabelByKey.get(metaKey) ??
-      pass.seasonLabel ??
-      seasonLabelFromPass(pass.season, pass.sportRaw)
+    const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
     return {
       externalKey,
       name: nameByKey.get(metaKey) ?? passLabel(pass),
@@ -264,10 +277,7 @@ export async function importFromUsername(
       const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
       const label = passLabel(pass)
       const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
-      const seasonLabel =
-        seasonLabelByKey.get(metaKey) ??
-        pass.seasonLabel ??
-        seasonLabelFromPass(pass.season, pass.sportRaw)
+      const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
 
       try {
         const dailyRows = await fetchDailyEarnings(

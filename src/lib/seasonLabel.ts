@@ -10,12 +10,16 @@ export function isUfcSport(sportRaw: string): boolean {
   return normalizeMeowbotSport(sportRaw) === 'ufc'
 }
 
+export function isGolfSport(sportRaw: string): boolean {
+  return normalizeMeowbotSport(sportRaw) === 'golf'
+}
+
 export function seasonLabelFromPass(season: number, sportRaw: string): string {
   if (!Number.isInteger(season) || season < 1000) return String(season)
   if (isCollegeSport(sportRaw)) {
     return `${season}-${String(season + 1).slice(-2)}`
   }
-  if (isUfcSport(sportRaw)) {
+  if (isUfcSport(sportRaw) || isGolfSport(sportRaw)) {
     return String(season)
   }
   return `${season - 1}-${String(season).slice(-2)}`

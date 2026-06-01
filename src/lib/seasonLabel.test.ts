@@ -16,6 +16,11 @@ describe('seasonLabelFromPass', () => {
   it('uses calendar year for UFC passes', () => {
     expect(seasonLabelFromPass(2023, 'ufc')).toBe('2023')
   })
+
+  it('uses calendar year for golf passes', () => {
+    expect(seasonLabelFromPass(2025, 'golf')).toBe('2025')
+    expect(seasonLabelFromPass(2026, 'golf')).toBe('2026')
+  })
 })
 
 describe('isCollegeSport', () => {
