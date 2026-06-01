@@ -383,7 +383,7 @@ export default function EntryPage() {
               / Meowbot — no Real API key needed. Re-importing updates existing cards by pass ID.
             </p>
           </div>
-          <span>Auto import</span>
+          <span className="badge">Auto import</span>
         </div>
         <div className="form-grid">
           <label className="field">
@@ -470,7 +470,7 @@ export default function EntryPage() {
               that username import skipped.
             </p>
           </div>
-          <span>{data.cards.length} cards saved</span>
+          <span className="badge">{data.cards.length} cards saved</span>
         </div>
 
         <div className="entry-mode-toggle" role="group" aria-label="Card entry mode">

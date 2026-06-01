@@ -634,7 +634,7 @@ label.button input.sr-only {
   margin-bottom: 1rem;
 }
 
-.section-heading > span,
+.section-heading > .badge,
 .badge {
   border: 1px solid rgba(62, 207, 158, 0.3);
   border-radius: 999px;
@@ -644,6 +644,165 @@ label.button input.sr-only {
   font-weight: 600;
   padding: 0.35rem 0.7rem;
   white-space: nowrap;
+}
+
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.85rem;
+  margin-left: auto;
+}
+
+.section-actions a {
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.section-actions a:hover {
+  text-decoration: underline;
+}
+
+.section-actions .section-action-sep {
+  color: var(--muted);
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.collapsible-panel {
+  overflow: hidden;
+}
+
+.collapsible-header {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0;
+}
+
+.collapsible-panel.is-open .collapsible-header {
+  margin-bottom: 1rem;
+}
+
+.collapsible-toggle {
+  align-items: start;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 1 1 12rem;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.collapsible-toggle:hover .collapsible-title {
+  color: var(--accent);
+}
+
+.collapsible-chevron {
+  color: var(--accent);
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  margin-top: 0.05rem;
+}
+
+.collapsible-heading-text {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.collapsible-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.collapsible-description {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 62ch;
+}
+
+.collapsible-body {
+  animation: collapsible-open 0.18s ease-out;
+}
+
+@keyframes collapsible-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card-picker {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.card-picker-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 0.35rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.45rem;
+}
+
+.card-picker-item {
+  align-items: start;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  width: 100%;
+}
+
+.card-picker-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line);
+}
+
+.card-picker-item.selected {
+  background: var(--good-soft);
+  border-color: rgba(62, 207, 158, 0.35);
+}
+
+.card-picker-item strong {
+  font-size: 0.95rem;
+}
+
+.card-picker-item small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.card-picker-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 0.75rem 0.35rem;
 }
 
 .field {
@@ -1308,7 +1467,7 @@ button.calendar-day {
   }
 
   .section-heading > .button,
-  .section-heading > span {
+  .section-heading > .section-actions {
     align-self: flex-start;
   }
 

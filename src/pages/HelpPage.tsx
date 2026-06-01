@@ -155,7 +155,14 @@ export default function HelpPage() {
           </div>
           <div>
             <dt>Cards</dt>
-            <dd>Per-card claimable, overlap, and entry totals.</dd>
+            <dd>Per-card totals, sorting, and rarity preview.</dd>
+          </div>
+          <div>
+            <dt>If sold</dt>
+            <dd>
+              Simulate selling a pass — lost vs freed claimable RAX and optional sale price
+              comparison.
+            </dd>
           </div>
         </dl>
       </section>

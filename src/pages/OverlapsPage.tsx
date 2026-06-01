@@ -148,7 +148,7 @@ export default function OverlapsPage() {
           <div className="panel">
             <div className="section-heading">
               <h2>{selectedSport === 'All' ? 'All overlap days' : `${selectedSport} overlap days`}</h2>
-              <span>
+              <span className="badge">
                 {sportOverlapDays.length} total
                 {sportOverlapDays.length > OVERLAP_DAYS_PAGE_SIZE
                   ? ` · page ${overlapDaysPage} of ${overlapDaysPageTotal}`
@@ -204,7 +204,7 @@ export default function OverlapsPage() {
           <div className="panel">
             <div className="section-heading">
               <h2>{selectedSport === 'All' ? 'All overlap cards' : `${selectedSport} overlap cards`}</h2>
-              <span>{sportOverlapCards.length} cards</span>
+              <span className="badge">{sportOverlapCards.length} cards</span>
             </div>
             {sportOverlapCards.length === 0 ? (
               <p className="empty">

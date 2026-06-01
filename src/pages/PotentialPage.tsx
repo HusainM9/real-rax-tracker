@@ -199,7 +199,7 @@ export default function PotentialPage() {
             <h2>Saved profiles</h2>
             <p>Player info and pasted JSON — reload to re-run the what-if analysis.</p>
           </div>
-          <span>{data.potentialCards.length} saved</span>
+          <span className="badge">{data.potentialCards.length} saved</span>
         </div>
         {data.potentialCards.length === 0 ? (
           <p className="empty">No saved profiles yet. Fill in the form below and save one.</p>
@@ -249,7 +249,7 @@ export default function PotentialPage() {
                 : 'Enter profile details and paste realapp.tools JSON.'}
             </p>
           </div>
-          <span>{editingId ? 'Editing' : 'Draft'}</span>
+          <span className="badge">{editingId ? 'Editing' : 'Draft'}</span>
         </div>
         <div className="form-grid">
           <label className="field">
@@ -353,7 +353,7 @@ export default function PotentialPage() {
                 ) : null}
               </p>
             </div>
-            <span>
+            <span className="badge">
               {potentialAnalysis.displacedExisting.length} existing card
               {potentialAnalysis.displacedExisting.length === 1 ? '' : 's'} displaced
             </span>

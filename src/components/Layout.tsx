@@ -11,6 +11,7 @@ const links = [
   { to: '/overlaps', label: 'Overlaps' },
   { to: '/potential', label: 'Potential' },
   { to: '/cards', label: 'Cards' },
+  { to: '/sell', label: 'If sold' },
   { to: '/help', label: 'Help' },
 ]
 
