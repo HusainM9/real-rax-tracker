@@ -590,7 +590,7 @@ export default function EntryPage() {
                 <strong>RAX icon</strong> on a performance.
               </li>
               <li>
-                In Network, filter for <code>userpassearnings</code> and click the request whose URL
+                In Network, filter for the request whose URL
                 includes <code>playerBoxScoreId</code> (for example{' '}
                 <code>
                   userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…
