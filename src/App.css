@@ -758,13 +758,18 @@ label.button input.sr-only {
   font-size: 0.88rem;
 }
 
-.calendar-grid {
+.calendar-grid-wrap {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  background: rgba(0, 0, 0, 0.16);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.16);
+  min-width: 100%;
 }
 
 .calendar-weekday,
@@ -792,9 +797,11 @@ label.button input.sr-only {
 .calendar-day {
   background: rgba(255, 255, 255, 0.01);
   color: var(--muted);
+  min-width: 0;
   min-height: 5.2rem;
   padding: 0.55rem;
   text-align: left;
+  overflow: hidden;
 }
 
 button.calendar-day {
@@ -808,6 +815,10 @@ button.calendar-day {
 .calendar-day strong,
 .calendar-day small {
   display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .calendar-day span {
@@ -820,11 +831,16 @@ button.calendar-day {
   color: var(--text);
   margin-top: 1.35rem;
   font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 .calendar-day small {
   color: var(--bad);
   font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .calendar-day.has-rax {
@@ -1297,6 +1313,11 @@ button.calendar-day {
     width: 100%;
     max-width: 16rem;
     margin-inline: auto;
+  }
+
+  .calendar-grid {
+    min-width: 36rem;
+    grid-template-columns: repeat(7, minmax(5.15rem, 1fr));
   }
 }
 

@@ -172,36 +172,38 @@ export default function CalendarPage() {
                   {formatRax(displayRaxValue(totals.totalClaimableRax))} claimable
                 </span>
               </div>
-              <div className="calendar-grid" role="grid" aria-label={`${group.month} claims`}>
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((weekday) => (
-                  <div className="calendar-weekday" key={weekday}>
-                    {weekday}
-                  </div>
-                ))}
-                {cells.map((cell) =>
-                  cell.result ? (
-                    <button
-                      className={`calendar-day has-rax${
-                        cell.monthDay === selectedMonthDay ? ' selected' : ''
-                      }`}
-                      key={cell.key}
-                      type="button"
-                      onClick={() => setSearchParams({ monthDay: cell.monthDay! })}
-                    >
-                      <span>{cell.dayNumber}</span>
-                      <strong>{formatRax(displayRaxValue(cell.result.totalClaimableRax))}</strong>
-                      {cell.result.totalOverlapRax > 0 ? (
-                        <small>
-                          overlap {formatRax(displayRaxValue(cell.result.totalOverlapRax))}
-                        </small>
-                      ) : null}
-                    </button>
-                  ) : (
-                    <div className="calendar-day" key={cell.key}>
-                      {cell.dayNumber ? <span>{cell.dayNumber}</span> : null}
+              <div className="calendar-grid-wrap">
+                <div className="calendar-grid" role="grid" aria-label={`${group.month} claims`}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((weekday) => (
+                    <div className="calendar-weekday" key={weekday}>
+                      {weekday}
                     </div>
-                  ),
-                )}
+                  ))}
+                  {cells.map((cell) =>
+                    cell.result ? (
+                      <button
+                        className={`calendar-day has-rax${
+                          cell.monthDay === selectedMonthDay ? ' selected' : ''
+                        }`}
+                        key={cell.key}
+                        type="button"
+                        onClick={() => setSearchParams({ monthDay: cell.monthDay! })}
+                      >
+                        <span>{cell.dayNumber}</span>
+                        <strong>{formatRax(displayRaxValue(cell.result.totalClaimableRax))}</strong>
+                        {cell.result.totalOverlapRax > 0 ? (
+                          <small>
+                            overlap {formatRax(displayRaxValue(cell.result.totalOverlapRax))}
+                          </small>
+                        ) : null}
+                      </button>
+                    ) : (
+                      <div className="calendar-day" key={cell.key}>
+                        {cell.dayNumber ? <span>{cell.dayNumber}</span> : null}
+                      </div>
+                    ),
+                  )}
+                </div>
               </div>
             </section>
           )
