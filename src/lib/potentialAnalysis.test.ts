@@ -35,6 +35,7 @@ describe('analyzePotentialCard', () => {
       perf('p3', 'c3', 10, '2026-03-01'),
     ],
     potentialCards: [],
+    savedCardProfiles: [],
   }
 
   it('reports overlap when a potential card would be third in sport', () => {

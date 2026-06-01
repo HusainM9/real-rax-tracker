@@ -35,6 +35,7 @@ describe('calendarView', () => {
       perf('p2', 'c2', '2026-01-15', 200),
     ],
     potentialCards: [],
+    savedCardProfiles: [],
   }
 
   const results = computeClaimDayResults(data)

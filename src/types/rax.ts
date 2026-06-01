@@ -56,6 +56,28 @@ export type SavedPotentialCard = {
   updatedAt: string
 }
 
+export type SavedCardEarningsRow = {
+  claimDay: string
+  raxEarned: number
+  baseRaxEarned?: number
+  note: string
+}
+
+export type SavedCardProfile = {
+  id: string
+  externalKey?: string
+  name: string
+  sport: Sport
+  season: string
+  notes: string
+  rarityLabel?: string
+  passKind?: 'player' | 'team'
+  rawJson: string
+  rows: SavedCardEarningsRow[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type AppSettings = {
   proBonusEnabled: boolean
   savedUsername: string
@@ -67,6 +89,7 @@ export type RaxTrackerData = {
   cards: PlayerCard[]
   performances: RaxPerformance[]
   potentialCards: SavedPotentialCard[]
+  savedCardProfiles: SavedCardProfile[]
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

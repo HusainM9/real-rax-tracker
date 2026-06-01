@@ -4,6 +4,8 @@ import type {
   RaxPerformance,
   RaxTrackerData,
   SavedPotentialCard,
+  SavedCardProfile,
+  SavedCardEarningsRow,
 } from '../types/rax'
 import { rarityLabelFromNotes } from './effectiveRax'
 
@@ -20,6 +22,7 @@ export function createEmptyData(): RaxTrackerData {
     cards: [],
     performances: [],
     potentialCards: [],
+    savedCardProfiles: [],
   }
 }
 
@@ -100,6 +103,46 @@ function hydratePotentialCard(value: unknown): SavedPotentialCard | null {
   }
 }
 
+function hydrateSavedCardRow(value: unknown): SavedCardEarningsRow | null {
+  if (!isRecord(value)) return null
+  const raxEarned = Number(value.raxEarned)
+  const baseRaxEarned = Number(value.baseRaxEarned)
+  return {
+    claimDay: typeof value.claimDay === 'string' ? value.claimDay : '',
+    raxEarned: Number.isFinite(raxEarned) && raxEarned > 0 ? raxEarned : 0,
+    baseRaxEarned:
+      Number.isFinite(baseRaxEarned) && baseRaxEarned > 0 ? baseRaxEarned : undefined,
+    note: typeof value.note === 'string' ? value.note : '',
+  }
+}
+
+function hydrateSavedCardProfile(value: unknown): SavedCardProfile | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  return {
+    id: value.id,
+    externalKey: typeof value.externalKey === 'string' ? value.externalKey : undefined,
+    name: typeof value.name === 'string' ? value.name : '',
+    sport: typeof value.sport === 'string' ? (value.sport as SavedCardProfile['sport']) : 'Other',
+    season: typeof value.season === 'string' ? value.season : '',
+    notes: typeof value.notes === 'string' ? value.notes : '',
+    rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    passKind: value.passKind === 'team' ? 'team' : value.passKind === 'player' ? 'player' : undefined,
+    rawJson: typeof value.rawJson === 'string' ? value.rawJson : '',
+    rows: Array.isArray(value.rows)
+      ? value.rows
+          .map(hydrateSavedCardRow)
+          .filter((row): row is SavedCardEarningsRow => row !== null && row.claimDay !== '')
+      : [],
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
+    updatedAt:
+      typeof value.updatedAt === 'string'
+        ? value.updatedAt
+        : typeof value.createdAt === 'string'
+          ? value.createdAt
+          : new Date().toISOString(),
+  }
+}
+
 export function normalizeData(value: unknown): RaxTrackerData {
   const fallback = createEmptyData()
   if (!isRecord(value)) return fallback
@@ -128,6 +171,11 @@ export function normalizeData(value: unknown): RaxTrackerData {
       ? value.potentialCards
           .map(hydratePotentialCard)
           .filter((card): card is SavedPotentialCard => card !== null)
+      : [],
+    savedCardProfiles: Array.isArray(value.savedCardProfiles)
+      ? value.savedCardProfiles
+          .map(hydrateSavedCardProfile)
+          .filter((profile): profile is SavedCardProfile => profile !== null)
       : [],
   }
 }

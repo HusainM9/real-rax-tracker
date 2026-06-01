@@ -6,7 +6,11 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { createId } from '../lib/id'
+import {
+  buildSavedCardProfile,
+  restoreSavedCardProfile,
+  upsertSavedCardProfile,
+} from '../lib/cardProfile'
 import {
   createEmptyData,
   exportTrackerData,
@@ -20,6 +24,7 @@ import {
   type UsernameImportProgress,
   type UsernameImportResult,
 } from '../lib/usernameImport'
+import { createId } from '../lib/id'
 import type {
   AppSettings,
   PlayerCard,
@@ -61,6 +66,9 @@ type RaxDataContextValue = {
   addPotentialCard: (input: PotentialCardInput) => string
   updatePotentialCard: (id: string, input: PotentialCardInput) => void
   deletePotentialCard: (id: string) => void
+  saveCardProfile: (cardId: string, rawJson?: string) => void
+  restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
+  deleteCardProfile: (profileId: string) => void
   exportJson: () => string
   importJson: (json: string) => void
   importFromUsername: (
@@ -273,6 +281,30 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         setData((current) => ({
           ...current,
           potentialCards: current.potentialCards.filter((card) => card.id !== id),
+        }))
+      },
+      saveCardProfile: (cardId, rawJson) => {
+        setData((current) => {
+          const card = current.cards.find((item) => item.id === cardId)
+          if (!card) return current
+          const performances = current.performances.filter(
+            (performance) => performance.cardId === cardId,
+          )
+          if (performances.length === 0) return current
+          const profile = buildSavedCardProfile({ card, performances, rawJson })
+          return upsertSavedCardProfile(current, profile)
+        })
+      },
+      restoreCardProfile: (profileId) => {
+        const restored = restoreSavedCardProfile(data, profileId)
+        if (!restored) return null
+        setData(restored.data)
+        return { cardId: restored.cardId, rowsRestored: restored.rowsRestored }
+      },
+      deleteCardProfile: (profileId) => {
+        setData((current) => ({
+          ...current,
+          savedCardProfiles: current.savedCardProfiles.filter((profile) => profile.id !== profileId),
         }))
       },
       exportJson: () => exportTrackerData(data),

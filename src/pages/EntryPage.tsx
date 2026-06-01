@@ -54,9 +54,13 @@ export default function EntryPage() {
     updatePerformance,
     deletePerformance,
     importFromUsername,
+    saveCardProfile,
+    restoreCardProfile,
+    deleteCardProfile,
   } = useRaxData()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
+  const [profileStatus, setProfileStatus] = useState('')
   const cardEntryRef = useRef<HTMLFormElement>(null)
   const [usernameImport, setUsernameImport] = useState({
     username: data.settings.savedUsername ?? '',
@@ -238,6 +242,8 @@ export default function EntryPage() {
       messages.push('added 1 RAX row')
     }
 
+    saveCardProfile(cardId, hasPaste ? cardEntry.rawJson : undefined)
+    messages.push('saved to profile')
     setCardEntryStatus(`${messages.join(' · ')}.`)
     setCardEntry((current) => ({
       ...emptyCardEntry(data.cards, cardId),
@@ -320,6 +326,48 @@ export default function EntryPage() {
         ? 'Import earnings'
         : 'Add RAX entry'
 
+  const saveSelectedCardProfile = () => {
+    const cardId =
+      cardEntry.mode === 'existing'
+        ? cardEntry.existingCardId || data.cards[0]?.id || ''
+        : ''
+    if (!cardId) {
+      setProfileStatus('Select an existing card with earnings to save.')
+      return
+    }
+    const performanceCount = data.performances.filter((performance) => performance.cardId === cardId).length
+    if (performanceCount === 0) {
+      setProfileStatus('This card has no earnings rows to save yet.')
+      return
+    }
+    saveCardProfile(cardId, cardEntry.rawJson.trim() || undefined)
+    const card = data.cards.find((item) => item.id === cardId)
+    setProfileStatus(
+      `Saved ${card?.name ?? 'card'} (${performanceCount} row${performanceCount === 1 ? '' : 's'}) to profile.`,
+    )
+  }
+
+  const handleRestoreProfile = (profileId: string) => {
+    const profile = data.savedCardProfiles.find((item) => item.id === profileId)
+    const restored = restoreCardProfile(profileId)
+    if (!restored) {
+      setProfileStatus('Could not restore profile — no earnings saved.')
+      return
+    }
+    setProfileStatus(
+      `Restored ${profile?.name ?? 'card'} with ${restored.rowsRestored} RAX row${
+        restored.rowsRestored === 1 ? '' : 's'
+      }.`,
+    )
+    setCardEntry((current) => ({
+      ...current,
+      mode: 'existing',
+      existingCardId: restored.cardId,
+      earningsInput: 'paste',
+      rawJson: profile?.rawJson ?? current.rawJson,
+    }))
+  }
+
   return (
     <div className="page-stack">
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
@@ -389,11 +437,11 @@ export default function EntryPage() {
             <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
               realapp.com
             </a>{' '}
-            using{' '}
+            below, or restore a{' '}
             <button className="link-button" type="button" onClick={openCardEntryForExisting}>
-              Add card & earnings
-            </button>{' '}
-            below.
+              saved profile
+            </button>
+            .
           </p>
         ) : null}
         {usernameImportStatus && !usernameImporting ? (
@@ -682,6 +730,87 @@ export default function EntryPage() {
           {cardEntryStatus ? <p className="import-status">{cardEntryStatus}</p> : null}
         </div>
       </form>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>Saved earnings profiles</h2>
+            <p>
+              Cards you add manually are saved here automatically. After re-import wipes pasted
+              earnings, click <strong>Restore</strong> to add them back onto the matching pass.
+            </p>
+          </div>
+          <span>{data.savedCardProfiles.length} saved</span>
+        </div>
+        {data.savedCardProfiles.length === 0 ? (
+          <p className="empty">
+            No saved profiles yet. Import or paste earnings above — each save updates the profile
+            for that player.
+          </p>
+        ) : (
+          <div className="list">
+            {data.savedCardProfiles.map((profile) => (
+              <div className="list-row" key={profile.id}>
+                <span>
+                  <strong>{profile.name}</strong>
+                  <small>
+                    {profile.sport} · {profile.season || 'No season'}
+                    {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
+                    row{profile.rows.length === 1 ? '' : 's'}
+                    {profile.externalKey ? ' · linked to username import' : ''}
+                  </small>
+                </span>
+                <span className="button-row compact-actions">
+                  <button className="button primary" type="button" onClick={() => handleRestoreProfile(profile.id)}>
+                    Restore
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => {
+                      setCardEntry((current) => ({
+                        ...current,
+                        mode: 'existing',
+                        existingCardId:
+                          data.cards.find(
+                            (card) =>
+                              (profile.externalKey && card.externalKey === profile.externalKey) ||
+                              (card.name === profile.name &&
+                                card.sport === profile.sport &&
+                                card.season === profile.season),
+                          )?.id ??
+                          current.existingCardId,
+                        earningsInput: 'paste',
+                        rawJson: profile.rawJson,
+                      }))
+                      setProfileStatus(`Loaded JSON for ${profile.name}.`)
+                      cardEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                    }}
+                  >
+                    Load JSON
+                  </button>
+                  <button
+                    className="button danger"
+                    type="button"
+                    onClick={() => {
+                      deleteCardProfile(profile.id)
+                      setProfileStatus(`Removed saved profile for ${profile.name}.`)
+                    }}
+                  >
+                    Delete
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="button-row">
+          <button className="button" type="button" onClick={saveSelectedCardProfile}>
+            Save selected card to profile
+          </button>
+          {profileStatus ? <p className="import-status">{profileStatus}</p> : null}
+        </div>
+      </section>
 
       <section className="panel">
         <div className="section-heading">

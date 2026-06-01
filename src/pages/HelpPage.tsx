@@ -103,8 +103,31 @@ export default function HelpPage() {
         </ol>
         <p className="import-hint">
           realapp.tools JSON uses a <code>rows</code> array; realapp.com uses <code>earnings</code>.
-          Both formats are accepted.
+          Both formats are accepted. Earnings are also saved to <strong>Saved earnings profiles</strong>{' '}
+          on Entry — restore them after re-import if pasted data disappears.
         </p>
+      </section>
+
+      <section className="panel help-section">
+        <h2>Saved earnings profiles</h2>
+        <p>
+          When you paste or import earnings on Entry, the tracker automatically saves a profile for
+          that player (card details + all RAX rows + pasted JSON). Re-importing your username
+          replaces earnings on imported passes but does <strong>not</strong> delete saved profiles.
+        </p>
+        <ul className="help-list">
+          <li>
+            <strong>Restore</strong> — re-applies saved RAX rows onto the matching pass (by import
+            ID when available, otherwise name + sport + season).
+          </li>
+          <li>
+            <strong>Load JSON</strong> — fills the paste box without importing yet.
+          </li>
+          <li>
+            Profiles are stored in this browser with your collection and included in JSON export
+            backups.
+          </li>
+        </ul>
       </section>
 
       <section className="panel help-section">

@@ -62,6 +62,7 @@ describe('overlapAnalysis', () => {
       perf('p12', 'c6', 5, '2026-04-01'),
     ],
     potentialCards: [],
+    savedCardProfiles: [],
   }
 
   const results = computeClaimDayResults(data)

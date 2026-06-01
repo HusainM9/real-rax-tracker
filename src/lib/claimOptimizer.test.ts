@@ -45,6 +45,7 @@ function data(proBonusEnabled = true): RaxTrackerData {
       perf('p6', 'c6', 30),
     ],
     potentialCards: [],
+    savedCardProfiles: [],
   }
 }
 
@@ -83,6 +84,7 @@ describe('computeClaimDayResults', () => {
         perf('p3', 'c3', 70, '2024-03-01'),
       ],
       potentialCards: [],
+    savedCardProfiles: [],
     }
 
     const [day] = computeClaimDayResults(crossYear)
@@ -105,6 +107,7 @@ describe('computeClaimDayResults', () => {
         perf('p3', 'c2', 80, '2026-04-10'),
       ],
       potentialCards: [],
+    savedCardProfiles: [],
     }
 
     const [day] = computeClaimDayResults(duplicateCard)
@@ -148,6 +151,7 @@ describe('computeYearRollup', () => {
         },
       ],
       potentialCards: [],
+    savedCardProfiles: [],
     }
 
     const rollup = computeYearRollup(imported, computeClaimDayResults(imported))
