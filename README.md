@@ -88,8 +88,9 @@ This app builds to static files in `dist/`. Production hosting is configured for
 4. **Environment variables** (Vercel → Project → Settings → Environment Variables):
    - `BASIC_AUTH_USER` — shared username (currently set in Vercel)
    - `BASIC_AUTH_PASSWORD` — shared password — view/rotate in Vercel dashboard only
+   - `AUTH_SESSION_SECRET` — random string for signing login cookies (required for the in-app login page)
    - Optional: `VITE_MEOWBOT_SUPABASE_URL`, `VITE_MEOWBOT_SUPABASE_KEY`
-5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) enforces HTTP Basic Auth at the edge when auth env vars are set.
+5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) + [`/api/auth/*`](api/auth/login.ts) enforce a signed session cookie after users sign in on the [`/login`](src/pages/LoginPage.tsx) page.
 
 ### GitHub setup
 
@@ -109,17 +110,18 @@ Use a **private** repository. After pushing, connect it in Vercel for automatic 
 2. Confirm routes work after login (`/entry`, `/calendar`, refresh on each).
 3. Enable **Deployment Protection** for **Preview** deployments:
    - Vercel → **real-rax-tracker** → Settings → **Deployment Protection**
-   - Turn on protection for **Preview** (not required for Production — middleware Basic Auth handles that)
+   - Turn on protection for **Preview** (not required for Production — session middleware handles that)
 
 ### Alternative: Vercel Deployment Protection (Pro)
 
-If you have Vercel Pro, you can use built-in **Password Protection** or **Vercel Authentication** on Production instead of (or in addition to) middleware Basic Auth. Do **not** add a client-side password check in React.
+If you have Vercel Pro, you can use built-in **Password Protection** on Preview deployments. Do **not** rely on a client-only password check in React — credentials are validated on the server via `/api/auth/login`.
 
 ## Security checklist
 
 ### Access control
 
-- [x] Edge Basic Auth via [`middleware.ts`](middleware.ts) — credentials only in Vercel env
+- [x] In-app login page at `/login` with server-validated session cookie
+- [x] Edge session gate via [`middleware.ts`](middleware.ts) — credentials only in Vercel env
 - [x] Set `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` in Vercel before sharing URL
 - [x] Verify incognito login prompt on production URL (returns 401 without credentials)
 - [ ] Enable Preview deployment protection in Vercel dashboard

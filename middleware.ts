@@ -1,53 +1,40 @@
 import { next } from '@vercel/functions'
+import {
+  authConfigured,
+  getSessionCookieName,
+  readCookie,
+  verifySessionToken,
+} from './lib/authCookie'
 
 export const config = {
   matcher: ['/((?!assets/|robots\\.txt).*)'],
 }
 
-function unauthorized(): Response {
-  return new Response('Authentication required', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="RAX OTD Tracker", charset="UTF-8"',
-    },
-  })
+function isPublicPath(pathname: string): boolean {
+  return pathname === '/login' || pathname.startsWith('/api/auth/')
 }
 
-function decodeBasicAuth(header: string): { user: string; password: string } | null {
-  const [scheme, encoded] = header.split(' ')
-  if (scheme !== 'Basic' || !encoded) return null
-
-  try {
-    const decoded = atob(encoded)
-    const separator = decoded.indexOf(':')
-    if (separator < 0) return null
-    return {
-      user: decoded.slice(0, separator),
-      password: decoded.slice(separator + 1),
-    }
-  } catch {
-    return null
-  }
-}
-
-export default function middleware(request: Request) {
-  const expectedUser = process.env.BASIC_AUTH_USER?.trim()
-  const expectedPassword = process.env.BASIC_AUTH_PASSWORD?.trim()
-
-  // Skip gate when credentials are not configured (local dev without env).
-  if (!expectedUser || !expectedPassword) {
+export default async function middleware(request: Request) {
+  if (!authConfigured()) {
     return next()
   }
 
-  const credentials = request.headers.get('authorization')
-  if (!credentials) return unauthorized()
+  const { pathname } = new URL(request.url)
 
-  const parsed = decodeBasicAuth(credentials)
-  if (!parsed) return unauthorized()
-
-  if (parsed.user === expectedUser && parsed.password === expectedPassword) {
+  if (isPublicPath(pathname)) {
     return next()
   }
 
-  return unauthorized()
+  const token = readCookie(request, getSessionCookieName())
+  if (await verifySessionToken(token)) {
+    return next()
+  }
+
+  if (pathname.startsWith('/api/')) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const loginUrl = new URL('/login', request.url)
+  loginUrl.searchParams.set('next', pathname)
+  return Response.redirect(loginUrl)
 }

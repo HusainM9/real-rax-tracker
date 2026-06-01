@@ -8,6 +8,6 @@ gh repo create real-rax-tracker --private --source=. --remote=origin --push
 npx vercel git connect
 ```
 
-If the repo name is taken, pick another name and update the `gh repo create` command.
+If the repo name is taken, pick another name in the `gh repo create` command.
 
 After connecting Git, every push to `main` triggers a Vercel production deploy.

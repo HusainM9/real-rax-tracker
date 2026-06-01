@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
 const links = [
   { to: '/', label: 'Dashboard', end: true },
@@ -12,8 +13,15 @@ const links = [
 ]
 
 export default function Layout() {
+  const { logout, devBypass } = useAuth()
+  const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
+
+  const signOut = async () => {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   useEffect(() => {
     setMenuOpen(false)
@@ -101,6 +109,11 @@ export default function Layout() {
           Data stays in your browser unless you export a backup. Not affiliated with Real Sports
           or Meowbot.
         </p>
+        {!devBypass ? (
+          <button className="button auth-sign-out" type="button" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        ) : null}
       </footer>
     </div>
   )

@@ -20,5 +20,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "middleware.ts"]
+  "include": ["src", "middleware.ts", "lib", "api"]
 }
