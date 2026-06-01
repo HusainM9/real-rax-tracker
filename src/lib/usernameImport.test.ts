@@ -1,0 +1,177 @@
+import { describe, expect, it } from 'vitest'
+import { createEmptyData } from './storage'
+import { importFromUsername } from './usernameImport'
+
+const samplePassesResponse = {
+  playerPairs: ['100:2026:nba', '200:2026:nfl'],
+  teamPairs: ['300:2023:ufc', '400:2026:nba'],
+  user: { userId: 'abc', avatarKey: '1' },
+  rarities: {
+    '100-2026-nba': ['Legendary 1'],
+    '200-2026-nfl': ['General'],
+    '300-2023-ufc': ['Mystic 2'],
+    '400-2026-nba': ['Common'],
+  },
+  passSnapshots: [
+    {
+      entityId: 100,
+      season: 2026,
+      sport: 'nba',
+      label: 'Test Player',
+      rarityLabel: 'Legendary 1',
+    },
+    {
+      entityId: 200,
+      season: 2026,
+      sport: 'nfl',
+      label: 'Other Player',
+      rarityLabel: 'General',
+    },
+    {
+      entityId: 300,
+      season: 2023,
+      sport: 'ufc',
+      label: "Sean O'Malley",
+      rarityLabel: 'Mystic 2',
+    },
+    {
+      entityId: 400,
+      season: 2026,
+      sport: 'nba',
+      label: 'LAL Lakers',
+      rarityLabel: 'Common',
+    },
+  ],
+}
+
+const otdPassRows = {
+  playerRows: [
+    {
+      entityId: 100,
+      season: 2026,
+      sport: 'nba',
+      seasonLabel: '2025-26',
+      playerName: 'Test Player',
+    },
+    {
+      entityId: 200,
+      season: 2026,
+      sport: 'nfl',
+      seasonLabel: '2025-26',
+      playerName: 'Other Player',
+    },
+    {
+      entityId: 300,
+      season: 2023,
+      sport: 'ufc',
+      seasonLabel: '2023',
+      playerName: "Sean O'Malley",
+    },
+  ],
+  teamRows: [
+    {
+      entityId: 400,
+      season: 2026,
+      sport: 'nba',
+      seasonLabel: '2025-26',
+      teamName: 'LAL Lakers',
+    },
+  ],
+}
+
+const dailyRowsByEntity: Record<number, { rows: Array<{ day: string; earnings: number }> }> = {
+  100: { rows: [{ day: '2025-08-22', earnings: 26 }] },
+  200: { rows: [{ day: '2025-09-13', earnings: 14 }] },
+  300: { rows: [{ day: '2017-07-19', earnings: 101 }] },
+  400: { rows: [{ day: '2025-10-12', earnings: 25 }] },
+}
+
+function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = String(input)
+  const body = init?.body ? JSON.parse(String(init.body)) : {}
+
+  if (url.includes('resolve-listing')) {
+    return Promise.resolve(
+      new Response(JSON.stringify(samplePassesResponse), { status: 200 }),
+    )
+  }
+
+  if (url.includes('market-data') && body.action === 'get_user_otd_data') {
+    return Promise.resolve(new Response(JSON.stringify(otdPassRows), { status: 200 }))
+  }
+
+  if (
+    url.includes('market-data') &&
+    (body.action === 'get_daily_earnings' || body.action === 'get_team_daily_earnings')
+  ) {
+    const entityId = body.payload.entityId as number
+    return Promise.resolve(
+      new Response(JSON.stringify(dailyRowsByEntity[entityId] ?? { rows: [] }), { status: 200 }),
+    )
+  }
+
+  return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
+}
+
+describe('importFromUsername', () => {
+  it('creates cards and OTD-adjusted performances from mocked API responses', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch as typeof fetch
+
+    try {
+      const { data, result } = await importFromUsername(createEmptyData(), 'testuser')
+
+      expect(result.cardsCreated).toBe(2)
+      expect(result.rowsImported).toBe(2)
+      expect(result.passesFetched).toBe(2)
+      expect(result.passesSkipped).toBe(2)
+      expect(data.cards).toHaveLength(2)
+      expect(data.performances).toHaveLength(2)
+      expect(data.cards[0]?.externalKey).toBe('100|2026|NBA')
+      expect(data.performances[0]?.claimDay).toBe('2025-08-22')
+      expect(data.performances[0]?.raxEarned).toBe(650)
+      const ufcCard = data.cards.find((card) => card.sport === 'UFC')
+      expect(ufcCard?.name).toBe("Sean O'Malley")
+      const ufcPerf = data.performances.find((perf) => perf.cardId === ufcCard?.id)
+      expect(ufcPerf?.raxEarned).toBe(1030)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('skips passes below Legendary', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch as typeof fetch
+
+    try {
+      const { data, result } = await importFromUsername(createEmptyData(), 'testuser')
+
+      expect(result.passesFetched).toBe(2)
+      expect(result.passesSkipped).toBe(2)
+      expect(data.cards.every((card) => card.name === 'Test Player' || card.name === "Sean O'Malley")).toBe(
+        true,
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('replaces performances for imported cards on re-import', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch as typeof fetch
+
+    try {
+      const first = await importFromUsername(createEmptyData(), 'testuser')
+      const second = await importFromUsername(first.data, 'testuser')
+
+      expect(second.result.cardsCreated).toBe(0)
+      expect(second.result.cardsUpdated).toBe(2)
+      expect(second.result.rowsImported).toBe(2)
+      expect(second.result.skipped).toBe(0)
+      expect(second.data.cards).toHaveLength(2)
+      expect(second.data.performances).toHaveLength(2)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})

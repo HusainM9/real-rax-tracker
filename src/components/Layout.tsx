@@ -1,0 +1,107 @@
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+
+const links = [
+  { to: '/', label: 'Dashboard', end: true },
+  { to: '/entry', label: 'Entry' },
+  { to: '/calendar', label: 'Calendar' },
+  { to: '/overlaps', label: 'Overlaps' },
+  { to: '/potential', label: 'Potential' },
+  { to: '/cards', label: 'Cards' },
+  { to: '/help', label: 'Help' },
+]
+
+export default function Layout() {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
+
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!menuOpen) {
+      document.body.style.overflow = ''
+      return
+    }
+
+    document.body.style.overflow = 'hidden'
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = ''
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  return (
+    <div className="app-shell">
+      <header className={`site-header${menuOpen ? ' menu-open' : ''}`}>
+        <div className="site-header-inner">
+          <NavLink className="brand" to="/" end onClick={() => setMenuOpen(false)}>
+            RAX OTD Tracker
+          </NavLink>
+
+          <button
+            type="button"
+            className="nav-menu-button"
+            aria-expanded={menuOpen}
+            aria-controls="main-nav"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span className="nav-menu-icon" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="nav-menu-label">{menuOpen ? 'Close' : 'Menu'}</span>
+          </button>
+
+          <nav
+            id="main-nav"
+            className={`main-nav${menuOpen ? ' open' : ''}`}
+            aria-label="Main navigation"
+          >
+            <ul className="nav-list">
+              {links.map((link) => (
+                <li key={link.to}>
+                  <NavLink
+                    to={link.to}
+                    end={link.end}
+                    className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    {link.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
+
+        {menuOpen ? (
+          <button
+            type="button"
+            className="nav-backdrop"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+          />
+        ) : null}
+      </header>
+
+      <main className="page-main">
+        <Outlet />
+      </main>
+
+      <footer className="site-footer">
+        <p>
+          Data stays in your browser unless you export a backup. Not affiliated with Real Sports
+          or Meowbot.
+        </p>
+      </footer>
+    </div>
+  )
+}
