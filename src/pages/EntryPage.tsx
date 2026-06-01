@@ -158,12 +158,12 @@ export default function EntryPage() {
     if (!hasPaste && !hasSingle) {
       if (cardEntry.mode === 'new') {
         setCardEntryStatus(`Added ${cardEntry.name.trim()}. Paste earnings JSON below when ready.`)
-        setCardEntry((current) => ({
+        setCardEntry({
           ...emptyCardEntry(data.cards, cardId),
           mode: 'existing',
           existingCardId: cardId,
           earningsInput: 'paste',
-        }))
+        })
       } else {
         setCardEntryStatus('Paste earnings JSON or switch to single day and enter RAX.')
       }
