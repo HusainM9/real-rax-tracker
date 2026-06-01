@@ -51,6 +51,7 @@ export type SavedPotentialCard = {
   notes: string
   rawJson: string
   rows: PotentialRaxRow[]
+  simulatedRarityLabel?: string
   createdAt: string
   updatedAt: string
 }

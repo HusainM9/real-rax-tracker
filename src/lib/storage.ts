@@ -88,6 +88,8 @@ function hydratePotentialCard(value: unknown): SavedPotentialCard | null {
       : [],
     notes: typeof value.notes === 'string' ? value.notes : '',
     rawJson: typeof value.rawJson === 'string' ? value.rawJson : '',
+    simulatedRarityLabel:
+      typeof value.simulatedRarityLabel === 'string' ? value.simulatedRarityLabel : undefined,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
     updatedAt:
       typeof value.updatedAt === 'string'

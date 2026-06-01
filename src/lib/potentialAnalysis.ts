@@ -6,6 +6,8 @@ export type PotentialProfile = {
   name: string
   sport: Sport
   season: string
+  simulatedRarityLabel?: string
+  passKind?: PlayerCard['passKind']
 }
 
 function candidateKey(candidate: ClaimCandidate): string {
@@ -57,6 +59,8 @@ export function analyzePotentialCard(
     sport: profile.sport,
     season: profile.season.trim(),
     notes: 'Potential card analysis',
+    passKind: profile.passKind ?? 'player',
+    simulatedRarityLabel: profile.simulatedRarityLabel?.trim() || undefined,
     createdAt: new Date().toISOString(),
   }
   const potentialData = {
@@ -64,14 +68,18 @@ export function analyzePotentialCard(
     cards: [...data.cards, potentialCard],
     performances: [
       ...data.performances,
-      ...rows.map((row, index) => ({
-        id: `potential-${index}`,
-        cardId: potentialCard.id,
-        claimDay: row.claimDay,
-        raxEarned: row.raxEarned,
-        note: row.note,
-        createdAt: new Date().toISOString(),
-      })),
+      ...rows.map((row, index) => {
+        const baseRax = row.baseRaxEarned ?? row.raxEarned
+        return {
+          id: `potential-${index}`,
+          cardId: potentialCard.id,
+          claimDay: row.claimDay,
+          raxEarned: baseRax,
+          baseRaxEarned: baseRax,
+          note: row.note,
+          createdAt: new Date().toISOString(),
+        }
+      }),
     ],
   }
   const baseClaimableByKey = buildClaimableByKey(data)

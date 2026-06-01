@@ -8,11 +8,15 @@ import {
 
   CARD_SORT_OPTIONS,
 
+  filterCardsByRarityPreset,
+
   filterCardsBySport,
 
   sortCards,
 
   type CardSortKey,
+
+  type RarityFilterValue,
 
   type SortDirection,
 
@@ -22,6 +26,7 @@ import { displayRaxValue } from '../lib/displayRax'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 
 import { formatRax } from '../lib/format'
+import { RARITY_TIERS } from '../lib/rarityFilter'
 
 import { useRaxData } from '../context/RaxDataContext'
 
@@ -40,17 +45,19 @@ export default function CardsPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const [sportFilter, setSportFilter] = useState<Sport | 'All'>('All')
+  const [rarityFilter, setRarityFilter] = useState<RarityFilterValue>('All')
 
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
 
   const rollup = useMemo(() => computeYearRollup(data, claimResults), [data, claimResults])
 
   const filteredCards = useMemo(
-
-    () => filterCardsBySport(rollup.cards, sportFilter),
-
-    [rollup.cards, sportFilter],
-
+    () =>
+      filterCardsByRarityPreset(
+        filterCardsBySport(rollup.cards, sportFilter),
+        rarityFilter,
+      ),
+    [rollup.cards, sportFilter, rarityFilter],
   )
 
   const sortedCards = useMemo(
@@ -91,7 +98,7 @@ export default function CardsPage() {
 
               Claimable RAX includes guaranteed top-two claims and any Pro bonus selections. Filter
 
-              by sport, then sort by base RAX and a tie-breaker (e.g. FC only, highest base first).
+              by sport and rarity, then sort by base RAX and a tie-breaker (e.g. FC only, highest base first).
               Use &quot;Preview as&quot; to simulate a rarity upgrade — totals update live across
               the app. Edit player, sport, or season on Entry.
 
@@ -129,6 +136,26 @@ export default function CardsPage() {
 
               ))}
 
+            </select>
+
+          </label>
+
+          <label className="field inline-field">
+
+            <span>Rarity</span>
+
+            <select
+              value={rarityFilter}
+              onChange={(event) => setRarityFilter(event.target.value as RarityFilterValue)}
+            >
+              <option value="All">All rarities</option>
+              <option value="Legendary+">Legendary+</option>
+              {RARITY_TIERS.map((tier) => (
+                <option key={tier} value={tier}>
+                  {tier}
+                </option>
+              ))}
+              <option value="Unknown">Unknown</option>
             </select>
 
           </label>
@@ -267,7 +294,7 @@ export default function CardsPage() {
 
                   <td colSpan={11} className="empty-cell">
 
-                    No {sportFilter} cards yet.
+                    No cards match the current sport and rarity filters.
 
                   </td>
 

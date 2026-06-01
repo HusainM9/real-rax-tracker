@@ -47,4 +47,21 @@ describe('analyzePotentialCard', () => {
     expect(result?.overlapRax).toBe(15)
     expect(result?.claimableRax).toBe(0)
   })
+
+  it('applies preview rarity OTD multipliers to pasted base rows', () => {
+    const rows = [{ claimDay: '2026-03-01', raxEarned: 15, baseRaxEarned: 15, note: '' }]
+    const base = analyzePotentialCard(
+      data,
+      { name: 'Prospect', sport: 'NBA', season: '2025-26' },
+      rows,
+    )
+    const iconic = analyzePotentialCard(
+      data,
+      { name: 'Prospect', sport: 'NBA', season: '2025-26', simulatedRarityLabel: 'Iconic 1' },
+      rows,
+    )
+
+    expect(base?.candidates[0]?.candidate.performance.raxEarned).toBe(15)
+    expect(iconic?.candidates[0]?.candidate.performance.raxEarned).toBeGreaterThan(15)
+  })
 })

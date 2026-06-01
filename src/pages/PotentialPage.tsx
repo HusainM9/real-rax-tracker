@@ -4,6 +4,7 @@ import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard } from '../lib/potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
+import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -13,6 +14,7 @@ const EMPTY_FORM = {
   season: '',
   notes: '',
   rawJson: '',
+  previewAs: '',
 }
 
 export default function PotentialPage() {
@@ -27,10 +29,15 @@ export default function PotentialPage() {
     () =>
       analyzePotentialCard(
         data,
-        { name: form.name, sport: form.sport, season: form.season },
+        {
+          name: form.name,
+          sport: form.sport,
+          season: form.season,
+          simulatedRarityLabel: form.previewAs || undefined,
+        },
         potentialRows,
       ),
-    [data, form.name, form.season, form.sport, potentialRows],
+    [data, form.name, form.previewAs, form.season, form.sport, potentialRows],
   )
 
   const resetForm = () => {
@@ -68,9 +75,10 @@ export default function PotentialPage() {
       season: form.season,
       notes: form.notes,
       rawJson: form.rawJson,
+      simulatedRarityLabel: form.previewAs || undefined,
       rows: potentialRows.map((row) => ({
         claimDay: row.claimDay,
-        raxEarned: row.raxEarned,
+        raxEarned: row.baseRaxEarned ?? row.raxEarned,
         note: row.note,
       })),
     }
@@ -95,6 +103,7 @@ export default function PotentialPage() {
       season: saved.season,
       notes: saved.notes,
       rawJson: saved.rawJson,
+      previewAs: saved.simulatedRarityLabel ?? '',
     })
     setPotentialRows(
       saved.rows.map((row) => ({
@@ -168,8 +177,8 @@ export default function PotentialPage() {
               </li>
               <li>
                 Fill in the player name, sport, and season/card label below, paste the JSON, and
-                click <strong>Analyze potential card</strong>. Paste values as-is — for cards you
-                already own, username import on Entry applies OTD multipliers automatically.
+                click <strong>Analyze potential card</strong>. Paste base earnings from the JSON —
+                use <strong>Preview as</strong> to simulate OTD at a higher rarity (e.g. Iconic).
               </li>
               <li>
                 Click <strong>Save profile</strong> to keep the player info and JSON for later.
@@ -203,6 +212,9 @@ export default function PotentialPage() {
                   <small>
                     {saved.sport} · {saved.season || 'No season'} · {saved.rows.length} row
                     {saved.rows.length === 1 ? '' : 's'}
+                    {saved.simulatedRarityLabel
+                      ? ` · preview ${saved.simulatedRarityLabel}`
+                      : ''}
                     {saved.notes ? ` · ${saved.notes}` : ''}
                   </small>
                 </span>
@@ -271,6 +283,21 @@ export default function PotentialPage() {
               onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
             />
           </label>
+          <label className="field">
+            <span>Preview as</span>
+            <select
+              value={form.previewAs}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, previewAs: event.target.value }))
+              }
+            >
+              {RARITY_PREVIEW_OPTIONS.map((option) => (
+                <option key={option || 'actual'} value={option}>
+                  {option || 'Base earnings (no OTD boost)'}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <label className="field">
           <span>Profile notes (optional)</span>
@@ -318,6 +345,12 @@ export default function PotentialPage() {
                   ),
                 )}{' '}
                 net claimable change after displaced cards.
+                {form.previewAs ? (
+                  <>
+                    {' '}
+                    OTD preview: <strong>{form.previewAs}</strong>.
+                  </>
+                ) : null}
               </p>
             </div>
             <span>

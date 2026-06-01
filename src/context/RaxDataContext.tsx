@@ -38,7 +38,10 @@ type PerformanceInput = Pick<
   RaxPerformance,
   'cardId' | 'claimDay' | 'raxEarned' | 'baseRaxEarned' | 'note'
 >
-type PotentialCardInput = Pick<SavedPotentialCard, 'name' | 'sport' | 'season' | 'notes' | 'rawJson'> & {
+type PotentialCardInput = Pick<
+  SavedPotentialCard,
+  'name' | 'sport' | 'season' | 'notes' | 'rawJson' | 'simulatedRarityLabel'
+> & {
   rows: PotentialRaxRow[]
 }
 
@@ -232,6 +235,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               season: input.season.trim(),
               notes: input.notes.trim(),
               rawJson: input.rawJson,
+              simulatedRarityLabel: input.simulatedRarityLabel?.trim() || undefined,
               rows: input.rows,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -252,6 +256,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                   season: input.season.trim(),
                   notes: input.notes.trim(),
                   rawJson: input.rawJson,
+                  simulatedRarityLabel: input.simulatedRarityLabel?.trim() || undefined,
                   rows: input.rows,
                   updatedAt: nowIso(),
                 }

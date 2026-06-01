@@ -1,4 +1,7 @@
 import type { CardRollup, Sport } from '../types/rax'
+import { normalizeRarityTier, RARITY_TIERS, legendaryPlusRarityFilter, type RarityTier } from './rarityFilter'
+
+export type RarityFilterValue = 'All' | 'Legendary+' | 'Unknown' | RarityTier
 
 export type CardSortKey =
   | 'baseRax'
@@ -85,4 +88,41 @@ export function sortCards(
 export function filterCardsBySport(cards: CardRollup[], sport: Sport | 'All'): CardRollup[] {
   if (sport === 'All') return cards
   return cards.filter((rollup) => rollup.card.sport === sport)
+}
+
+export function cardRarityTier(card: CardRollup['card']): RarityTier | 'Unknown' {
+  const label = card.rarityLabel?.trim()
+  if (!label) return 'Unknown'
+
+  const tier = normalizeRarityTier(label)
+  return tier === 'Other' ? 'Unknown' : tier
+}
+
+export function filterCardsByRarity(
+  cards: CardRollup[],
+  selectedTiers: Set<RarityTier>,
+  includeUnknown: boolean,
+): CardRollup[] {
+  const showAll = includeUnknown && selectedTiers.size === RARITY_TIERS.length
+  if (showAll) return cards
+
+  return cards.filter((rollup) => {
+    const tier = cardRarityTier(rollup.card)
+    if (tier === 'Unknown') return includeUnknown
+    return selectedTiers.has(tier)
+  })
+}
+
+export function filterCardsByRarityPreset(
+  cards: CardRollup[],
+  filter: RarityFilterValue,
+): CardRollup[] {
+  if (filter === 'All') return cards
+  if (filter === 'Legendary+') {
+    return filterCardsByRarity(cards, legendaryPlusRarityFilter(), false)
+  }
+  if (filter === 'Unknown') {
+    return cards.filter((rollup) => cardRarityTier(rollup.card) === 'Unknown')
+  }
+  return cards.filter((rollup) => cardRarityTier(rollup.card) === filter)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterCardsBySport, sortCards } from './cardSort'
+import { filterCardsByRarityPreset, filterCardsBySport, sortCards } from './cardSort'
 import type { CardRollup, PlayerCard } from '../types/rax'
 
 function rollup(
@@ -7,6 +7,7 @@ function rollup(
   name: string,
   sport: PlayerCard['sport'],
   totalBaseRax: number,
+  rarityLabel?: string,
 ): CardRollup {
   return {
     card: {
@@ -15,6 +16,7 @@ function rollup(
       sport,
       season: '2025-26',
       notes: '',
+      rarityLabel,
       createdAt: '2026-01-01T00:00:00.000Z',
     },
     totalBaseRax,
@@ -56,5 +58,25 @@ describe('cardSort', () => {
     ]
     const sorted = sortCards(tied, 'baseRax', 'desc', 'name')
     expect(sorted.map((row) => row.card.name)).toEqual(['Zulu', 'Alpha'])
+  })
+
+  it('filters by rarity tier', () => {
+    const mixed = [
+      rollup('1', 'Common card', 'NBA', 10, 'Common'),
+      rollup('2', 'Iconic card', 'NBA', 10, 'Iconic'),
+      rollup('3', 'Mystic card', 'NBA', 10, 'Mystic'),
+      rollup('4', 'No rarity', 'NBA', 10),
+    ]
+    const filtered = filterCardsByRarityPreset(mixed, 'Legendary+')
+    expect(filtered.map((row) => row.card.name)).toEqual(['Iconic card', 'Mystic card'])
+  })
+
+  it('filters unknown rarity preset', () => {
+    const mixed = [
+      rollup('1', 'Iconic card', 'NBA', 10, 'Iconic'),
+      rollup('2', 'No rarity', 'NBA', 10),
+    ]
+    const filtered = filterCardsByRarityPreset(mixed, 'Unknown')
+    expect(filtered.map((row) => row.card.name)).toEqual(['No rarity'])
   })
 })
