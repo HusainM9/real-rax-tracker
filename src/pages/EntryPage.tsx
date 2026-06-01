@@ -57,7 +57,7 @@ export default function EntryPage() {
   } = useRaxData()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
-  const cardEntryRef = useRef<HTMLElement>(null)
+  const cardEntryRef = useRef<HTMLFormElement>(null)
   const [usernameImport, setUsernameImport] = useState({
     username: data.settings.savedUsername ?? '',
   })
