@@ -93,7 +93,7 @@ export default function CardsPage() {
 
               by sport, then sort by base RAX and a tie-breaker (e.g. FC only, highest base first).
               Use &quot;Preview as&quot; to simulate a rarity upgrade — totals update live across
-              the app.
+              the app. Edit player, sport, or season on Entry.
 
             </p>
 
@@ -280,74 +280,12 @@ export default function CardsPage() {
                   <tr key={cardRollup.card.id}>
 
                     <td>
-
-                      <input
-
-                        value={cardRollup.card.name}
-
-                        aria-label={`Player name for ${cardRollup.card.name || 'card'}`}
-
-                        onChange={(event) =>
-
-                          updateCard(cardRollup.card.id, { name: event.target.value })
-
-                        }
-
-                      />
-
+                      <strong>{cardRollup.card.name}</strong>
                     </td>
 
-                    <td>
+                    <td>{cardRollup.card.sport}</td>
 
-                      <select
-
-                        value={cardRollup.card.sport}
-
-                        aria-label={`Sport for ${cardRollup.card.name || 'card'}`}
-
-                        onChange={(event) =>
-
-                          updateCard(cardRollup.card.id, {
-
-                            sport: event.target.value as Sport,
-
-                          })
-
-                        }
-
-                      >
-
-                        {SPORTS.map((sport) => (
-
-                          <option key={sport} value={sport}>
-
-                            {sport}
-
-                          </option>
-
-                        ))}
-
-                      </select>
-
-                    </td>
-
-                    <td>
-
-                      <input
-
-                        value={cardRollup.card.season}
-
-                        aria-label={`Season for ${cardRollup.card.name || 'card'}`}
-
-                        onChange={(event) =>
-
-                          updateCard(cardRollup.card.id, { season: event.target.value })
-
-                        }
-
-                      />
-
-                    </td>
+                    <td>{cardRollup.card.season}</td>
 
                     <td>{cardRollup.card.rarityLabel || '—'}</td>
 

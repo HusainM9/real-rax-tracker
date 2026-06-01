@@ -45,12 +45,15 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: clip;
   background:
     radial-gradient(ellipse 70% 45% at 50% -15%, rgba(228, 160, 36, 0.07), transparent),
     var(--bg);
@@ -170,13 +173,15 @@ th {
   top: 0;
   z-index: 50;
   margin: 0 calc(-1 * min(1rem, 2vw));
-  padding: 0.85rem min(1rem, 2vw) 0.25rem;
+  padding: max(0.85rem, env(safe-area-inset-top, 0px)) min(1rem, 2vw) 0.25rem;
   background: transparent;
   border-bottom: none;
+  isolation: isolate;
 }
 
 .site-header.menu-open {
   background: transparent;
+  z-index: 60;
 }
 
 .site-header-inner {
@@ -211,11 +216,13 @@ th {
   background: transparent;
   color: var(--text-soft);
   cursor: pointer;
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   padding: 0.45rem 0.65rem;
   font-size: 0.88rem;
   font-weight: 600;
   flex-shrink: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .nav-menu-button:hover {
@@ -338,18 +345,35 @@ th {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   padding: 0.55rem 0.95rem;
   white-space: nowrap;
   text-decoration: none;
   font-size: 0.88rem;
   font-weight: 500;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   transition:
     transform 0.12s ease,
     border-color 0.15s ease,
     background 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+label.button {
+  position: relative;
+  cursor: pointer;
+}
+
+label.button input.sr-only {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .button:hover {
@@ -366,10 +390,25 @@ th {
   box-shadow: 0 4px 14px var(--accent-glow);
 }
 
-.button.primary:hover {
-  color: #141414;
-  background: var(--accent-hover);
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .button.primary:hover {
+    color: #141414;
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(228, 160, 36, 0.28);
+    box-shadow: var(--shadow-md);
+  }
+
+  .list-row:hover,
+  a.list-row:hover {
+    border-color: rgba(228, 160, 36, 0.28);
+    background: rgba(255, 255, 255, 0.04);
+    transform: translateY(-1px);
+  }
 }
 
 .button.danger {
@@ -390,6 +429,8 @@ th {
 }
 
 .page-main {
+  position: relative;
+  z-index: 1;
   padding-top: 0.5rem;
 }
 
@@ -506,7 +547,6 @@ th {
   position: relative;
   overflow: hidden;
   transition:
-    transform 0.15s ease,
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
@@ -518,12 +558,6 @@ th {
   height: 3px;
   background: var(--accent);
   opacity: 0.85;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(228, 160, 36, 0.28);
-  box-shadow: var(--shadow-md);
 }
 
 .stat-card span,
@@ -618,7 +652,14 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
-  align-items: center;
+  align-items: stretch;
+}
+
+.button-row .button,
+.button-row label.button,
+.button-row a.button {
+  flex: 1 1 auto;
+  min-width: min(100%, 9rem);
 }
 
 .sort-controls {
@@ -659,15 +700,7 @@ th {
   background: rgba(255, 255, 255, 0.02);
   transition:
     border-color 0.15s ease,
-    background 0.15s ease,
-    transform 0.12s ease;
-}
-
-.list-row:hover,
-a.list-row:hover {
-  border-color: rgba(228, 160, 36, 0.28);
-  background: rgba(255, 255, 255, 0.04);
-  transform: translateY(-1px);
+    background 0.15s ease;
 }
 
 .table-wrap {
@@ -1111,6 +1144,7 @@ button.calendar-day {
 
   .site-header-inner {
     min-height: 3rem;
+    z-index: 54;
   }
 
   .nav-menu-button {
@@ -1122,26 +1156,20 @@ button.calendar-day {
   }
 
   .main-nav {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    left: min(1rem, 2vw);
-    right: min(1rem, 2vw);
-    display: block;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(-0.35rem);
-    transition:
-      opacity 0.2s ease,
-      transform 0.2s ease,
-      visibility 0.2s ease;
-    pointer-events: none;
+    display: none;
+    position: fixed;
+    top: calc(3.25rem + env(safe-area-inset-top, 0px));
+    left: max(0.5rem, env(safe-area-inset-left, 0px));
+    right: max(0.5rem, env(safe-area-inset-right, 0px));
+    z-index: 53;
+    max-height: calc(100dvh - 4rem - env(safe-area-inset-top, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .main-nav.open {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-    pointer-events: auto;
+    display: block;
+    z-index: 61;
   }
 
   .nav-list {
@@ -1181,7 +1209,7 @@ button.calendar-day {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 51;
+    z-index: 55;
     border: none;
     padding: 0;
     margin: 0;
@@ -1225,6 +1253,50 @@ button.calendar-day {
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .section-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-heading > .button,
+  .section-heading > span {
+    align-self: flex-start;
+  }
+
+  .button-row,
+  .calendar-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .button-row .button,
+  .button-row label.button,
+  .button-row a.button,
+  .hero-actions .button,
+  .hero-actions label.button,
+  .hero-actions a.button {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .compact-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .compact-actions .button {
+    flex: 1 1 calc(50% - 0.35rem);
+    min-width: min(100%, 7rem);
+  }
+
+  .site-footer .button {
+    width: 100%;
+    max-width: 16rem;
+    margin-inline: auto;
   }
 }
 

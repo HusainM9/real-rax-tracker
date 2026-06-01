@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+const MOBILE_NAV_QUERY = '(max-width: 1024px)'
+
 const links = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/entry', label: 'Entry' },
@@ -26,6 +28,16 @@ export default function Layout() {
   useEffect(() => {
     setMenuOpen(false)
   }, [location.pathname])
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_NAV_QUERY)
+    const syncMenu = () => {
+      if (!media.matches) setMenuOpen(false)
+    }
+    syncMenu()
+    media.addEventListener('change', syncMenu)
+    return () => media.removeEventListener('change', syncMenu)
+  }, [])
 
   useEffect(() => {
     if (!menuOpen) {
@@ -89,16 +101,16 @@ export default function Layout() {
             </ul>
           </nav>
         </div>
-
-        {menuOpen ? (
-          <button
-            type="button"
-            className="nav-backdrop"
-            aria-label="Close menu"
-            onClick={() => setMenuOpen(false)}
-          />
-        ) : null}
       </header>
+
+      {menuOpen ? (
+        <button
+          type="button"
+          className="nav-backdrop"
+          aria-label="Close menu"
+          onClick={() => setMenuOpen(false)}
+        />
+      ) : null}
 
       <main className="page-main">
         <Outlet />
