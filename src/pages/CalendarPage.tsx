@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   buildCalendarCells,
@@ -32,12 +32,46 @@ function CandidateRow({ candidate }: { candidate: ClaimCandidate }) {
   )
 }
 
-function DayPanel({ day }: { day: ClaimDayResult }) {
+function OverlapSection({ overlaps }: { overlaps: ClaimCandidate[] }) {
+  const [open, setOpen] = useState(false)
+  const overlapRax = overlaps.reduce((sum, candidate) => sum + candidate.performance.raxEarned, 0)
+
+  if (overlaps.length === 0) {
+    return <p className="empty overlap-empty">No overlap in this sport.</p>
+  }
+
   return (
-    <article className="panel day-panel" id={`day-${day.claimDay}`}>
+    <div className="overlap-section">
+      <button
+        type="button"
+        className="overlap-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="overlap-toggle-chevron" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span>
+          Overlaps ({overlaps.length}) · {formatRax(overlapRax)} RAX
+        </span>
+      </button>
+      {open ? (
+        <div className="overlap-list">
+          {overlaps.map((candidate) => (
+            <CandidateRow candidate={candidate} key={candidate.performance.id} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
+  return (
+    <article className="panel day-panel">
       <div className="section-heading">
         <div>
-          <h2>{formatClaimDay(day.claimDay)}</h2>
+          <h2 id={titleId}>{formatClaimDay(day.claimDay)}</h2>
           <p>
             {formatRax(day.totalClaimableRax)} claimable · {formatRax(day.totalOverlapRax)} overlapped
             · top 2 per sport + Pro bonus
@@ -56,14 +90,7 @@ function DayPanel({ day }: { day: ClaimDayResult }) {
             ))}
             {sport.guaranteed.length === 0 ? <p className="empty">No claims for this sport.</p> : null}
 
-            <p className="mini-heading">Overlaps</p>
-            {sport.overlaps.length === 0 ? (
-              <p className="empty">No overlap in this sport.</p>
-            ) : (
-              sport.overlaps.map((candidate) => (
-                <CandidateRow candidate={candidate} key={candidate.performance.id} />
-              ))
-            )}
+            <OverlapSection overlaps={sport.overlaps} />
           </section>
         ))}
       </div>
@@ -93,6 +120,33 @@ export default function CalendarPage() {
   const monthGroups = useMemo(() => groupClaimDaysByMonth(allResults), [allResults])
   const layoutYear = currentYear()
   const previewCount = data.cards.filter((card) => card.simulatedRarityLabel).length
+
+  const closeDayPanel = () => setSearchParams({})
+
+  useEffect(() => {
+    if (!selectedDay) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeDayPanel()
+    }
+    document.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [selectedDay, setSearchParams])
+
+  const openDay = (monthDay: string) => {
+    if (monthDay === selectedMonthDay) {
+      closeDayPanel()
+      return
+    }
+    setSearchParams({ monthDay })
+  }
 
   return (
     <div className="page-stack">
@@ -142,14 +196,38 @@ export default function CalendarPage() {
             </select>
           </label>
           {selectedMonthDay ? (
-            <button className="button" type="button" onClick={() => setSearchParams({})}>
+            <button className="button" type="button" onClick={closeDayPanel}>
               Show all
             </button>
           ) : null}
         </div>
       </section>
 
-      {selectedDay ? <DayPanel day={selectedDay} /> : null}
+      {selectedDay ? (
+        <div
+          className="calendar-modal-backdrop"
+          role="presentation"
+          onClick={closeDayPanel}
+        >
+          <div
+            className="calendar-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-day-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="calendar-modal-close button"
+              type="button"
+              aria-label="Close day details"
+              onClick={closeDayPanel}
+            >
+              Close
+            </button>
+            <DayPanel day={selectedDay} titleId="calendar-day-title" />
+          </div>
+        </div>
+      ) : null}
 
       {allResults.length === 0 ? (
         <section className="panel">
@@ -187,7 +265,7 @@ export default function CalendarPage() {
                         }`}
                         key={cell.key}
                         type="button"
-                        onClick={() => setSearchParams({ monthDay: cell.monthDay! })}
+                        onClick={() => openDay(cell.monthDay!)}
                       >
                         <span>{cell.dayNumber}</span>
                         <strong>{formatRax(displayRaxValue(cell.result.totalClaimableRax))}</strong>
