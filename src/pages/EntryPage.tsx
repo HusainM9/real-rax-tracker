@@ -3,12 +3,33 @@ import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
-import type { UsernameImportProgress } from '../lib/usernameImport'
+import { reportImportAdminEvents } from '../lib/adminEvents'
+import {
+  getFailedPlayerPasses,
+  type FailedPlayerPassImport,
+  type UsernameImportProgress,
+} from '../lib/usernameImport'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
 const ENTRY_PAGE_SIZE = 50
 const HEAVY_TABLE_THRESHOLD = 100
+const EXISTING_CARD_SEARCH_LIMIT = 50
+
+function matchesExistingCardSearch(
+  query: string,
+  card: {
+    name: string
+    sport: string
+    season: string
+    rarityLabel?: string
+  },
+): boolean {
+  const haystack = [card.name, card.sport, card.season, card.rarityLabel ?? '']
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(query)
+}
 
 function paginate<T>(items: T[], page: number, pageSize: number): T[] {
   const start = (page - 1) * pageSize
@@ -75,10 +96,46 @@ export default function EntryPage() {
     null,
   )
   const [usernameImporting, setUsernameImporting] = useState(false)
-  const [usernameImportFetchErrors, setUsernameImportFetchErrors] = useState(0)
+  const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
+    FailedPlayerPassImport[]
+  >([])
+  const [existingCardQuery, setExistingCardQuery] = useState('')
   const importAbortRef = useRef<AbortController | null>(null)
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
+
+  const sortedExistingCards = useMemo(
+    () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
+    [data.cards],
+  )
+
+  const selectedExistingCardId = cardEntry.existingCardId || data.cards[0]?.id || ''
+
+  const filteredExistingCards = useMemo(() => {
+    const query = existingCardQuery.trim().toLowerCase()
+    const matches = query
+      ? sortedExistingCards.filter((card) => matchesExistingCardSearch(query, card))
+      : sortedExistingCards
+    const limited = matches.slice(0, EXISTING_CARD_SEARCH_LIMIT)
+    if (
+      selectedExistingCardId &&
+      !limited.some((card) => card.id === selectedExistingCardId)
+    ) {
+      const selected = sortedExistingCards.find((card) => card.id === selectedExistingCardId)
+      if (selected) {
+        return [selected, ...limited.slice(0, EXISTING_CARD_SEARCH_LIMIT - 1)]
+      }
+    }
+    return limited
+  }, [existingCardQuery, selectedExistingCardId, sortedExistingCards])
+
+  const existingCardSearchHint =
+    data.cards.length === 0
+      ? 'Import your collection or add a new card first.'
+      : existingCardQuery.trim()
+        ? `${filteredExistingCards.length} match${filteredExistingCards.length === 1 ? '' : 'es'}`
+        : `Showing first ${Math.min(sortedExistingCards.length, EXISTING_CARD_SEARCH_LIMIT)} of ${sortedExistingCards.length} — search to narrow`
+
   const sortedPerformances = useMemo(
     () =>
       [...data.performances].sort(
@@ -264,20 +321,32 @@ export default function EntryPage() {
     setUsernameImporting(true)
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
-    setUsernameImportFetchErrors(0)
+    setUsernameImportFailedPasses([])
 
     try {
       const result = await importFromUsername(username, {
         signal: controller.signal,
         onProgress: setUsernameImportProgress,
       })
-      const errorNote =
-        result.errors.length > 0 ? ` · ${result.errors.length} pass fetch error(s)` : ''
+      const failedPlayerPasses = getFailedPlayerPasses(result)
+      const noEarningsCount = failedPlayerPasses.filter((pass) => pass.reason === 'no_earnings').length
+      const fetchErrorCount = failedPlayerPasses.filter((pass) => pass.reason === 'fetch_error').length
+      const issueParts: string[] = []
+      if (noEarningsCount > 0) {
+        issueParts.push(
+          `${noEarningsCount} player pass${noEarningsCount === 1 ? '' : 'es'} with no earnings`,
+        )
+      }
+      if (fetchErrorCount > 0) {
+        issueParts.push(`${fetchErrorCount} player fetch error${fetchErrorCount === 1 ? '' : 's'}`)
+      }
+      const issueNote = issueParts.length > 0 ? ` · ${issueParts.join(', ')}` : ''
       const skipNote =
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
-      setUsernameImportFetchErrors(result.errors.length)
+      setUsernameImportFailedPasses(failedPlayerPasses)
+      void reportImportAdminEvents(username, result)
       if (result.errors.length > 0) {
         setCardEntry((current) => ({
           ...current,
@@ -291,7 +360,7 @@ export default function EntryPage() {
           result.passesFetched
         } pass${result.passesFetched === 1 ? '' : 'es'} (${result.cardsCreated} new card${
           result.cardsCreated === 1 ? '' : 's'
-        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${errorNote}.`,
+        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
       )
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
         setShowHeavyTables(false)
@@ -427,22 +496,60 @@ export default function EntryPage() {
           </p>
         ) : null}
         {usernameImportStatus ? <p className="import-status">{usernameImportStatus}</p> : null}
-        {usernameImportFetchErrors > 0 && !usernameImporting ? (
-          <p className="import-hint">
-            <strong>
-              {usernameImportFetchErrors} pass{usernameImportFetchErrors === 1 ? '' : 'es'} had no
-              daily RAX from realapp.tools.
-            </strong>{' '}
-            Paste earnings from{' '}
-            <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-              realapp.com
-            </a>{' '}
-            below, or restore a{' '}
-            <button className="link-button" type="button" onClick={openCardEntryForExisting}>
-              saved profile
-            </button>
-            .
-          </p>
+        {usernameImportFailedPasses.length > 0 && !usernameImporting ? (
+          <section className="import-failures">
+            <p className="import-hint">
+              <strong>
+                {usernameImportFailedPasses.length} player pass
+                {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
+              </strong>{' '}
+              Paste earnings from{' '}
+              <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                realapp.com
+              </a>{' '}
+              below, or restore a{' '}
+              <button className="link-button" type="button" onClick={openCardEntryForExisting}>
+                saved profile
+              </button>
+              .
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Player pass</th>
+                    <th>Sport</th>
+                    <th>Season</th>
+                    <th>Issue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usernameImportFailedPasses.map((pass) => (
+                    <tr
+                      key={`${pass.name}|${pass.sport}|${pass.season}|${pass.reason}|${pass.detail}`}
+                    >
+                      <td>
+                        {pass.name}
+                        {pass.rarityLabel ? (
+                          <>
+                            <br />
+                            <small className="table-sub">{pass.rarityLabel}</small>
+                          </>
+                        ) : null}
+                      </td>
+                      <td>{pass.sport}</td>
+                      <td>{pass.season || '—'}</td>
+                      <td>
+                        {pass.reason === 'no_earnings' ? 'No earnings' : 'Fetch failed'}
+                        <br />
+                        <small className="table-sub">{pass.detail}</small>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         ) : null}
         {usernameImportStatus && !usernameImporting ? (
           <div className="button-row">
@@ -584,26 +691,45 @@ export default function EntryPage() {
             </label>
           </>
         ) : (
-          <label className="field">
-            <span>Player card</span>
-            <select
-              value={cardEntry.existingCardId || data.cards[0]?.id || ''}
-              disabled={data.cards.length === 0}
-              onChange={(event) =>
-                setCardEntry((current) => ({ ...current, existingCardId: event.target.value }))
-              }
-            >
-              {data.cards.length === 0 ? (
-                <option value="">Import your collection or add a new card first</option>
-              ) : null}
-              {data.cards.map((card) => (
-                <option key={card.id} value={card.id}>
-                  {card.name} · {card.sport} {card.season}
-                  {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="card-picker">
+            <label className="field">
+              <span>Search cards</span>
+              <input
+                type="search"
+                value={existingCardQuery}
+                placeholder="Player name, sport, season, rarity…"
+                disabled={data.cards.length === 0}
+                onChange={(event) => setExistingCardQuery(event.target.value)}
+              />
+            </label>
+            <p className="import-hint">{existingCardSearchHint}</p>
+            {data.cards.length === 0 ? (
+              <p className="card-picker-empty">No cards in your collection yet.</p>
+            ) : filteredExistingCards.length === 0 ? (
+              <p className="card-picker-empty">No cards match that search.</p>
+            ) : (
+              <div className="card-picker-list" role="listbox" aria-label="Existing cards">
+                {filteredExistingCards.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selectedExistingCardId === card.id}
+                    className={`card-picker-item${selectedExistingCardId === card.id ? ' selected' : ''}`}
+                    onClick={() =>
+                      setCardEntry((current) => ({ ...current, existingCardId: card.id }))
+                    }
+                  >
+                    <strong>{card.name || 'Unnamed pass'}</strong>
+                    <small>
+                      {card.sport} · {card.season || 'No season'}
+                      {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         <div className="form-subsection">

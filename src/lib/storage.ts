@@ -6,7 +6,11 @@ import type {
   SavedPotentialCard,
   SavedCardProfile,
   SavedCardEarningsRow,
+  SavedSellRankings,
+  SavedSellRankRow,
+  SavedSkippedSellRankPass,
 } from '../types/rax'
+import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
@@ -23,6 +27,7 @@ export function createEmptyData(): RaxTrackerData {
     performances: [],
     potentialCards: [],
     savedCardProfiles: [],
+    savedSellRankings: null,
   }
 }
 
@@ -37,15 +42,18 @@ function hydrateCard(value: unknown): PlayerCard | null {
     typeof value.rarityLabel === 'string'
       ? value.rarityLabel
       : rarityLabelFromNotes(notes)
+  const name = typeof value.name === 'string' ? value.name : ''
+  const explicitPassKind =
+    value.passKind === 'team' ? 'team' : value.passKind === 'player' ? 'player' : undefined
   return {
     id: value.id,
-    name: typeof value.name === 'string' ? value.name : '',
+    name,
     sport: typeof value.sport === 'string' ? (value.sport as PlayerCard['sport']) : 'Other',
     season: typeof value.season === 'string' ? value.season : '',
     notes,
     externalKey: typeof value.externalKey === 'string' ? value.externalKey : undefined,
     rarityLabel,
-    passKind: value.passKind === 'team' ? 'team' : value.passKind === 'player' ? 'player' : undefined,
+    passKind: explicitPassKind ?? (looksLikeTeamPassName(name) ? 'team' : undefined),
     simulatedRarityLabel:
       typeof value.simulatedRarityLabel === 'string' ? value.simulatedRarityLabel : undefined,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
@@ -143,6 +151,58 @@ function hydrateSavedCardProfile(value: unknown): SavedCardProfile | null {
   }
 }
 
+function hydrateSavedSellRankRow(value: unknown): SavedSellRankRow | null {
+  if (!isRecord(value) || typeof value.cardId !== 'string') return null
+  return {
+    cardId: value.cardId,
+    name: typeof value.name === 'string' ? value.name : '',
+    sport:
+      typeof value.sport === 'string' ? (value.sport as SavedSellRankRow['sport']) : 'Other',
+    season: typeof value.season === 'string' ? value.season : '',
+    rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    claimableNow: Number(value.claimableNow) || 0,
+    lostClaimableRax: Number(value.lostClaimableRax) || 0,
+    freedClaimableRax: Number(value.freedClaimableRax) || 0,
+    netClaimableDelta: Number(value.netClaimableDelta) || 0,
+  }
+}
+
+function hydrateSkippedSellRankPass(value: unknown): SavedSkippedSellRankPass | null {
+  if (!isRecord(value) || typeof value.cardId !== 'string') return null
+  const reason = value.reason === 'analysis_failed' ? 'analysis_failed' : 'no_earnings'
+  return {
+    cardId: value.cardId,
+    name: typeof value.name === 'string' ? value.name : '',
+    sport:
+      typeof value.sport === 'string'
+        ? (value.sport as SavedSkippedSellRankPass['sport'])
+        : 'Other',
+    season: typeof value.season === 'string' ? value.season : '',
+    rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    reason,
+    detail: typeof value.detail === 'string' ? value.detail : '',
+  }
+}
+
+function hydrateSavedSellRankings(value: unknown): SavedSellRankings | null {
+  if (!isRecord(value) || typeof value.calculatedAt !== 'string') return null
+  return {
+    calculatedAt: value.calculatedAt,
+    skippedWithoutEarnings: Number(value.skippedWithoutEarnings) || 0,
+    skippedTeamPasses: Number(value.skippedTeamPasses) || 0,
+    skippedPlayerPasses: Array.isArray(value.skippedPlayerPasses)
+      ? value.skippedPlayerPasses
+          .map(hydrateSkippedSellRankPass)
+          .filter((pass): pass is SavedSkippedSellRankPass => pass !== null)
+      : [],
+    rows: Array.isArray(value.rows)
+      ? value.rows
+          .map(hydrateSavedSellRankRow)
+          .filter((row): row is SavedSellRankRow => row !== null)
+      : [],
+  }
+}
+
 export function normalizeData(value: unknown): RaxTrackerData {
   const fallback = createEmptyData()
   if (!isRecord(value)) return fallback
@@ -177,6 +237,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .map(hydrateSavedCardProfile)
           .filter((profile): profile is SavedCardProfile => profile !== null)
       : [],
+    savedSellRankings: hydrateSavedSellRankings(value.savedSellRankings),
   }
 }
 

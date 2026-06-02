@@ -31,6 +31,71 @@ export type UsernameImportResult = {
   passesFetched: number
   passesSkipped: number
   errors: string[]
+  passesWithNoEarnings: PassWithNoEarnings[]
+  passFetchErrors: PassFetchError[]
+}
+
+export type PassWithNoEarnings = {
+  name: string
+  sport: Sport
+  season: string
+  rarityLabel?: string
+  externalKey: string
+  passKind: 'player' | 'team'
+}
+
+export type PassFetchError = {
+  name: string
+  sport: Sport
+  season: string
+  rarityLabel?: string
+  externalKey: string
+  passKind: 'player' | 'team'
+  message: string
+}
+
+export type FailedPlayerPassImport = {
+  name: string
+  sport: Sport
+  season: string
+  rarityLabel?: string
+  reason: 'no_earnings' | 'fetch_error'
+  detail: string
+}
+
+export function getFailedPlayerPasses(result: UsernameImportResult): FailedPlayerPassImport[] {
+  const failed: FailedPlayerPassImport[] = []
+
+  for (const pass of result.passesWithNoEarnings) {
+    if (pass.passKind !== 'player') continue
+    failed.push({
+      name: pass.name,
+      sport: pass.sport,
+      season: pass.season,
+      rarityLabel: pass.rarityLabel,
+      reason: 'no_earnings',
+      detail: 'No daily earnings returned from realapp.tools',
+    })
+  }
+
+  for (const pass of result.passFetchErrors) {
+    if (pass.passKind !== 'player') continue
+    failed.push({
+      name: pass.name,
+      sport: pass.sport,
+      season: pass.season,
+      rarityLabel: pass.rarityLabel,
+      reason: 'fetch_error',
+      detail: pass.message,
+    })
+  }
+
+  return failed.sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) ||
+      a.sport.localeCompare(b.sport) ||
+      a.season.localeCompare(b.season),
+  )
 }
 
 type CardDraft = Pick<
@@ -187,6 +252,8 @@ export async function importFromUsername(
   options?: UsernameImportOptions,
 ): Promise<{ data: RaxTrackerData; result: UsernameImportResult }> {
   const errors: string[] = []
+  const passesWithNoEarnings: PassWithNoEarnings[] = []
+  const passFetchErrors: PassFetchError[] = []
   const reportProgress = options?.onProgress
     ? createThrottledProgress(options.onProgress)
     : undefined
@@ -278,6 +345,15 @@ export async function importFromUsername(
       const label = passLabel(pass)
       const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
       const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
+      const passName = nameByKey.get(metaKey) ?? label
+      const passMeta = {
+        name: passName,
+        sport,
+        season: seasonLabel.trim(),
+        rarityLabel: pass.rarityLabel,
+        externalKey,
+        passKind: pass.passKind,
+      }
 
       try {
         const dailyRows = await fetchDailyEarnings(
@@ -309,19 +385,21 @@ export async function importFromUsername(
             })
           }
         } else if (cardId && dailyRows.length === 0) {
-          errors.push(`${label}: no daily earnings returned (check season/sport mapping).`)
+          passesWithNoEarnings.push(passMeta)
+          errors.push(`${passName}: no daily earnings returned (check season/sport mapping).`)
         }
       } catch (error) {
-        errors.push(
-          `${label}: ${error instanceof Error ? error.message : 'Could not fetch daily earnings.'}`,
-        )
+        const message =
+          error instanceof Error ? error.message : 'Could not fetch daily earnings.'
+        passFetchErrors.push({ ...passMeta, message })
+        errors.push(`${passName}: ${message}`)
       } finally {
         completed += 1
         reportProgress?.({
           phase: 'fetching',
           current: completed,
           total,
-          label,
+          label: passName,
         })
       }
     },
@@ -344,6 +422,8 @@ export async function importFromUsername(
       passesFetched: selectedPasses.length,
       passesSkipped,
       errors,
+      passesWithNoEarnings,
+      passFetchErrors,
     },
   }
 }

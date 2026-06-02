@@ -12,6 +12,10 @@ import LoginPage from './pages/LoginPage'
 import OverlapsPage from './pages/OverlapsPage'
 import PotentialPage from './pages/PotentialPage'
 import SellPage from './pages/SellPage'
+import AdminLoginPage from './pages/AdminLoginPage'
+import AdminPage from './pages/AdminPage'
+import RequireAdmin from './components/RequireAdmin'
+import { AdminProvider } from './context/AdminAuthContext'
 import './App.css'
 
 export default function App() {
@@ -21,6 +25,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<RequireAuth />}>
+            <Route path="/admin/login" element={<AdminProvider><AdminLoginPage /></AdminProvider>} />
+            <Route element={<AdminProvider><RequireAdmin /></AdminProvider>}>
+              <Route path="/admin" element={<AdminPage />} />
+            </Route>
             <Route
               element={
                 <RaxDataProvider>

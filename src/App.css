@@ -863,6 +863,10 @@ label.button input.sr-only {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.rank-search-field {
+  grid-column: 1 / -1;
+}
+
 .compact-actions {
   justify-content: flex-end;
 }
@@ -1100,6 +1104,14 @@ button.calendar-day {
   line-height: 1.55;
 }
 
+.import-failures {
+  margin-top: 0.85rem;
+}
+
+.import-failures .table-wrap {
+  margin-top: 0.65rem;
+}
+
 .panel.import-hint {
   border-color: rgba(228, 160, 36, 0.22);
   background: linear-gradient(180deg, var(--accent-muted), var(--surface));
@@ -1211,6 +1223,21 @@ button.calendar-day {
 
 .sale-comparison-verdict strong {
   color: var(--text-soft);
+}
+
+.sell-not-needed {
+  color: #86efcc;
+}
+
+.sell-not-needed-callout {
+  border: 1px solid rgba(62, 207, 158, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(62, 207, 158, 0.08);
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
 }
 
 .rarity-filter {

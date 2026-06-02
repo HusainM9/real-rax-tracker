@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyData } from './storage'
-import { importFromUsername } from './usernameImport'
+import { getFailedPlayerPasses, importFromUsername } from './usernameImport'
 
 const samplePassesResponse = {
   playerPairs: ['100:2026:nba', '200:2026:nfl'],
@@ -151,6 +151,48 @@ describe('importFromUsername', () => {
       expect(data.cards.every((card) => card.name === 'Test Player' || card.name === "Sean O'Malley")).toBe(
         true,
       )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('records passes with no daily earnings', async () => {
+    const originalFetch = globalThis.fetch
+    const noEarningsFetch: typeof fetch = (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) : {}
+      if (
+        url.includes('market-data') &&
+        (body.action === 'get_daily_earnings' || body.action === 'get_team_daily_earnings') &&
+        body.payload.entityId === 100
+      ) {
+        return Promise.resolve(new Response(JSON.stringify({ rows: [] }), { status: 200 }))
+      }
+      return mockFetch(input, init)
+    }
+    globalThis.fetch = noEarningsFetch
+
+    try {
+      const { data, result } = await importFromUsername(createEmptyData(), 'testuser')
+
+      expect(result.passesWithNoEarnings).toEqual([
+        expect.objectContaining({
+          name: 'Test Player',
+          sport: 'NBA',
+          externalKey: '100|2026|NBA',
+          passKind: 'player',
+        }),
+      ])
+      expect(result.errors.some((error) => error.includes('no daily earnings'))).toBe(true)
+      expect(getFailedPlayerPasses(result)).toEqual([
+        expect.objectContaining({
+          name: 'Test Player',
+          sport: 'NBA',
+          reason: 'no_earnings',
+        }),
+      ])
+      expect(data.cards.find((card) => card.externalKey === '100|2026|NBA')).toBeDefined()
+      expect(data.performances.filter((perf) => perf.cardId === data.cards[0]?.id)).toHaveLength(0)
     } finally {
       globalThis.fetch = originalFetch
     }

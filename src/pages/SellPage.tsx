@@ -1,14 +1,41 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
-import { sortCards } from '../lib/cardSort'
+import { sortCards, type RarityFilterValue, type SortDirection } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRax } from '../lib/format'
-import { analyzeRemovedCard, computeSaleComparison, formatRemoveCardSummary, formatSignedRax } from '../lib/removeCardAnalysis'
+import { isPlayerPassForSell } from '../lib/passKind'
+import { RARITY_TIERS } from '../lib/rarityFilter'
+import {
+  analyzeRemovedCard,
+  computeSaleComparison,
+  formatRemoveCardSummary,
+  formatSignedRax,
+  isNotNeededForClaims,
+  rankAllRemovedCardsAsync,
+  type SellRankProgress,
+} from '../lib/removeCardAnalysis'
+import {
+  filterSellRankRows,
+  SELL_RANK_SORT_OPTIONS,
+  sortSellRankRows,
+  type SellRankSortKey,
+} from '../lib/sellRankings'
 import { useRaxData } from '../context/RaxDataContext'
+import { SPORTS, type Sport } from '../types/rax'
 
 const CARD_SEARCH_LIMIT = 50
+const SELL_RANK_PAGE_SIZE = 50
+
+function paginate<T>(items: T[], page: number, pageSize: number): T[] {
+  const start = (page - 1) * pageSize
+  return items.slice(start, start + pageSize)
+}
+
+function pageCount(count: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(count / pageSize))
+}
 
 function matchesCardSearch(
   query: string,
@@ -33,20 +60,43 @@ function matchesCardSearch(
 }
 
 export default function SellPage() {
-  const { data } = useRaxData()
+  const { data, saveSellRankings, clearSellRankings } = useRaxData()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedCardId = searchParams.get('card') ?? ''
   const [salePrice, setSalePrice] = useState('')
   const [cardQuery, setCardQuery] = useState('')
+  const [rankSportFilter, setRankSportFilter] = useState<Sport | 'All'>('All')
+  const [rankRarityFilter, setRankRarityFilter] = useState<RarityFilterValue>('All')
+  const [rankSortKey, setRankSortKey] = useState<SellRankSortKey>('netClaimable')
+  const [rankSortDirection, setRankSortDirection] = useState<SortDirection>('desc')
+  const [rankQuery, setRankQuery] = useState('')
+  const [rankingInProgress, setRankingInProgress] = useState(false)
+  const [rankProgress, setRankProgress] = useState<SellRankProgress | null>(null)
+  const [rankStatus, setRankStatus] = useState('')
+  const [rankResultsPage, setRankResultsPage] = useState(1)
+  const [skippedPassesPage, setSkippedPassesPage] = useState(1)
+  const rankAbortRef = useRef<AbortController | null>(null)
+
+  const savedRankings = data.savedSellRankings
 
   const rollup = useMemo(() => {
     const results = computeClaimDayResults(data)
     return computeYearRollup(data, results)
   }, [data])
 
-  const sortedCards = useMemo(
-    () => sortCards(rollup.cards, 'name', 'asc', null),
+  const playerCards = useMemo(
+    () => rollup.cards.filter((row) => isPlayerPassForSell(row.card)),
     [rollup.cards],
+  )
+
+  const sortedCards = useMemo(
+    () => sortCards(playerCards, 'name', 'asc', null),
+    [playerCards],
+  )
+
+  const selectedCard = useMemo(
+    () => data.cards.find((card) => card.id === selectedCardId),
+    [data.cards, selectedCardId],
   )
 
   const filteredCards = useMemo(() => {
@@ -73,8 +123,11 @@ export default function SellPage() {
   )
 
   const sellAnalysis = useMemo(
-    () => (selectedCardId ? analyzeRemovedCard(data, selectedCardId) : null),
-    [data, selectedCardId],
+    () =>
+      selectedCardId && selectedCard && isPlayerPassForSell(selectedCard)
+        ? analyzeRemovedCard(data, selectedCardId)
+        : null,
+    [data, selectedCard, selectedCardId],
   )
 
   const parsedSalePrice = Number(salePrice.replace(/,/g, ''))
@@ -96,6 +149,92 @@ export default function SellPage() {
     setSearchParams({ card: cardId })
   }
 
+  const runBulkRanking = async () => {
+    rankAbortRef.current?.abort()
+    const controller = new AbortController()
+    rankAbortRef.current = controller
+    setRankingInProgress(true)
+    setRankProgress(null)
+    setRankStatus('')
+    setRankResultsPage(1)
+    setSkippedPassesPage(1)
+
+    try {
+      const result = await rankAllRemovedCardsAsync(data, {
+        signal: controller.signal,
+        onProgress: setRankProgress,
+      })
+      saveSellRankings(result)
+      const skippedCount = result.skippedPlayerPasses.length
+      setRankStatus(
+        `Ranked ${result.rankings.length} player pass${result.rankings.length === 1 ? '' : 'es'}${
+          skippedCount > 0
+            ? ` · ${skippedCount} player pass${skippedCount === 1 ? '' : 'es'} skipped`
+            : ''
+        }.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setRankStatus('Ranking cancelled.')
+      } else {
+        setRankStatus(error instanceof Error ? error.message : 'Ranking failed.')
+      }
+    } finally {
+      setRankingInProgress(false)
+      setRankProgress(null)
+      rankAbortRef.current = null
+    }
+  }
+
+  const cancelBulkRanking = () => {
+    rankAbortRef.current?.abort()
+  }
+
+  const displayedRankings = useMemo(() => {
+    if (!savedRankings) return []
+    const filtered = filterSellRankRows(
+      savedRankings.rows,
+      rankSportFilter,
+      rankRarityFilter,
+      rankQuery,
+    )
+    return sortSellRankRows(filtered, rankSortKey, rankSortDirection)
+  }, [rankQuery, rankRarityFilter, rankSortDirection, rankSortKey, rankSportFilter, savedRankings])
+
+  useEffect(() => {
+    setRankResultsPage(1)
+  }, [rankQuery, rankRarityFilter, rankSortDirection, rankSortKey, rankSportFilter])
+
+  const paginatedRankings = useMemo(
+    () => paginate(displayedRankings, rankResultsPage, SELL_RANK_PAGE_SIZE),
+    [displayedRankings, rankResultsPage],
+  )
+
+  const rankResultsPageTotal = pageCount(displayedRankings.length, SELL_RANK_PAGE_SIZE)
+  const rankResultsOffset = (rankResultsPage - 1) * SELL_RANK_PAGE_SIZE
+
+  const skippedPlayerPasses = savedRankings?.skippedPlayerPasses ?? []
+
+  const paginatedSkippedPasses = useMemo(
+    () => paginate(skippedPlayerPasses, skippedPassesPage, SELL_RANK_PAGE_SIZE),
+    [skippedPassesPage, skippedPlayerPasses],
+  )
+
+  const skippedPassesPageTotal = pageCount(skippedPlayerPasses.length, SELL_RANK_PAGE_SIZE)
+
+  const bulkSkipHint = savedRankings
+    ? [
+        savedRankings.skippedTeamPasses > 0
+          ? `${savedRankings.skippedTeamPasses} team pass${savedRankings.skippedTeamPasses === 1 ? '' : 'es'} excluded`
+          : '',
+        savedRankings.skippedWithoutEarnings > 0
+          ? `${savedRankings.skippedWithoutEarnings} player pass${savedRankings.skippedWithoutEarnings === 1 ? '' : 'es'} skipped (no earnings)`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : ''
+
   const searchHint =
     sortedCards.length === 0
       ? 'Add cards on Entry first.'
@@ -111,14 +250,290 @@ export default function SellPage() {
           <h2>If you sell this pass</h2>
           <p>
             See how much claimable RAX you lose, what opens up on other cards, and whether a sale
-            price beats keeping the pass. Uses the same guaranteed / overlap / Pro bonus rules as
-            the rest of the tracker.
+            price beats keeping the pass. Player passes only — team passes are excluded. Uses the
+            same guaranteed / overlap / Pro bonus rules as the rest of the tracker.
           </p>
         </div>
         <Link className="button" to="/cards">
           Card totals
         </Link>
       </section>
+
+      <CollapsiblePanel
+        title="Rank all passes"
+        description="Scan player passes with earnings on demand — sorted by highest net claimable if sold."
+        defaultOpen={false}
+      >
+        <p className="import-hint">
+          Player passes only. Team passes are excluded. Net claimable 0 means the pass is not
+          needed for your collection claims — selling it would not reduce total claimable RAX.
+        </p>
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={sortedCards.length === 0 || rankingInProgress}
+            onClick={() => void runBulkRanking()}
+          >
+            {rankingInProgress
+              ? 'Calculating…'
+              : savedRankings
+                ? 'Recalculate rankings'
+                : 'Calculate rankings'}
+          </button>
+          {rankingInProgress ? (
+            <button className="button" type="button" onClick={cancelBulkRanking}>
+              Cancel
+            </button>
+          ) : null}
+          {savedRankings && !rankingInProgress ? (
+            <button className="button" type="button" onClick={clearSellRankings}>
+              Clear results
+            </button>
+          ) : null}
+        </div>
+        {rankProgress ? (
+          <p className="import-progress">
+            Analyzing pass {rankProgress.current}/{rankProgress.total} — {rankProgress.label}
+          </p>
+        ) : null}
+        {rankStatus ? <p className="import-status">{rankStatus}</p> : null}
+        {savedRankings ? (
+          savedRankings.rows.length === 0 ? (
+            <p className="empty">
+              No player passes with earnings to rank.
+              {bulkSkipHint ? ` ${bulkSkipHint}.` : ''}
+            </p>
+          ) : (
+            <>
+              <p className="import-hint">
+                Saved {new Date(savedRankings.calculatedAt).toLocaleString()} ·{' '}
+                {displayedRankings.length} shown of {savedRankings.rows.length} ranked pass
+                {savedRankings.rows.length === 1 ? '' : 'es'}.
+                {bulkSkipHint ? ` ${bulkSkipHint}.` : ''}
+              </p>
+              {skippedPlayerPasses.length > 0 ? (
+                <section className="import-failures">
+                  <p className="import-hint">
+                    <strong>
+                      {skippedPlayerPasses.length} player pass
+                      {skippedPlayerPasses.length === 1 ? '' : 'es'} could not be ranked.
+                    </strong>{' '}
+                    Add earnings on <Link to="/entry">Entry</Link> or re-import the pass.
+                  </p>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Player pass</th>
+                          <th>Sport</th>
+                          <th>Season</th>
+                          <th>Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSkippedPasses.map((pass) => (
+                          <tr key={`${pass.cardId}|${pass.reason}|${pass.detail}`}>
+                            <td>
+                              <button
+                                className="link-button"
+                                type="button"
+                                onClick={() => selectCard(pass.cardId)}
+                              >
+                                {pass.name || 'Unnamed pass'}
+                              </button>
+                              {pass.rarityLabel ? (
+                                <>
+                                  <br />
+                                  <small className="table-sub">{pass.rarityLabel}</small>
+                                </>
+                              ) : null}
+                            </td>
+                            <td>{pass.sport}</td>
+                            <td>{pass.season || '—'}</td>
+                            <td>
+                              {pass.reason === 'no_earnings' ? 'No earnings' : 'Analysis failed'}
+                              <br />
+                              <small className="table-sub">{pass.detail}</small>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {skippedPlayerPasses.length > SELL_RANK_PAGE_SIZE ? (
+                    <div className="table-pagination">
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={skippedPassesPage <= 1}
+                        onClick={() => setSkippedPassesPage((page) => page - 1)}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {skippedPassesPage} of {skippedPassesPageTotal}
+                      </span>
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={skippedPassesPage >= skippedPassesPageTotal}
+                        onClick={() => setSkippedPassesPage((page) => page + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+              <div className="sort-controls">
+                <label className="field inline-field rank-search-field">
+                  <span>Search</span>
+                  <input
+                    type="search"
+                    value={rankQuery}
+                    placeholder="Player name, sport, season…"
+                    onChange={(event) => setRankQuery(event.target.value)}
+                  />
+                </label>
+                <label className="field inline-field">
+                  <span>Sport</span>
+                  <select
+                    value={rankSportFilter}
+                    onChange={(event) => setRankSportFilter(event.target.value as Sport | 'All')}
+                  >
+                    <option value="All">All sports</option>
+                    {SPORTS.map((sport) => (
+                      <option key={sport} value={sport}>
+                        {sport}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Rarity</span>
+                  <select
+                    value={rankRarityFilter}
+                    onChange={(event) =>
+                      setRankRarityFilter(event.target.value as RarityFilterValue)
+                    }
+                  >
+                    <option value="All">All rarities</option>
+                    <option value="Legendary+">Legendary+</option>
+                    {RARITY_TIERS.map((tier) => (
+                      <option key={tier} value={tier}>
+                        {tier}
+                      </option>
+                    ))}
+                    <option value="Unknown">Unknown</option>
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Sort by</span>
+                  <select
+                    value={rankSortKey}
+                    onChange={(event) => setRankSortKey(event.target.value as SellRankSortKey)}
+                  >
+                    {SELL_RANK_SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Direction</span>
+                  <select
+                    value={rankSortDirection}
+                    onChange={(event) => setRankSortDirection(event.target.value as SortDirection)}
+                  >
+                    <option value="desc">High to low</option>
+                    <option value="asc">Low to high</option>
+                  </select>
+                </label>
+              </div>
+              {displayedRankings.length === 0 ? (
+                <p className="empty">No ranked passes match the current filters.</p>
+              ) : (
+                <>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player pass</th>
+                        <th>Sport</th>
+                        <th>Claimable now</th>
+                        <th>Lost if sold</th>
+                        <th>Freed on others</th>
+                        <th>Net claimable</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedRankings.map((row, index) => (
+                        <tr key={row.cardId}>
+                          <td>{rankResultsOffset + index + 1}</td>
+                          <td>
+                            <button
+                              className="link-button"
+                              type="button"
+                              onClick={() => selectCard(row.cardId)}
+                            >
+                              {row.name || 'Unnamed pass'}
+                            </button>
+                            <small className="table-sub">
+                              {row.season || 'No season'}
+                              {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                            </small>
+                          </td>
+                          <td>{row.sport}</td>
+                          <td>{formatRax(displayRaxValue(row.claimableNow))}</td>
+                          <td>{formatRax(displayRaxValue(row.lostClaimableRax))}</td>
+                          <td>{formatRax(displayRaxValue(row.freedClaimableRax))}</td>
+                          <td>
+                            <strong>
+                              {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                            </strong>
+                            {isNotNeededForClaims(row.netClaimableDelta) ? (
+                              <small className="table-sub sell-not-needed">Not needed</small>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {displayedRankings.length > SELL_RANK_PAGE_SIZE ? (
+                  <div className="table-pagination">
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={rankResultsPage <= 1}
+                      onClick={() => setRankResultsPage((page) => page - 1)}
+                    >
+                      Previous
+                    </button>
+                    <span>
+                      Page {rankResultsPage} of {rankResultsPageTotal}
+                    </span>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={rankResultsPage >= rankResultsPageTotal}
+                      onClick={() => setRankResultsPage((page) => page + 1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
+                </>
+              )}
+            </>
+          )
+        ) : (
+          <p className="empty">Click calculate to rank passes with earnings by net claimable if sold.</p>
+        )}
+      </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Choose a pass"
@@ -174,7 +589,13 @@ export default function SellPage() {
 
       {!selectedCardId ? (
         <section className="panel">
-          <p className="empty">Pick a pass above to simulate selling it.</p>
+          <p className="empty">Pick a player pass above to simulate selling it.</p>
+        </section>
+      ) : selectedCard && !isPlayerPassForSell(selectedCard) ? (
+        <section className="panel">
+          <p className="empty">
+            Team passes are excluded from If sold. Pick a player pass above to analyze a sale.
+          </p>
         </section>
       ) : !sellAnalysis ? (
         <section className="panel">
@@ -184,9 +605,19 @@ export default function SellPage() {
         <CollapsiblePanel
           title={sellAnalysis.card.name}
           description={`${sellAnalysis.card.sport} · ${sellAnalysis.card.season || 'No season'}${sellAnalysis.card.rarityLabel ? ` · ${sellAnalysis.card.rarityLabel}` : ''}`}
-          badge={`Net ${formatRax(displayRaxValue(sellAnalysis.netClaimableDelta))}`}
+          badge={
+            isNotNeededForClaims(sellAnalysis.netClaimableDelta)
+              ? 'Not needed'
+              : `Net ${formatRax(displayRaxValue(sellAnalysis.netClaimableDelta))}`
+          }
           defaultOpen
         >
+          {isNotNeededForClaims(sellAnalysis.netClaimableDelta) ? (
+            <p className="sell-not-needed-callout">
+              Net claimable is 0 — this pass is not needed for your collection claims. Selling it
+              would not reduce your total claimable RAX.
+            </p>
+          ) : null}
           <div className="stats-grid">
             <article className="stat-card panel">
               <span>Lost claimable</span>
@@ -203,7 +634,11 @@ export default function SellPage() {
             <article className="stat-card panel">
               <span>Net claimable</span>
               <strong>{formatRax(displayRaxValue(sellAnalysis.netClaimableDelta))}</strong>
-              <small className="table-sub">collection-wide change</small>
+              <small className="table-sub">
+                {isNotNeededForClaims(sellAnalysis.netClaimableDelta)
+                  ? 'not needed for claims'
+                  : 'collection-wide change'}
+              </small>
             </article>
             <article className="stat-card panel">
               <span>Overlap only</span>

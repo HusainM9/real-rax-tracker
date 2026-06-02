@@ -78,6 +78,36 @@ export type SavedCardProfile = {
   updatedAt: string
 }
 
+export type SavedSellRankRow = {
+  cardId: string
+  name: string
+  sport: Sport
+  season: string
+  rarityLabel?: string
+  claimableNow: number
+  lostClaimableRax: number
+  freedClaimableRax: number
+  netClaimableDelta: number
+}
+
+export type SavedSkippedSellRankPass = {
+  cardId: string
+  name: string
+  sport: Sport
+  season: string
+  rarityLabel?: string
+  reason: 'no_earnings' | 'analysis_failed'
+  detail: string
+}
+
+export type SavedSellRankings = {
+  calculatedAt: string
+  skippedWithoutEarnings: number
+  skippedTeamPasses: number
+  skippedPlayerPasses: SavedSkippedSellRankPass[]
+  rows: SavedSellRankRow[]
+}
+
 export type AppSettings = {
   proBonusEnabled: boolean
   savedUsername: string
@@ -90,6 +120,7 @@ export type RaxTrackerData = {
   performances: RaxPerformance[]
   potentialCards: SavedPotentialCard[]
   savedCardProfiles: SavedCardProfile[]
+  savedSellRankings?: SavedSellRankings | null
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

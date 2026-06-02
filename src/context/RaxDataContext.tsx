@@ -25,6 +25,8 @@ import {
   type UsernameImportResult,
 } from '../lib/usernameImport'
 import { createId } from '../lib/id'
+import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
+import { buildSavedSellRankings } from '../lib/sellRankings'
 import type {
   AppSettings,
   PlayerCard,
@@ -69,6 +71,8 @@ type RaxDataContextValue = {
   saveCardProfile: (cardId: string, rawJson?: string) => void
   restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
   deleteCardProfile: (profileId: string) => void
+  saveSellRankings: (result: BulkSellRankResult) => void
+  clearSellRankings: () => void
   exportJson: () => string
   importJson: (json: string) => void
   importFromUsername: (
@@ -305,6 +309,18 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         setData((current) => ({
           ...current,
           savedCardProfiles: current.savedCardProfiles.filter((profile) => profile.id !== profileId),
+        }))
+      },
+      saveSellRankings: (result) => {
+        setData((current) => ({
+          ...current,
+          savedSellRankings: buildSavedSellRankings(result, nowIso()),
+        }))
+      },
+      clearSellRankings: () => {
+        setData((current) => ({
+          ...current,
+          savedSellRankings: null,
         }))
       },
       exportJson: () => exportTrackerData(data),

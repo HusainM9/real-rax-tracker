@@ -208,6 +208,12 @@ export default function HelpPage() {
             the app URL. It does not sync or isolate data between people — each browser keeps
             its own collection.
           </li>
+          <li>
+            <strong>Operator logging.</strong> When a username import skips a player pass because
+            realapp.tools returned no daily earnings, the app can report that event to a central
+            log (production only). Operators use the unlisted <code>/admin</code> area to review
+            Real @usernames and import gaps — not your card list or RAX totals.
+          </li>
         </ul>
       </section>
     </div>

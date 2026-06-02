@@ -74,7 +74,12 @@ For production access control (Vercel only, set in the Vercel dashboard):
 ```
 BASIC_AUTH_PASSWORD=
 AUTH_SESSION_SECRET=
+ADMIN_PASSWORD=
+KV_REST_API_URL=
+KV_REST_API_TOKEN=
 ```
+
+`ADMIN_PASSWORD` gates the unlisted `/admin` operator area (requires a normal site login first). `KV_*` vars come from linking a **Vercel KV** or **Redis** store to the project — used for a central import event log (passes skipped for no earnings, etc.). Without KV, the app works normally; admin logs stay empty.
 
 ## Deployment (Vercel)
 
@@ -90,8 +95,19 @@ This app builds to static files in `dist/`. Production hosting is configured for
 4. **Environment variables** (Vercel → Project → Settings → Environment Variables):
    - `BASIC_AUTH_PASSWORD` — shared site password — view/rotate in Vercel dashboard only
    - `AUTH_SESSION_SECRET` — random string for signing login cookies (recommended; falls back to password if unset)
+   - `ADMIN_PASSWORD` — separate password for `/admin` (operator event log)
+   - **Vercel KV / Redis** — create a store in the Vercel dashboard and link it to this project (injects `KV_REST_API_URL` and `KV_REST_API_TOKEN`)
    - Optional: `VITE_MEOWBOT_SUPABASE_URL`, `VITE_MEOWBOT_SUPABASE_KEY`
 5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) + [`/api/auth/*`](api/auth/login.ts) enforce a signed session cookie after users sign in on the [`/login`](src/pages/LoginPage.tsx) page.
+
+### Admin event log (optional)
+
+1. Link a Vercel KV or Redis store to the project.
+2. Set `ADMIN_PASSWORD` in Vercel env.
+3. After deploy, sign in normally, then open `/admin/login` and enter the admin password.
+4. Run a username import that hits a player pass with no daily earnings; confirm `pass_no_earnings` appears under **Logs** on `/admin`.
+
+Browsers POST events in production only (not during `npm run dev`). Admin sees Real @usernames and reported import events — not other users' card data.
 
 ### GitHub setup
 
