@@ -1,3 +1,5 @@
+import { CALENDAR_MONTH_NAMES } from './calendarView'
+import { monthIndexFromClaimDay } from './claimDayKey'
 import { computeClaimDayResults } from './claimOptimizer'
 import type { ParsedRealAppToolsRow } from './realAppToolsImport'
 import type { ClaimCandidate, PlayerCard, RaxTrackerData, Sport } from '../types/rax'
@@ -34,6 +36,23 @@ function buildClaimableByKey(data: RaxTrackerData): Map<string, ClaimCandidate['
   return claimable
 }
 
+export type PotentialMonthlyNet = {
+  monthIdx: number
+  month: string
+  potentialGain: number
+  displacedLoss: number
+  netDelta: number
+}
+
+export type DisplacedCardSummary = {
+  cardId: string
+  name: string
+  sport: Sport
+  season: string
+  daysDisplaced: number
+  raxLost: number
+}
+
 export type PotentialAnalysisResult = {
   candidates: Array<{ day: ReturnType<typeof computeClaimDayResults>[number]; candidate: ClaimCandidate }>
   claimableRax: number
@@ -44,6 +63,75 @@ export type PotentialAnalysisResult = {
     previousStatus: Exclude<ClaimCandidate['status'], 'overlap'>
   }>
   displacedRax: number
+  displacedByCard: DisplacedCardSummary[]
+  monthlyNet: PotentialMonthlyNet[]
+}
+
+export function summarizeDisplacedByCard(
+  displacedExisting: PotentialAnalysisResult['displacedExisting'],
+): DisplacedCardSummary[] {
+  const byCard = new Map<string, DisplacedCardSummary>()
+
+  for (const { candidate } of displacedExisting) {
+    const existing = byCard.get(candidate.card.id)
+    if (existing) {
+      existing.daysDisplaced += 1
+      existing.raxLost += candidate.performance.raxEarned
+      continue
+    }
+
+    byCard.set(candidate.card.id, {
+      cardId: candidate.card.id,
+      name: candidate.card.name,
+      sport: candidate.card.sport,
+      season: candidate.card.season,
+      daysDisplaced: 1,
+      raxLost: candidate.performance.raxEarned,
+    })
+  }
+
+  return [...byCard.values()].sort(
+    (a, b) => b.raxLost - a.raxLost || a.name.localeCompare(b.name),
+  )
+}
+
+function addMonthlyRax(
+  buckets: Map<number, { gain: number; loss: number }>,
+  claimDay: string,
+  field: 'gain' | 'loss',
+  rax: number,
+): void {
+  const monthIdx = monthIndexFromClaimDay(claimDay)
+  if (monthIdx < 0) return
+  const bucket = buckets.get(monthIdx) ?? { gain: 0, loss: 0 }
+  bucket[field] += rax
+  buckets.set(monthIdx, bucket)
+}
+
+export function buildPotentialMonthlyNet(
+  potentialCandidates: PotentialAnalysisResult['candidates'],
+  displacedExisting: PotentialAnalysisResult['displacedExisting'],
+): PotentialMonthlyNet[] {
+  const buckets = new Map<number, { gain: number; loss: number }>()
+
+  for (const { candidate } of potentialCandidates) {
+    if (candidate.status === 'overlap') continue
+    addMonthlyRax(buckets, candidate.performance.claimDay, 'gain', candidate.performance.raxEarned)
+  }
+
+  for (const { candidate } of displacedExisting) {
+    addMonthlyRax(buckets, candidate.performance.claimDay, 'loss', candidate.performance.raxEarned)
+  }
+
+  return [...buckets.entries()]
+    .map(([monthIdx, { gain, loss }]) => ({
+      monthIdx,
+      month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
+      potentialGain: gain,
+      displacedLoss: loss,
+      netDelta: gain - loss,
+    }))
+    .sort((a, b) => a.monthIdx - b.monthIdx)
 }
 
 export function analyzePotentialCard(
@@ -122,5 +210,7 @@ export function analyzePotentialCard(
       .reduce((sum, { candidate }) => sum + candidate.performance.raxEarned, 0),
     displacedExisting,
     displacedRax,
+    displacedByCard: summarizeDisplacedByCard(displacedExisting),
+    monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting),
   }
 }

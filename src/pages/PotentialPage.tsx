@@ -1,8 +1,9 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
-import { analyzePotentialCard } from '../lib/potentialAnalysis'
+import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
+import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
@@ -15,6 +16,287 @@ const EMPTY_FORM = {
   notes: '',
   rawJson: '',
   previewAs: '',
+}
+
+function CollapsibleAnalysisSection({
+  label,
+  children,
+  defaultOpen = false,
+}: {
+  label: string
+  children: ReactNode
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="overlap-section">
+      <button
+        type="button"
+        className="overlap-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="overlap-toggle-chevron" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span>{label}</span>
+      </button>
+      {open ? <div className="overlap-list">{children}</div> : null}
+    </div>
+  )
+}
+
+function PotentialAnalysisResults({
+  analysis,
+  previewAs,
+}: {
+  analysis: PotentialAnalysisResult
+  previewAs: string
+}) {
+  const netCollectionDelta = analysis.claimableRax - analysis.displacedRax
+  const displacedCardCount = analysis.displacedByCard.length
+
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <h2>Analysis result</h2>
+          <p className="import-hint">
+            How this pass would affect your collection&apos;s claimable RAX (top 2 per sport + Pro
+            bonus rules).
+            {previewAs ? (
+              <>
+                {' '}
+                OTD preview: <strong>{previewAs}</strong>.
+              </>
+            ) : null}
+          </p>
+        </div>
+        <span className="badge">{formatSignedRax(displayRaxValue(netCollectionDelta))} net</span>
+      </div>
+
+      <div className="stats-grid potential-summary-grid">
+        <article className="stat-card panel">
+          <span>New card — claimable</span>
+          <strong>{formatRax(displayRaxValue(analysis.claimableRax))}</strong>
+          <small className="table-sub">Would count in your collection</small>
+        </article>
+        <article className="stat-card panel">
+          <span>New card — overlap only</span>
+          <strong>{formatRax(displayRaxValue(analysis.overlapRax))}</strong>
+          <small className="table-sub">Would not count if added</small>
+        </article>
+        <article className="stat-card panel">
+          <span>Existing cards lost</span>
+          <strong className="sale-negative">
+            −{formatRax(displayRaxValue(analysis.displacedRax))}
+          </strong>
+          <small className="table-sub">
+            {displacedCardCount} card{displacedCardCount === 1 ? '' : 's'} pushed to overlap
+          </small>
+        </article>
+        <article className="stat-card panel">
+          <span>Net collection change</span>
+          <strong
+            className={
+              netCollectionDelta > 0
+                ? 'sale-positive'
+                : netCollectionDelta < 0
+                  ? 'sale-negative'
+                  : ''
+            }
+          >
+            {formatSignedRax(displayRaxValue(netCollectionDelta))}
+          </strong>
+          <small className="table-sub">Claimable added − displaced</small>
+        </article>
+      </div>
+
+      <CollapsibleAnalysisSection
+        defaultOpen
+        label={
+          displacedCardCount === 0
+            ? 'Most displaced existing cards (none)'
+            : `Most displaced existing cards (${displacedCardCount}) · −${formatRax(displayRaxValue(analysis.displacedRax))} RAX lost`
+        }
+      >
+        {displacedCardCount === 0 ? (
+          <p className="empty overlap-empty">No currently claimable cards would be pushed to overlap.</p>
+        ) : (
+          <>
+            <p className="import-hint">Ranked by total claimable RAX lost across OTD days.</p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Card</th>
+                    <th>Sport</th>
+                    <th>Days displaced</th>
+                    <th>RAX lost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analysis.displacedByCard.map((row, index) => (
+                    <tr key={row.cardId}>
+                      <td>{index + 1}</td>
+                      <td>
+                        {row.name}
+                        {row.season ? (
+                          <>
+                            <br />
+                            <small className="table-sub">{row.season}</small>
+                          </>
+                        ) : null}
+                      </td>
+                      <td>{row.sport}</td>
+                      <td>{row.daysDisplaced}</td>
+                      <td>
+                        <strong className="sale-negative">
+                          −{formatRax(displayRaxValue(row.raxLost))}
+                        </strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>
+                      <strong>Total</strong>
+                    </td>
+                    <td>
+                      {analysis.displacedByCard.reduce((sum, row) => sum + row.daysDisplaced, 0)}
+                    </td>
+                    <td>
+                      <strong className="sale-negative">
+                        −{formatRax(displayRaxValue(analysis.displacedRax))}
+                      </strong>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        )}
+      </CollapsibleAnalysisSection>
+
+      {analysis.monthlyNet.length > 0 ? (
+        <CollapsibleAnalysisSection
+          defaultOpen
+          label={`Net claimable by month (${analysis.monthlyNet.length}) · ${formatSignedRax(displayRaxValue(netCollectionDelta))} total`}
+        >
+          <p className="import-hint">
+            Per calendar month: claimable from the new card minus existing cards pushed to overlap.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Net change</th>
+                  <th>New card adds</th>
+                  <th>Displaced</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analysis.monthlyNet.map((row) => (
+                  <tr key={row.monthIdx}>
+                    <td>{row.month}</td>
+                    <td>
+                      <strong
+                        className={
+                          row.netDelta > 0
+                            ? 'sale-positive'
+                            : row.netDelta < 0
+                              ? 'sale-negative'
+                              : ''
+                        }
+                      >
+                        {formatSignedRax(displayRaxValue(row.netDelta))} RAX
+                      </strong>
+                    </td>
+                    <td>
+                      {row.potentialGain > 0
+                        ? `+${formatRax(displayRaxValue(row.potentialGain))}`
+                        : '—'}
+                    </td>
+                    <td>
+                      {row.displacedLoss > 0
+                        ? `−${formatRax(displayRaxValue(row.displacedLoss))}`
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleAnalysisSection>
+      ) : null}
+
+      <section className="content-grid">
+        <div>
+          <CollapsibleAnalysisSection
+            label={`Potential card days (${analysis.candidates.length}) · ${formatRax(displayRaxValue(analysis.claimableRax))} claimable · ${formatRax(displayRaxValue(analysis.overlapRax))} overlap`}
+          >
+            <div className="list">
+              {analysis.candidates.map(({ day, candidate }) => (
+                <div
+                  className={`list-row claim-row ${candidate.status}`}
+                  key={candidate.performance.id}
+                >
+                  <span>
+                    <strong>{formatClaimDay(day.claimDay)}</strong>
+                    <small>
+                      {candidate.status === 'overlap'
+                        ? 'Would be overlapped'
+                        : candidate.status === 'pro-bonus'
+                          ? 'Would use Pro bonus'
+                          : `Would be top-${candidate.rankInSport} in ${candidate.card.sport}`}
+                    </small>
+                  </span>
+                  <b>{formatRax(candidate.performance.raxEarned)} RAX</b>
+                </div>
+              ))}
+            </div>
+          </CollapsibleAnalysisSection>
+        </div>
+
+        <div>
+          <CollapsibleAnalysisSection
+            label={
+              analysis.displacedExisting.length === 0
+                ? 'Existing cards displaced (0)'
+                : `Existing cards displaced (${analysis.displacedExisting.length}) · ${formatRax(displayRaxValue(analysis.displacedRax))} RAX lost`
+            }
+          >
+            {analysis.displacedExisting.length === 0 ? (
+              <p className="empty overlap-empty">No currently claimable cards would be pushed out.</p>
+            ) : (
+              <div className="list">
+                {analysis.displacedExisting.map(({ day, candidate, previousStatus }) => (
+                  <Link
+                    className="list-row claim-row overlap"
+                    to={`/calendar?monthDay=${day.claimDay}`}
+                    key={`${day.claimDay}-${candidate.performance.id}`}
+                  >
+                    <span>
+                      <strong>{candidate.card.name}</strong>
+                      <small>
+                        {formatClaimDay(day.claimDay)} · was{' '}
+                        {previousStatus === 'pro-bonus' ? 'Pro bonus' : 'guaranteed'} · now overlap
+                      </small>
+                    </span>
+                    <b>{formatRax(candidate.performance.raxEarned)} RAX lost</b>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CollapsibleAnalysisSection>
+        </div>
+      </section>
+    </section>
+  )
 }
 
 export default function PotentialPage() {
@@ -331,82 +613,7 @@ export default function PotentialPage() {
       </form>
 
       {potentialAnalysis ? (
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <h2>Analysis result</h2>
-              <p>
-                {formatRax(displayRaxValue(potentialAnalysis.claimableRax))} claimable
-                · {formatRax(displayRaxValue(potentialAnalysis.overlapRax))}{' '}
-                overlapped for this card ·{' '}
-                {formatRax(
-                  displayRaxValue(
-                    potentialAnalysis.claimableRax - potentialAnalysis.displacedRax,
-                  ),
-                )}{' '}
-                net claimable change after displaced cards.
-                {form.previewAs ? (
-                  <>
-                    {' '}
-                    OTD preview: <strong>{form.previewAs}</strong>.
-                  </>
-                ) : null}
-              </p>
-            </div>
-            <span className="badge">
-              {potentialAnalysis.displacedExisting.length} existing card
-              {potentialAnalysis.displacedExisting.length === 1 ? '' : 's'} displaced
-            </span>
-          </div>
-          <section className="content-grid">
-            <div>
-              <p className="mini-heading">Potential card days</p>
-              <div className="list">
-                {potentialAnalysis.candidates.map(({ day, candidate }) => (
-                  <div className={`list-row claim-row ${candidate.status}`} key={candidate.performance.id}>
-                    <span>
-                      <strong>{formatClaimDay(day.claimDay)}</strong>
-                      <small>
-                        {candidate.status === 'overlap'
-                          ? 'Would be overlapped'
-                          : candidate.status === 'pro-bonus'
-                            ? 'Would use Pro bonus'
-                            : `Would be top-${candidate.rankInSport} in ${candidate.card.sport}`}
-                      </small>
-                    </span>
-                    <b>{formatRax(candidate.performance.raxEarned)} RAX</b>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="mini-heading">Existing cards displaced</p>
-              {potentialAnalysis.displacedExisting.length === 0 ? (
-                <p className="empty">No currently claimable cards would be pushed out.</p>
-              ) : (
-                <div className="list">
-                  {potentialAnalysis.displacedExisting.map(({ day, candidate, previousStatus }) => (
-                    <Link
-                      className="list-row claim-row overlap"
-                      to={`/calendar?monthDay=${day.claimDay}`}
-                      key={`${day.claimDay}-${candidate.performance.id}`}
-                    >
-                      <span>
-                        <strong>{candidate.card.name}</strong>
-                        <small>
-                          {formatClaimDay(day.claimDay)} · was{' '}
-                          {previousStatus === 'pro-bonus' ? 'Pro bonus' : 'guaranteed'} · now overlap
-                        </small>
-                      </span>
-                      <b>{formatRax(candidate.performance.raxEarned)} RAX lost</b>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </section>
+        <PotentialAnalysisResults analysis={potentialAnalysis} previewAs={form.previewAs} />
       ) : null}
     </div>
   )

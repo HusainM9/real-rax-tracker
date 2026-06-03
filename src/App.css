@@ -622,6 +622,26 @@ label.button input.sr-only {
   gap: 1rem;
 }
 
+.potential-summary-grid {
+  margin-bottom: 1rem;
+}
+
+.potential-summary-grid .stat-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.overlap-list .table-wrap tfoot td {
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+}
+
+.potential-summary-grid + .overlap-section,
+.overlap-section + .content-grid,
+.content-grid + .overlap-section {
+  margin-top: 0.85rem;
+}
+
 .panel {
   padding: 1.15rem 1.2rem;
 }
