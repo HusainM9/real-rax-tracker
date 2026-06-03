@@ -88,6 +88,109 @@ function parseDailyRow(
   }
 }
 
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
+function stripCodeFences(text: string): string {
+  const trimmed = text.trim()
+  const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(trimmed)
+  return fence ? fence[1]!.trim() : trimmed
+}
+
+/** Pull the first balanced {...} or [...] from a noisy paste (headers, labels, etc.). */
+function extractJsonSlice(text: string): string {
+  const startObj = text.indexOf('{')
+  const startArr = text.indexOf('[')
+  let start = -1
+  if (startObj >= 0 && (startArr < 0 || startObj < startArr)) start = startObj
+  else if (startArr >= 0) start = startArr
+  if (start < 0) return text
+
+  const open = text[start]!
+  const close = open === '{' ? '}' : ']'
+  let depth = 0
+  let inString = false
+  let escape = false
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!
+    if (inString) {
+      if (escape) escape = false
+      else if (ch === '\\') escape = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === open) depth++
+    else if (ch === close) {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+
+  return text.slice(start)
+}
+
+/** Fix partial DevTools copies that start with earnings": or rows": instead of {"earnings": */
+function repairRowsOrEarningsFragment(text: string): string | null {
+  const match = text.match(/^(?:"?)(rows|earnings)"?\s*:\s*([\s\S]+)$/i)
+  if (!match) return null
+
+  const key = match[1]!.toLowerCase()
+  let value = match[2]!.trim().replace(/,\s*$/, '')
+
+  if (value.endsWith('}') && value.startsWith('[')) {
+    value = value.replace(/\}\s*$/, '')
+  }
+
+  return `{"${key}": ${value}}`
+}
+
+export function normalizeRealAppToolsPaste(raw: string): string {
+  let text = stripCodeFences(stripBom(raw.trim()))
+
+  if (text.startsWith('{') || text.startsWith('[')) {
+    return text
+  }
+
+  const repaired = repairRowsOrEarningsFragment(text)
+  if (repaired) return repaired
+
+  if (text.includes('{') || text.includes('[')) {
+    text = extractJsonSlice(text)
+    if (text.startsWith('{') || text.startsWith('[')) return text
+    const repairedSlice = repairRowsOrEarningsFragment(text)
+    if (repairedSlice) return repairedSlice
+  }
+
+  return text
+}
+
+function parseRealAppToolsJson(text: string): unknown {
+  const normalized = normalizeRealAppToolsPaste(text)
+  const candidates = [normalized]
+  const trimmed = normalized.trim()
+
+  if (!trimmed.endsWith('}') && !trimmed.endsWith(']')) {
+    candidates.push(`${trimmed}}`, `${trimmed}]}`, `${trimmed}}}`)
+  }
+
+  let lastError: unknown
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate)
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError
+}
+
 function parseDailyRows(
   inputRows: RealAppToolsRow[],
   options: DailyRowImportOptions = {},
@@ -111,7 +214,20 @@ export function parseRealAppToolsRows(
   rawJson: string,
   options: DailyRowImportOptions = {},
 ): RealAppToolsParseResult {
-  const parsed = JSON.parse(rawJson) as unknown
+  let parsed: unknown
+  try {
+    parsed = parseRealAppToolsJson(rawJson)
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      const hint =
+        /earnings|rows/i.test(rawJson) && !rawJson.trim().startsWith('{')
+          ? ' Your paste looks like a partial copy — select the whole Response body starting with {.'
+          : ''
+      throw new Error(`Invalid JSON.${hint} (${error.message})`)
+    }
+    throw error
+  }
+
   const inputRows = getRows(parsed)
   if (inputRows.length === 0) {
     throw new Error(

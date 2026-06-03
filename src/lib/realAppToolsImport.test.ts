@@ -78,4 +78,38 @@ describe('parseRealAppToolsRows', () => {
     expect(result.rows[0]?.raxEarned).toBeGreaterThan(26)
     expect(result.skipped).toBe(0)
   })
+
+  it('repairs a partial paste that starts with earnings": instead of {"earnings":', () => {
+    const full = {
+      earnings: [{ day: '2025-08-22', earnings: 26, playerBoxScoreIds: [1] }],
+    }
+    const partial = JSON.stringify(full).slice(1)
+
+    const result = parseRealAppToolsRows(partial)
+
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0]?.claimDay).toBe('2025-08-22')
+  })
+
+  it('repairs a partial paste that starts with rows":', () => {
+    const full = {
+      rows: [{ day: '2025-09-13', earnings: 14, player_box_score_id: 99 }],
+    }
+    const partial = JSON.stringify(full).slice(1)
+
+    const result = parseRealAppToolsRows(partial)
+
+    expect(result.rows[0]?.claimDay).toBe('2025-09-13')
+  })
+
+  it('extracts JSON from text pasted around a response body', () => {
+    const body = JSON.stringify({
+      rows: [{ day: '2025-08-22', earnings: 26, player_box_score_id: 1 }],
+    })
+    const wrapped = `Response\n\n${body}\n\n200 OK`
+
+    const result = parseRealAppToolsRows(wrapped)
+
+    expect(result.rows).toHaveLength(1)
+  })
 })

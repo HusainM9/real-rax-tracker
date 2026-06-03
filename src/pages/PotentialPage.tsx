@@ -332,7 +332,11 @@ export default function PotentialPage() {
   const submitAnalyze = (event: FormEvent) => {
     event.preventDefault()
     try {
-      const parsed = parseRealAppToolsRows(form.rawJson)
+      const parsed = parseRealAppToolsRows(form.rawJson, {
+        sport: form.sport,
+        rarityLabel: form.previewAs,
+        applyOtdMultiplier: Boolean(form.previewAs),
+      })
       setPotentialRows(parsed.rows)
       setStatus(
         `Analyzing ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'}${
@@ -424,7 +428,7 @@ export default function PotentialPage() {
         <div className="section-heading">
           <div>
             <h2>Manual import walkthrough</h2>
-            <p>Paste one card at a time from realapp.tools — no username import needed.</p>
+            <p>Paste one card at a time from realapp.tools — copy the JSON from DevTools.</p>
           </div>
           <button className="button" type="button" onClick={() => setShowTutorial((current) => !current)}>
             {showTutorial ? 'Hide steps' : 'Show steps'}
@@ -445,31 +449,42 @@ export default function PotentialPage() {
                 <strong>calendar</strong> on that profile to load daily earnings.
               </li>
               <li>
-                <strong>On desktop (PC/Mac):</strong> press <kbd>F12</kbd> or right-click →{' '}
-                <strong>Inspect</strong>, open the <strong>Network</strong> tab, then refresh or
-                click the calendar again. Filter for <code>market-data</code>, click that request,
-                and copy the JSON from the Response panel.
+                <strong>Chrome or Edge (Windows/Mac):</strong> press <kbd>F12</kbd> or{' '}
+                <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>I</kbd> on Mac → <strong>Network</strong> →
+                filter <code>market-data</code> → click the request → open <strong>Response</strong>{' '}
+                (or Preview) → select <strong>all</strong> the JSON (it must start with{' '}
+                <code>{'{'}</code>) → copy.
               </li>
               <li>
-                <strong>On mobile:</strong> use your browser&apos;s desktop site mode if needed, or
-                connect remote debugging (Safari Web Inspector on iOS, Chrome{' '}
-                <code>chrome://inspect</code> on Android). Open Network, trigger the calendar load,
-                and copy the <code>market-data</code> response JSON. Alternatively, paste on desktop
-                first and save the profile here for later.
+                <strong>Safari on Mac:</strong> Safari → Settings → Advanced → enable{' '}
+                <strong>Show features for web developers</strong>. Then Develop →{' '}
+                <strong>Show Web Inspector</strong> → <strong>Network</strong> tab (same filter and
+                copy steps). Safari labels panels slightly differently than Chrome; use the panel
+                that shows the raw JSON body, not Headers only.
+              </li>
+              <li>
+                <strong>Firefox (Windows/Mac):</strong> <kbd>F12</kbd> or <kbd>Cmd</kbd>+
+                <kbd>Option</kbd>+<kbd>I</kbd> → <strong>Network</strong> → click{' '}
+                <code>market-data</code> → <strong>Response</strong>.
+              </li>
+              <li>
+                <strong>On mobile:</strong> use desktop site mode on a PC if you can, or remote
+                debugging (Safari Web Inspector on iOS, Chrome <code>chrome://inspect</code> on
+                Android). Alternatively, paste on desktop first and save the profile here.
               </li>
               <li>
                 Fill in the player name, sport, and season/card label below, paste the JSON, and
-                click <strong>Analyze potential card</strong>. Paste base earnings from the JSON —
-                use <strong>Preview as</strong> to simulate OTD at a higher rarity (e.g. Iconic).
+                click <strong>Analyze potential card</strong>. Use <strong>Preview as</strong> to
+                simulate OTD at a higher rarity (e.g. Iconic).
               </li>
               <li>
                 Click <strong>Save profile</strong> to keep the player info and JSON for later.
               </li>
             </ol>
             <p className="import-hint">
-              The JSON usually looks like{' '}
-              <code>{'{"rows":[{"day":"2025-08-22","earnings":26,...}]}'}</code> or a plain array of
-              row objects from the <code>market-data</code> request.
+              The JSON must start with <code>{'{'}</code>, e.g.{' '}
+              <code>{'{"rows":[{"day":"2025-08-22","earnings":26,...}]}'}</code>. If you only copy
+              from <code>earnings</code> onward, paste will fail — select from the opening brace.
             </p>
           </>
         ) : null}
