@@ -74,7 +74,8 @@ export function getFailedPlayerPasses(result: UsernameImportResult): FailedPlaye
       season: pass.season,
       rarityLabel: pass.rarityLabel,
       reason: 'no_earnings',
-      detail: 'No daily earnings returned from realapp.tools',
+      detail:
+        'No daily earnings returned from import. The card was still added — add RAX manually on the Entry page (Add card & earnings: select this card, paste JSON or add day by day).',
     })
   }
 
@@ -386,7 +387,9 @@ export async function importFromUsername(
           }
         } else if (cardId && dailyRows.length === 0) {
           passesWithNoEarnings.push(passMeta)
-          errors.push(`${passName}: no daily earnings returned (check season/sport mapping).`)
+          errors.push(
+            `${passName}: no daily earnings returned — add RAX manually on the Entry page (Add card & earnings).`,
+          )
         }
       } catch (error) {
         const message =

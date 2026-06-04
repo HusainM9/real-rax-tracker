@@ -334,7 +334,7 @@ export default function EntryPage() {
       const issueParts: string[] = []
       if (noEarningsCount > 0) {
         issueParts.push(
-          `${noEarningsCount} player pass${noEarningsCount === 1 ? '' : 'es'} with no earnings`,
+          `${noEarningsCount} player pass${noEarningsCount === 1 ? '' : 'es'} with no earnings (add RAX manually on Entry)`,
         )
       }
       if (fetchErrorCount > 0) {
@@ -503,14 +503,36 @@ export default function EntryPage() {
                 {usernameImportFailedPasses.length} player pass
                 {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
               </strong>{' '}
-              Paste earnings from{' '}
-              <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                realapp.com
-              </a>{' '}
-              below, or restore a{' '}
-              <button className="link-button" type="button" onClick={openCardEntryForExisting}>
-                saved profile
-              </button>
+              Use{' '}
+              <a href="#add-card-earnings">Add card &amp; earnings</a> below to finish these passes
+              {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings') ? (
+                <>
+                  {' '}
+                  (cards with <strong>no earnings</strong> were still created — select the card, paste
+                  JSON, or add RAX day by day)
+                </>
+              ) : null}
+              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
+                <>
+                  {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings')
+                    ? '; for fetch failures you can paste from'
+                    : ' — paste from'}
+                </>
+              ) : null}
+              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
+                <>
+                  {' '}
+                  <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                    realapp.com
+                  </a>{' '}
+                  or restore a{' '}
+                  <button className="link-button" type="button" onClick={openCardEntryForExisting}>
+                    saved profile
+                  </button>
+                </>
+              ) : (
+                <> — paste from realapp.tools or realapp.com if you have the JSON</>
+              )}
               .
             </p>
             <div className="table-wrap">
@@ -540,7 +562,7 @@ export default function EntryPage() {
                       <td>{pass.sport}</td>
                       <td>{pass.season || '—'}</td>
                       <td>
-                        {pass.reason === 'no_earnings' ? 'No earnings' : 'Fetch failed'}
+                        {pass.reason === 'no_earnings' ? 'No earnings (card added)' : 'Fetch failed'}
                         <br />
                         <small className="table-sub">{pass.detail}</small>
                       </td>
