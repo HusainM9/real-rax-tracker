@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import ImportShutdownNotice from './ImportShutdownNotice'
 import { useAuth } from '../context/AuthContext'
 
 const MOBILE_NAV_QUERY = '(max-width: 1024px)'
@@ -112,6 +113,8 @@ export default function Layout() {
           onClick={() => setMenuOpen(false)}
         />
       ) : null}
+
+      <ImportShutdownNotice />
 
       <main className="page-main">
         <Outlet />

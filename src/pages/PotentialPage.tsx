@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
+import { realappToolsShutdownLabel } from '../lib/importShutdown'
+import { cachedEarningsToJson } from '../lib/playerEarningsCache'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
@@ -306,6 +308,29 @@ export default function PotentialPage() {
   const [status, setStatus] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showTutorial, setShowTutorial] = useState(true)
+  const [cachedProfileQuery, setCachedProfileQuery] = useState('')
+  const cachedEarningsProfiles = useMemo(
+    () => [...(data.cachedPlayerEarnings ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [data.cachedPlayerEarnings],
+  )
+  const filteredCachedEarningsProfiles = useMemo(() => {
+    const query = cachedProfileQuery.trim().toLowerCase()
+    if (!query) return []
+    return cachedEarningsProfiles
+      .filter((profile) =>
+        [
+          profile.name,
+          profile.sport,
+          profile.season,
+          String(profile.seasonYear),
+          profile.rarityLabel ?? '',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query),
+      )
+      .slice(0, 24)
+  }, [cachedEarningsProfiles, cachedProfileQuery])
 
   const potentialAnalysis = useMemo(
     () =>
@@ -404,6 +429,26 @@ export default function PotentialPage() {
     )
   }
 
+  const loadCachedEarnings = (cacheKey: string) => {
+    const profile = data.cachedPlayerEarnings?.find((item) => item.cacheKey === cacheKey)
+    if (!profile) return
+    setEditingId(null)
+    setPotentialRows([])
+    setForm({
+      name: profile.name,
+      sport: profile.sport,
+      season: profile.season,
+      notes: `Loaded from cached ${profile.source.replace('_', ' ')}`,
+      rawJson: cachedEarningsToJson(profile),
+      previewAs: profile.rarityLabel ?? '',
+    })
+    setStatus(
+      `Loaded cached earnings for ${profile.name} (${profile.rows.length} row${
+        profile.rows.length === 1 ? '' : 's'
+      }). Click Analyze potential card to run the what-if.`,
+    )
+  }
+
   return (
     <div className="page-stack">
       <section className="hero-card">
@@ -411,12 +456,9 @@ export default function PotentialPage() {
           <p className="eyebrow">What-if</p>
           <h2>Potential card checker</h2>
           <p>
-            Test a player or team pass you do not own yet. Paste daily RAX from{' '}
-            <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-              realapp.tools
-            </a>{' '}
-            and see what would be claimable vs overlapped against your collection. Saved profiles
-            stay out of your real totals.
+            Test a player or team pass you do not own yet. Load cached player earnings from prior
+            imports or paste daily RAX JSON from realapp.com. Saved profiles stay out of your real
+            totals.
           </p>
         </div>
         <Link className="button" to="/overlaps">
@@ -428,7 +470,10 @@ export default function PotentialPage() {
         <div className="section-heading">
           <div>
             <h2>Manual import walkthrough</h2>
-            <p>Paste one card at a time from realapp.tools — copy the JSON from DevTools.</p>
+            <p>
+              Username import closes after {realappToolsShutdownLabel()}; after that, use cached
+              earnings or paste one card at a time from realapp.com.
+            </p>
           </div>
           <button className="button" type="button" onClick={() => setShowTutorial((current) => !current)}>
             {showTutorial ? 'Hide steps' : 'Show steps'}
@@ -439,19 +484,18 @@ export default function PotentialPage() {
             <ol className="help-list ordered">
               <li>
                 Open{' '}
-                <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-                  realapp.tools
+                <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                  realapp.com
                 </a>{' '}
-                and go to the <strong>OTD Table</strong>.
+                on a desktop browser and log in with Real Pro.
               </li>
               <li>
-                Find the player or team pass you are considering and open their profile. Click the{' '}
-                <strong>calendar</strong> on that profile to load daily earnings.
+                Find the player or team pass you are considering and open its earnings view.
               </li>
               <li>
                 <strong>Chrome or Edge (Windows/Mac):</strong> press <kbd>F12</kbd> or{' '}
                 <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>I</kbd> on Mac → <strong>Network</strong> →
-                filter <code>market-data</code> → click the request → open <strong>Response</strong>{' '}
+                filter <code>userpassearnings</code> → click the request → open <strong>Response</strong>{' '}
                 (or Preview) → select <strong>all</strong> the JSON (it must start with{' '}
                 <code>{'{'}</code>) → copy.
               </li>
@@ -465,7 +509,7 @@ export default function PotentialPage() {
               <li>
                 <strong>Firefox (Windows/Mac):</strong> <kbd>F12</kbd> or <kbd>Cmd</kbd>+
                 <kbd>Option</kbd>+<kbd>I</kbd> → <strong>Network</strong> → click{' '}
-                <code>market-data</code> → <strong>Response</strong>.
+                <code>userpassearnings</code> → <strong>Response</strong>.
               </li>
               <li>
                 <strong>On mobile:</strong> use desktop site mode on a PC if you can, or remote
@@ -483,8 +527,9 @@ export default function PotentialPage() {
             </ol>
             <p className="import-hint">
               The JSON must start with <code>{'{'}</code>, e.g.{' '}
-              <code>{'{"rows":[{"day":"2025-08-22","earnings":26,...}]}'}</code>. If you only copy
-              from <code>earnings</code> onward, paste will fail — select from the opening brace.
+              <code>{'{"earnings":[{"day":"2025-08-22","earnings":26,...}]}'}</code>. If you only
+              copy from <code>earnings</code> onward, paste will fail — select from the opening
+              brace.
             </p>
           </>
         ) : null}
@@ -543,11 +588,65 @@ export default function PotentialPage() {
             <p>
               {editingId
                 ? 'Update fields or JSON, then analyze again or save.'
-                : 'Enter profile details and paste realapp.tools JSON.'}
+                : 'Enter profile details, load cached earnings, or paste realapp.com JSON.'}
             </p>
           </div>
           <span className="badge">{editingId ? 'Editing' : 'Draft'}</span>
         </div>
+        {cachedEarningsProfiles.length > 0 ? (
+          <section className="cached-profile-panel">
+            <div className="section-heading">
+              <div>
+                <h3>Cached player earnings</h3>
+                <p>
+                  Player daily earnings saved from previous imports. Search here to run a what-if
+                  without copying JSON again.
+                </p>
+              </div>
+              <span className="badge">{cachedEarningsProfiles.length} cached</span>
+            </div>
+            <label className="field">
+              <span>Search cached profiles</span>
+              <input
+                type="search"
+                value={cachedProfileQuery}
+                placeholder="Player name, sport, season, rarity…"
+                onChange={(event) => setCachedProfileQuery(event.target.value)}
+              />
+            </label>
+            {!cachedProfileQuery.trim() ? (
+              <p className="card-picker-empty">
+                Start typing to find cached base earnings from previous imports. These profiles are
+                reusable what-if inputs, not saved Potential cards.
+              </p>
+            ) : filteredCachedEarningsProfiles.length === 0 ? (
+              <p className="card-picker-empty">No cached profiles match that search.</p>
+            ) : (
+              <div className="cached-profile-list" role="listbox" aria-label="Cached player earnings">
+                {filteredCachedEarningsProfiles.map((profile) => (
+                  <button
+                    key={profile.cacheKey}
+                    type="button"
+                    className="cached-profile-item"
+                    onClick={() => loadCachedEarnings(profile.cacheKey)}
+                  >
+                    <strong>{profile.name}</strong>
+                    <small>
+                      {profile.sport} · {profile.season || profile.seasonYear}
+                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
+                      row{profile.rows.length === 1 ? '' : 's'}
+                    </small>
+                    <span>Use in Potential</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="import-hint">
+              Cached profiles are reusable base earnings. Pick a profile, choose a rarity in
+              Preview as, then analyze the impact against your collection.
+            </p>
+          </section>
+        ) : null}
         <div className="form-grid">
           <label className="field">
             <span>Player / team name</span>
@@ -605,7 +704,7 @@ export default function PotentialPage() {
           />
         </label>
         <label className="field">
-          <span>realapp.tools JSON</span>
+          <span>realapp.com earnings JSON</span>
           <textarea
             className="bulk-import-textarea"
             value={form.rawJson}

@@ -11,10 +11,18 @@ import {
   runWithConcurrency,
   type MeowbotPlayerPass,
 } from './meowbotApi'
+import { playerEarningsCacheKey, upsertCachedPlayerEarnings } from './playerEarningsCache'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
 import { passMetadataKey, seasonLabelFromPass, isGolfSport } from './seasonLabel'
-import type { PlayerCard, RaxPerformance, RaxTrackerData, Sport } from '../types/rax'
+import type {
+  CachedPlayerEarningsProfile,
+  PlayerCard,
+  RaxPerformance,
+  RaxTrackerData,
+  SavedCardEarningsRow,
+  Sport,
+} from '../types/rax'
 
 export type UsernameImportProgress = {
   phase: 'resolving' | 'fetching'
@@ -30,9 +38,22 @@ export type UsernameImportResult = {
   skipped: number
   passesFetched: number
   passesSkipped: number
+  cachedPlayerPasses: number
+  ownedPasses: OwnedPassSnapshot[]
   errors: string[]
   passesWithNoEarnings: PassWithNoEarnings[]
   passFetchErrors: PassFetchError[]
+}
+
+export type OwnedPassSnapshot = {
+  name: string
+  sport: Sport
+  season: string
+  seasonYear: number
+  entityId: number
+  rarityLabel?: string
+  externalKey: string
+  passKind: 'player' | 'team'
 }
 
 export type PassWithNoEarnings = {
@@ -122,6 +143,18 @@ function nowIso(): string {
 function passLabel(pass: MeowbotPlayerPass): string {
   if (pass.playerName) return pass.playerName
   return pass.passKind === 'team' ? `Team ${pass.entityId}` : `Player ${pass.entityId}`
+}
+
+function uniquePasses(passes: MeowbotPlayerPass[]): MeowbotPlayerPass[] {
+  const seen = new Set<string>()
+  const unique: MeowbotPlayerPass[] = []
+  for (const pass of passes) {
+    const key = `${pass.passKind}|${pass.pair}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(pass)
+  }
+  return unique
 }
 
 function resolvePassSeasonLabel(
@@ -273,13 +306,16 @@ export async function importFromUsername(
     ),
   )
   const passesSkipped = allPasses.length - selectedPasses.length
+  const selectedPassKeys = new Set(selectedPasses.map((pass) => `${pass.passKind}|${pass.pair}`))
+  const cacheCandidatePasses = resolved.playerPasses
+  const passesToFetch = uniquePasses([...selectedPasses, ...cacheCandidatePasses])
 
   if (selectedPasses.length === 0) {
     throw new Error('No Legendary+ passes found for this username.')
   }
 
-  const entityIds = [...new Set(selectedPasses.map((pass) => pass.entityId))]
-  const selectedPlayerPairs = selectedPasses
+  const entityIds = [...new Set(passesToFetch.map((pass) => pass.entityId))]
+  const selectedPlayerPairs = passesToFetch
     .filter((pass) => pass.passKind === 'player')
     .map((pass) => pass.pair)
   const selectedTeamPairs = selectedPasses
@@ -333,16 +369,18 @@ export async function importFromUsername(
 
   const cardIdsToReplace = new Set(cardIdByExternalKey.values())
   const performanceDrafts: PerformanceDraft[] = []
+  const cachedProfiles: CachedPlayerEarningsProfile[] = []
   let fetchSkipped = 0
-  const total = selectedPasses.length
+  const total = passesToFetch.length
   let completed = 0
 
   await runWithConcurrency(
-    selectedPasses,
+    passesToFetch,
     concurrency,
     async (pass) => {
       const sport = mapMeowbotSport(pass.sportRaw) as Sport
       const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
+      const isSelectedPass = selectedPassKeys.has(`${pass.passKind}|${pass.pair}`)
       const label = passLabel(pass)
       const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
       const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
@@ -368,7 +406,38 @@ export async function importFromUsername(
           options?.signal,
         )
         const cardId = cardIdByExternalKey.get(externalKey)
-        if (cardId && dailyRows.length > 0) {
+        if (dailyRows.length > 0) {
+          const cached = parseRealAppToolsDailyRows(dailyRows)
+          if (pass.passKind === 'player' && cached.rows.length > 0) {
+            cachedProfiles.push({
+              cacheKey: playerEarningsCacheKey({
+                passKind: pass.passKind,
+                sport,
+                seasonYear: pass.season,
+                entityId: pass.entityId,
+              }),
+              entityId: pass.entityId,
+              sport,
+              season: seasonLabel.trim(),
+              seasonYear: pass.season,
+              passKind: pass.passKind,
+              name: passName,
+              rarityLabel: pass.rarityLabel,
+              externalKey,
+              rows: cached.rows.map(
+                (row): SavedCardEarningsRow => ({
+                  claimDay: row.claimDay,
+                  raxEarned: row.baseRaxEarned ?? row.raxEarned,
+                  baseRaxEarned: row.baseRaxEarned ?? row.raxEarned,
+                  note: row.note,
+                }),
+              ),
+              source: 'username_import',
+              updatedAt: nowIso(),
+            })
+          }
+        }
+        if (isSelectedPass && cardId && dailyRows.length > 0) {
           const parsed = parseRealAppToolsDailyRows(dailyRows, {
             sport: normalizeMeowbotSport(pass.sportRaw),
             rarityLabel: pass.rarityLabel,
@@ -385,7 +454,7 @@ export async function importFromUsername(
               note: entry.note,
             })
           }
-        } else if (cardId && dailyRows.length === 0) {
+        } else if (isSelectedPass && cardId && dailyRows.length === 0) {
           passesWithNoEarnings.push(passMeta)
           errors.push(
             `${passName}: no daily earnings returned — add RAX manually on the Entry page (Add card & earnings).`,
@@ -394,8 +463,10 @@ export async function importFromUsername(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Could not fetch daily earnings.'
-        passFetchErrors.push({ ...passMeta, message })
-        errors.push(`${passName}: ${message}`)
+        if (isSelectedPass) {
+          passFetchErrors.push({ ...passMeta, message })
+          errors.push(`${passName}: ${message}`)
+        }
       } finally {
         completed += 1
         reportProgress?.({
@@ -410,10 +481,26 @@ export async function importFromUsername(
   )
 
   const { data: finalData, rowsImported, skipped } = mergePerformances(
-    withCards,
+    upsertCachedPlayerEarnings(withCards, cachedProfiles),
     performanceDrafts,
     cardIdsToReplace,
   )
+  const ownedPasses: OwnedPassSnapshot[] = allPasses.map((pass) => {
+    const sport = mapMeowbotSport(pass.sportRaw) as Sport
+    const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
+    const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
+    const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
+    return {
+      name: nameByKey.get(metaKey) ?? passLabel(pass),
+      sport,
+      season: seasonLabel.trim(),
+      seasonYear: pass.season,
+      entityId: pass.entityId,
+      rarityLabel: pass.rarityLabel,
+      externalKey,
+      passKind: pass.passKind,
+    }
+  })
 
   return {
     data: finalData,
@@ -424,6 +511,8 @@ export async function importFromUsername(
       skipped: skipped + fetchSkipped,
       passesFetched: selectedPasses.length,
       passesSkipped,
+      cachedPlayerPasses: cachedProfiles.length,
+      ownedPasses,
       errors,
       passesWithNoEarnings,
       passFetchErrors,

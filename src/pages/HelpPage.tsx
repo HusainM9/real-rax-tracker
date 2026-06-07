@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { realappToolsShutdownLabel } from '../lib/importShutdown'
 
 export default function HelpPage() {
   return (
@@ -44,16 +45,18 @@ export default function HelpPage() {
         <h2>Getting your data in</h2>
         <ol className="help-list ordered">
           <li>
-            <strong>Username import (recommended)</strong> — on Entry, enter your Real @username.
-            Legendary, Mystic, and Iconic player and team passes are fetched automatically via{' '}
+            <strong>Username import (until shutdown)</strong> — on Entry, enter your Real @username.
+            Legendary, Mystic, and Iconic player and team passes can be fetched via{' '}
             <a href="https://realapp.tools" target="_blank" rel="noreferrer">
               realapp.tools
             </a>{' '}
-            / Meowbot. No Real API key needed.
+            / Meowbot until {realappToolsShutdownLabel()}. Existing imported cards and earnings
+            remain saved locally after the service closes.
           </li>
           <li>
             <strong>Add card &amp; earnings</strong> — on Entry, set up the pass and paste daily
-            RAX JSON (realapp.tools or realapp.com) in one form.
+            RAX JSON from realapp.com in one form. Cached player earnings from prior imports can
+            be loaded when available.
           </li>
           <li>
             <strong>Manual entry</strong> — use single-day mode in the same form for one-off rows.
@@ -62,9 +65,39 @@ export default function HelpPage() {
       </section>
 
       <section className="panel help-section">
-        <h2>When username import misses daily RAX</h2>
+        <h2>realapp.tools shutdown</h2>
         <p>
-          Some passes return no daily earnings from realapp.tools. You can fill them in from{' '}
+          realapp.tools / Meowbot is shutting down, so automatic username import will stop working.
+          This does <strong>not</strong> delete cards or earnings already imported into this
+          browser.
+        </p>
+        <ul className="help-list">
+          <li>
+            <strong>Back up before and after big imports.</strong> Use Export JSON on Dashboard.
+            Backups include cards, earnings, saved profiles, potential profiles, sell rankings,
+            and cached player earnings.
+          </li>
+          <li>
+            <strong>Local player earnings cache.</strong> While username import still works, the
+            tracker caches player daily earnings it sees. Entry and Potential can load those cached
+            rows later to avoid another JSON paste.
+          </li>
+          <li>
+            <strong>Backend ownership cache.</strong> Successful username imports can report a
+            minimal pass list to the operator cache: username, pass name, sport, season, entity ID,
+            rarity, and pass kind. It does not upload your notes, claim math, or full backup.
+          </li>
+          <li>
+            <strong>After shutdown.</strong> New cards and earnings are manual: use Add card &amp;
+            earnings, paste realapp.com JSON, add single-day rows, or restore an exported backup.
+          </li>
+        </ul>
+      </section>
+
+      <section className="panel help-section">
+        <h2>Manual realapp.com earnings JSON</h2>
+        <p>
+          After username import closes, or when a pass is missing daily rows, you can fill it in from{' '}
           <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
             realapp.com
           </a>{' '}
@@ -102,9 +135,10 @@ export default function HelpPage() {
           </li>
         </ol>
         <p className="import-hint">
-          realapp.tools JSON uses a <code>rows</code> array; realapp.com uses <code>earnings</code>.
-          Both formats are accepted. Earnings are also saved to <strong>Saved earnings profiles</strong>{' '}
-          on Entry — restore them after re-import if pasted data disappears.
+          realapp.com uses an <code>earnings</code> array. The tracker still accepts old
+          realapp.tools <code>rows</code> JSON while you have it. Earnings are also saved to{' '}
+          <strong>Saved earnings profiles</strong> on Entry — restore them after re-import or manual
+          card changes.
         </p>
       </section>
 
@@ -151,7 +185,7 @@ export default function HelpPage() {
           </div>
           <div>
             <dt>Potential</dt>
-            <dd>What-if checker for cards you do not own — paste realapp.tools JSON manually.</dd>
+            <dd>What-if checker for cards you do not own — load cached earnings or paste JSON.</dd>
           </div>
           <div>
             <dt>Cards</dt>
@@ -209,10 +243,10 @@ export default function HelpPage() {
             its own collection.
           </li>
           <li>
-            <strong>Operator logging.</strong> When a username import skips a player pass because
-            realapp.tools returned no daily earnings, the app can report that event to a central
-            log (production only). Operators use the unlisted <code>/admin</code> area to review
-            Real @usernames and import gaps — not your card list or RAX totals.
+            <strong>Operator logging and ownership cache.</strong> Production imports can report
+            import events plus a minimal username/pass snapshot to help restore known pass lists
+            later. This does not upload your local notes, manual edits, claim results, or backup
+            JSON.
           </li>
         </ul>
       </section>

@@ -232,8 +232,7 @@ export default function CalendarPage() {
       {allResults.length === 0 ? (
         <section className="panel">
           <p className="empty">
-            No claim days yet.{' '}
-            <Link to="/entry">Import your collection</Link> or add RAX entries.
+            No claim days yet. <Link to="/entry">Import or add cards</Link> to create RAX entries.
           </p>
         </section>
       ) : (

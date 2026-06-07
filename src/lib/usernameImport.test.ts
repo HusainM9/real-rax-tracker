@@ -125,8 +125,15 @@ describe('importFromUsername', () => {
       expect(result.rowsImported).toBe(2)
       expect(result.passesFetched).toBe(2)
       expect(result.passesSkipped).toBe(2)
+      expect(result.cachedPlayerPasses).toBe(2)
+      expect(result.ownedPasses).toHaveLength(4)
       expect(data.cards).toHaveLength(2)
       expect(data.performances).toHaveLength(2)
+      expect(data.cachedPlayerEarnings).toHaveLength(2)
+      expect((data.cachedPlayerEarnings ?? []).map((profile) => profile.name).sort()).toEqual([
+        'Other Player',
+        'Test Player',
+      ])
       expect(data.cards[0]?.externalKey).toBe('100|2026|NBA')
       expect(data.performances[0]?.claimDay).toBe('2025-08-22')
       expect(data.performances[0]?.raxEarned).toBe(650)

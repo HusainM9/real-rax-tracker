@@ -2,6 +2,8 @@ import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
+import { usernameImportDisabled, realappToolsShutdownLabel } from '../lib/importShutdown'
+import { cachedEarningsToJson } from '../lib/playerEarningsCache'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import {
@@ -48,7 +50,7 @@ type EarningsInputMode = 'paste' | 'single'
 function emptyCardEntry(cards: { id: string }[], existingCardId = '') {
   const resolvedCardId = existingCardId || cards[0]?.id || ''
   return {
-    mode: (resolvedCardId ? 'existing' : 'new') as CardEntryMode,
+    mode: 'new' as CardEntryMode,
     existingCardId: resolvedCardId,
     name: '',
     sport: 'NBA' as Sport,
@@ -100,9 +102,33 @@ export default function EntryPage() {
     FailedPlayerPassImport[]
   >([])
   const [existingCardQuery, setExistingCardQuery] = useState('')
+  const [cachedProfileQuery, setCachedProfileQuery] = useState('')
   const importAbortRef = useRef<AbortController | null>(null)
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
+  const importDisabled = usernameImportDisabled()
+  const cachedEarningsProfiles = useMemo(
+    () => [...(data.cachedPlayerEarnings ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [data.cachedPlayerEarnings],
+  )
+  const filteredCachedEarningsProfiles = useMemo(() => {
+    const query = cachedProfileQuery.trim().toLowerCase()
+    if (!query) return []
+    return cachedEarningsProfiles
+      .filter((profile) =>
+        [
+          profile.name,
+          profile.sport,
+          profile.season,
+          String(profile.seasonYear),
+          profile.rarityLabel ?? '',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query),
+      )
+      .slice(0, 24)
+  }, [cachedEarningsProfiles, cachedProfileQuery])
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -135,6 +161,28 @@ export default function EntryPage() {
       : existingCardQuery.trim()
         ? `${filteredExistingCards.length} match${filteredExistingCards.length === 1 ? '' : 'es'}`
         : `Showing first ${Math.min(sortedExistingCards.length, EXISTING_CARD_SEARCH_LIMIT)} of ${sortedExistingCards.length} — search to narrow`
+
+  const loadCachedEarnings = (cacheKey: string) => {
+    const profile = data.cachedPlayerEarnings?.find((item) => item.cacheKey === cacheKey)
+    if (!profile) return
+    const rawJson = cachedEarningsToJson(profile)
+    setCardEntry((current) => ({
+      ...current,
+      mode: 'new',
+      name: profile.name,
+      sport: profile.sport,
+      season: profile.season,
+      rarityLabel: profile.rarityLabel ?? current.rarityLabel,
+      passKind: profile.passKind,
+      earningsInput: 'paste',
+      rawJson,
+    }))
+    setCardEntryStatus(
+      `Loaded cached earnings for ${profile.name} (${profile.rows.length} row${
+        profile.rows.length === 1 ? '' : 's'
+      }). Review the card details, then import earnings.`,
+    )
+  }
 
   const sortedPerformances = useMemo(
     () =>
@@ -314,6 +362,12 @@ export default function EntryPage() {
     event.preventDefault()
     const username = usernameImport.username.trim()
     if (!username) return
+    if (importDisabled) {
+      setUsernameImportStatus(
+        'Automatic username import is closed because realapp.tools / Meowbot has shut down. Use Add card & earnings below for future entries.',
+      )
+      return
+    }
 
     importAbortRef.current?.abort()
     const controller = new AbortController()
@@ -360,7 +414,9 @@ export default function EntryPage() {
           result.passesFetched
         } pass${result.passesFetched === 1 ? '' : 'es'} (${result.cardsCreated} new card${
           result.cardsCreated === 1 ? '' : 's'
-        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
+        }, ${result.cardsUpdated} updated) · cached ${result.cachedPlayerPasses} player earning profile${
+          result.cachedPlayerPasses === 1 ? '' : 's'
+        } for manual Entry/Potential use${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
       )
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
         setShowHeavyTables(false)
@@ -444,15 +500,16 @@ export default function EntryPage() {
           <div>
             <h2>Import from Real username</h2>
             <p>
-              Enter your @username to fetch Legendary+ player and team passes with daily RAX
-              automatically. Data via{' '}
+              Enter your @username to fetch Legendary+ player and team passes while realapp.tools
+              is still online. Automatic import closes after {realappToolsShutdownLabel()}; existing
+              local data and backups keep working. Data via{' '}
               <a href="https://realapp.tools" target="_blank" rel="noreferrer">
                 realapp.tools
               </a>{' '}
-              / Meowbot — no Real API key needed. Re-importing updates existing cards by pass ID.
+              / Meowbot — no Real API key needed.
             </p>
           </div>
-          <span className="badge">Auto import</span>
+          <span className="badge">{importDisabled ? 'Closed' : 'Until shutdown'}</span>
         </div>
         <div className="form-grid">
           <label className="field">
@@ -460,7 +517,7 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting}
+              disabled={usernameImporting || importDisabled}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
@@ -468,14 +525,21 @@ export default function EntryPage() {
           </label>
         </div>
         <p className="import-hint">
-          Imports Legendary, Mystic, and Iconic passes only — fewer API calls and faster loads.
-          Your username is saved in this browser after a successful import.
+          Imports Legendary, Mystic, and Iconic passes into your collection, and caches any player
+          earnings it can fetch to speed up future manual Entry and Potential checks. Your username
+          is saved in this browser after a successful import.
         </p>
+        {importDisabled ? (
+          <p className="import-status">
+            Automatic username import is closed. Existing imported data is still saved locally; use
+            Export JSON on Dashboard for backups and Add card &amp; earnings below for new cards.
+          </p>
+        ) : null}
         <div className="button-row">
           <button
             className="button primary"
             type="submit"
-            disabled={usernameImporting || usernameImport.username.trim().length === 0}
+            disabled={usernameImporting || importDisabled || usernameImport.username.trim().length === 0}
           >
             {usernameImporting ? 'Importing…' : 'Import Legendary+ passes'}
           </button>
@@ -531,7 +595,7 @@ export default function EntryPage() {
                   </button>
                 </>
               ) : (
-                <> — paste from realapp.tools or realapp.com if you have the JSON</>
+                <> — paste from realapp.com, cached earnings, or old realapp.tools JSON if you have it</>
               )}
               .
             </p>
@@ -601,6 +665,61 @@ export default function EntryPage() {
           </div>
           <span className="badge">{data.cards.length} cards saved</span>
         </div>
+
+        {cachedEarningsProfiles.length > 0 ? (
+          <section className="cached-profile-panel">
+            <div className="section-heading">
+              <div>
+                <h3>Cached player earnings</h3>
+                <p>
+                  Player daily earnings saved from previous imports. Search here to prefill a new
+                  manual card without copying JSON again.
+                </p>
+              </div>
+              <span className="badge">{cachedEarningsProfiles.length} cached</span>
+            </div>
+            <label className="field">
+              <span>Search cached profiles</span>
+              <input
+                type="search"
+                value={cachedProfileQuery}
+                placeholder="Player name, sport, season, rarity…"
+                onChange={(event) => setCachedProfileQuery(event.target.value)}
+              />
+            </label>
+            {!cachedProfileQuery.trim() ? (
+              <p className="card-picker-empty">
+                Start typing to find a cached player. These are saved base earnings from prior
+                imports, not cards currently in your collection.
+              </p>
+            ) : filteredCachedEarningsProfiles.length === 0 ? (
+              <p className="card-picker-empty">No cached profiles match that search.</p>
+            ) : (
+              <div className="cached-profile-list" role="listbox" aria-label="Cached player earnings">
+                {filteredCachedEarningsProfiles.map((profile) => (
+                  <button
+                    key={profile.cacheKey}
+                    type="button"
+                    className="cached-profile-item"
+                    onClick={() => loadCachedEarnings(profile.cacheKey)}
+                  >
+                    <strong>{profile.name}</strong>
+                    <small>
+                      {profile.sport} · {profile.season || profile.seasonYear}
+                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
+                      row{profile.rows.length === 1 ? '' : 's'}
+                    </small>
+                    <span>Use cached earnings</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="import-hint">
+              Cached profiles are not extra cards in your collection. Choosing one fills the new
+              card form and earnings JSON below so you can review and save it manually.
+            </p>
+          </section>
+        ) : null}
 
         <div className="entry-mode-toggle" role="group" aria-label="Card entry mode">
           <button
@@ -759,14 +878,15 @@ export default function EntryPage() {
             <div>
               <h3>Daily RAX earnings</h3>
               <p className="subsection-note">
-                Paste JSON from realapp.tools or realapp.com, or enter a single day manually.
+                Paste JSON from realapp.com, load cached player earnings, or enter a single day
+                manually.
               </p>
             </div>
           </div>
 
           <section className="panel import-hint">
             <p>
-              <strong>When username import misses daily RAX</strong> — use realapp.com on a{' '}
+              <strong>Manual earnings after import shutdown</strong> — use realapp.com on a{' '}
               <strong>desktop</strong> browser (Real Pro). Mobile redirects to the app store.
             </p>
             <ol className="help-list ordered">
@@ -1004,7 +1124,7 @@ export default function EntryPage() {
               {data.cards.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="empty-cell">
-                    Import your collection above or use Add card & earnings below.
+                    Import while available above or use Add card & earnings below.
                   </td>
                 </tr>
               ) : (
@@ -1126,7 +1246,7 @@ export default function EntryPage() {
               {sortedPerformances.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty-cell">
-                    Import your collection or add earnings in Add card & earnings above.
+                    Import while available or add earnings in Add card & earnings above.
                   </td>
                 </tr>
               ) : (

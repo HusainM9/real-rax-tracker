@@ -97,5 +97,31 @@ export async function reportImportAdminEvents(
   realUsername: string,
   result: UsernameImportResult,
 ): Promise<void> {
-  await postAdminEvents(buildImportAdminEvents(realUsername, result))
+  await Promise.all([
+    postAdminEvents(buildImportAdminEvents(realUsername, result)),
+    postImportOwnershipSnapshot(realUsername, result),
+  ])
+}
+
+async function postImportOwnershipSnapshot(
+  realUsername: string,
+  result: UsernameImportResult,
+): Promise<void> {
+  if (result.ownedPasses.length === 0 || import.meta.env.DEV) return
+
+  try {
+    await fetch('/api/admin/ownership', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        realUsername,
+        clientId: getAdminClientId(),
+        importedAt: new Date().toISOString(),
+        passes: result.ownedPasses,
+      }),
+    })
+  } catch {
+    // Fire-and-forget — never block import UX.
+  }
 }

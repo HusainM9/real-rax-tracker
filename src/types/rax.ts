@@ -78,6 +78,21 @@ export type SavedCardProfile = {
   updatedAt: string
 }
 
+export type CachedPlayerEarningsProfile = {
+  cacheKey: string
+  entityId: number
+  sport: Sport
+  season: string
+  seasonYear: number
+  passKind: 'player' | 'team'
+  name: string
+  rarityLabel?: string
+  externalKey: string
+  rows: SavedCardEarningsRow[]
+  source: 'username_import' | 'manual'
+  updatedAt: string
+}
+
 export type SavedSellRankRow = {
   cardId: string
   name: string
@@ -120,6 +135,7 @@ export type RaxTrackerData = {
   performances: RaxPerformance[]
   potentialCards: SavedPotentialCard[]
   savedCardProfiles: SavedCardProfile[]
+  cachedPlayerEarnings?: CachedPlayerEarningsProfile[]
   savedSellRankings?: SavedSellRankings | null
 }
 

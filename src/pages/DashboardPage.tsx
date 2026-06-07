@@ -95,8 +95,8 @@ export default function DashboardPage() {
           </div>
           <ol className="onboarding-steps">
             <li>
-              <strong>Import your collection</strong> — enter your Real @username on Entry to
-              pull player passes and daily RAX automatically, or add cards manually.
+              <strong>Import or add cards</strong> — use username import while realapp.tools is
+              available, then add future cards manually or from cached earnings.
             </li>
             <li>
               <strong>Check the Dashboard</strong> — see claimable vs overlapped RAX across your
@@ -108,8 +108,8 @@ export default function DashboardPage() {
             </li>
           </ol>
           <div className="button-row">
-            <Link className="button primary" to="/entry">
-              Import your collection
+              <Link className="button primary" to="/entry">
+                Import / add cards
             </Link>
             <Link className="button" to="/help">
               How it works
@@ -200,8 +200,7 @@ export default function DashboardPage() {
           </div>
           {bestDays.length === 0 ? (
             <p className="empty">
-              No claim days yet.{' '}
-              <Link to="/entry">Import your collection</Link> to get started.
+              No claim days yet. <Link to="/entry">Import or add cards</Link> to get started.
             </p>
           ) : (
             <div className="list">

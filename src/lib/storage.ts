@@ -1,4 +1,5 @@
 import type {
+  CachedPlayerEarningsProfile,
   PlayerCard,
   PotentialRaxRow,
   RaxPerformance,
@@ -27,6 +28,7 @@ export function createEmptyData(): RaxTrackerData {
     performances: [],
     potentialCards: [],
     savedCardProfiles: [],
+    cachedPlayerEarnings: [],
     savedSellRankings: null,
   }
 }
@@ -151,6 +153,32 @@ function hydrateSavedCardProfile(value: unknown): SavedCardProfile | null {
   }
 }
 
+function hydrateCachedPlayerEarnings(value: unknown): CachedPlayerEarningsProfile | null {
+  if (!isRecord(value) || typeof value.cacheKey !== 'string') return null
+  const entityId = Number(value.entityId)
+  const seasonYear = Number(value.seasonYear)
+  const passKind = value.passKind === 'team' ? 'team' : 'player'
+  return {
+    cacheKey: value.cacheKey,
+    entityId: Number.isFinite(entityId) ? entityId : 0,
+    sport:
+      typeof value.sport === 'string' ? (value.sport as CachedPlayerEarningsProfile['sport']) : 'Other',
+    season: typeof value.season === 'string' ? value.season : '',
+    seasonYear: Number.isFinite(seasonYear) ? seasonYear : 0,
+    passKind,
+    name: typeof value.name === 'string' ? value.name : '',
+    rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    externalKey: typeof value.externalKey === 'string' ? value.externalKey : value.cacheKey,
+    rows: Array.isArray(value.rows)
+      ? value.rows
+          .map(hydrateSavedCardRow)
+          .filter((row): row is SavedCardEarningsRow => row !== null && row.claimDay !== '')
+      : [],
+    source: value.source === 'manual' ? 'manual' : 'username_import',
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
+  }
+}
+
 function hydrateSavedSellRankRow(value: unknown): SavedSellRankRow | null {
   if (!isRecord(value) || typeof value.cardId !== 'string') return null
   return {
@@ -236,6 +264,14 @@ export function normalizeData(value: unknown): RaxTrackerData {
       ? value.savedCardProfiles
           .map(hydrateSavedCardProfile)
           .filter((profile): profile is SavedCardProfile => profile !== null)
+      : [],
+    cachedPlayerEarnings: Array.isArray(value.cachedPlayerEarnings)
+      ? value.cachedPlayerEarnings
+          .map(hydrateCachedPlayerEarnings)
+          .filter(
+            (profile): profile is CachedPlayerEarningsProfile =>
+              profile !== null && profile.cacheKey !== '' && profile.rows.length > 0,
+          )
       : [],
     savedSellRankings: hydrateSavedSellRankings(value.savedSellRankings),
   }

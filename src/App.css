@@ -825,6 +825,61 @@ label.button input.sr-only {
   padding: 0.75rem 0.35rem;
 }
 
+.cached-profile-panel {
+  border: 1px solid rgba(228, 160, 36, 0.24);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(228, 160, 36, 0.08), rgba(255, 255, 255, 0.02));
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.cached-profile-list {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.cached-profile-item {
+  align-items: start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 6.5rem;
+  padding: 0.8rem 0.9rem;
+  text-align: left;
+  width: 100%;
+}
+
+.cached-profile-item:hover {
+  background: rgba(228, 160, 36, 0.08);
+  border-color: rgba(228, 160, 36, 0.32);
+}
+
+.cached-profile-item strong {
+  font-size: 1rem;
+}
+
+.cached-profile-item small {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.cached-profile-item span {
+  color: var(--accent-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
 .field {
   display: grid;
   gap: 0.4rem;
@@ -1219,6 +1274,36 @@ button.calendar-day {
 
 .onboarding-steps strong {
   color: var(--text);
+}
+
+.shutdown-notice {
+  border: 1px solid rgba(228, 160, 36, 0.28);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(228, 160, 36, 0.12), rgba(255, 255, 255, 0.03)),
+    var(--surface);
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.shutdown-notice h2 {
+  margin: 0.15rem 0 0.45rem;
+}
+
+.shutdown-notice p {
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.shutdown-notice p + p {
+  margin-top: 0.65rem;
+}
+
+.shutdown-notice-actions {
+  align-items: center;
 }
 
 .import-panel {

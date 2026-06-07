@@ -19,9 +19,9 @@ Open the local URL from Vite (usually `http://localhost:5173`).
 2. Enter your Real **@username**
 3. Click **Import Legendary+ passes**
 
-Player and team passes at **Legendary, Mystic, and Iconic** are fetched via [realapp.tools](https://realapp.tools) / Meowbot's public API — no Real Sports API key required. Re-importing updates existing cards matched by pass ID. Your username is saved locally after a successful import.
+Player and team passes at **Legendary, Mystic, and Iconic** are fetched via [realapp.tools](https://realapp.tools) / Meowbot's public API until that service shuts down. Re-importing updates existing cards matched by pass ID. Your username is saved locally after a successful import.
 
-You can also paste JSON from realapp.tools per card (Advanced section) or add rows manually. For cards you do not own yet, use **Potential** with the `market-data` JSON walkthrough.
+After realapp.tools closes, automatic username import is disabled. Existing imported cards and earnings remain in browser storage and JSON backups. New cards can be added manually with **Add card & earnings**, realapp.com earnings JSON paste, cached player earnings from prior imports, or single-day rows. For cards you do not own yet, use **Potential** with cached earnings or pasted JSON.
 
 ## How claims work
 
@@ -47,7 +47,7 @@ See **Help** in the app for the full guide.
 
 Use **Export JSON** on the Dashboard to back up. **Import JSON** restores on another browser or device. **Clear all data** removes everything from this browser.
 
-Treat export files as **sensitive** — they contain your Real username, card list, and RAX history in plain JSON. See **Help → Backup and privacy** in the app.
+Treat export files as **sensitive** — they contain your Real username, card list, RAX history, saved profiles, potential cards, sell rankings, and cached player earnings in plain JSON. See **Help → Backup and privacy** in the app.
 
 ## Scripts
 
@@ -79,7 +79,7 @@ KV_REST_API_URL=
 KV_REST_API_TOKEN=
 ```
 
-`ADMIN_PASSWORD` gates the unlisted `/admin` operator area (requires a normal site login first). `KV_*` vars come from linking a **Vercel KV** or **Redis** store to the project — used for a central import event log (passes skipped for no earnings, etc.). Without KV, the app works normally; admin logs stay empty.
+`ADMIN_PASSWORD` gates the unlisted `/admin` operator area (requires a normal site login first). `KV_*` vars come from linking a **Vercel KV** or **Redis** store to the project — used for central import events and minimal username/pass ownership snapshots. Without KV, the app works normally; admin logs and ownership cache stay empty.
 
 ## Deployment (Vercel)
 
@@ -100,14 +100,14 @@ This app builds to static files in `dist/`. Production hosting is configured for
    - Optional: `VITE_MEOWBOT_SUPABASE_URL`, `VITE_MEOWBOT_SUPABASE_KEY`
 5. **Deploy** — [`vercel.json`](vercel.json) handles SPA routing and security headers. [`middleware.ts`](middleware.ts) + [`/api/auth/*`](api/auth/login.ts) enforce a signed session cookie after users sign in on the [`/login`](src/pages/LoginPage.tsx) page.
 
-### Admin event log (optional)
+### Admin event log and ownership cache (optional)
 
 1. Link a Vercel KV or Redis store to the project.
 2. Set `ADMIN_PASSWORD` in Vercel env.
 3. After deploy, sign in normally, then open `/admin/login` and enter the admin password.
 4. Run a username import that hits a player pass with no daily earnings; confirm `pass_no_earnings` appears under **Logs** on `/admin`.
 
-Browsers POST events in production only (not during `npm run dev`). Admin sees Real @usernames and reported import events — not other users' card data.
+Browsers POST events and ownership snapshots in production only (not during `npm run dev`). Admin sees Real @usernames, reported import events, and minimal pass metadata — not users' notes, claim calculations, manual edits, or backup JSON.
 
 ### GitHub setup
 
@@ -160,7 +160,8 @@ All tracker data lives in **browser `localStorage`** per device:
 - No server-side database or multi-user isolation
 - Anyone who passes the site gate only sees their own browser data
 - JSON export/import is **unencrypted** — treat backups as sensitive (documented in Help)
-- Username import calls public Meowbot endpoints from the client
+- Username import calls public Meowbot endpoints from the client until realapp.tools shuts down
+- Successful production imports may send minimal pass ownership metadata to the backend cache
 
 ### Future app-level auth (deferred)
 
