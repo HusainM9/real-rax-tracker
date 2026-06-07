@@ -19,6 +19,7 @@ import {
   saveTrackerData,
 } from '../lib/storage'
 import {
+  importFromAdminOwnership as runAdminOwnershipImport,
   importFromUsername as runUsernameImport,
   type UsernameImportOptions,
   type UsernameImportProgress,
@@ -76,6 +77,10 @@ type RaxDataContextValue = {
   exportJson: () => string
   importJson: (json: string) => void
   importFromUsername: (
+    username: string,
+    options?: ImportFromUsernameOptions,
+  ) => Promise<UsernameImportResult>
+  importFromAdminOwnership: (
     username: string,
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
@@ -327,6 +332,15 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       importJson: (json) => setData(importTrackerData(json)),
       importFromUsername: async (username, options) => {
         const { data: nextData, result } = await runUsernameImport(data, username, options)
+        const trimmed = username.replace(/^@/, '').trim()
+        setData({
+          ...nextData,
+          settings: { ...nextData.settings, savedUsername: trimmed },
+        })
+        return result
+      },
+      importFromAdminOwnership: async (username, options) => {
+        const { data: nextData, result } = await runAdminOwnershipImport(data, username, options)
         const trimmed = username.replace(/^@/, '').trim()
         setData({
           ...nextData,

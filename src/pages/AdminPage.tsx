@@ -15,6 +15,16 @@ type UsersResponse = {
   storageConfigured: boolean
 }
 
+type OwnershipLookupResponse = {
+  ownership: {
+    realUsername: string
+    importedAt: string
+    updatedAt: string
+    passes: Array<{ rarityLabel?: string }>
+  } | null
+  storageConfigured: boolean
+}
+
 const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
   pass_no_earnings: 'No earnings',
@@ -31,6 +41,8 @@ export default function AdminPage() {
   const [error, setError] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | AdminEvent['type']>('all')
   const [usernameFilter, setUsernameFilter] = useState('')
+  const [ownershipLookupUsername, setOwnershipLookupUsername] = useState('')
+  const [ownershipLookupStatus, setOwnershipLookupStatus] = useState('')
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -74,6 +86,46 @@ export default function AdminPage() {
       noEarnings,
     }
   }, [users])
+
+  const lookupOwnership = async () => {
+    const username = ownershipLookupUsername.replace(/^@/, '').trim().toLowerCase()
+    if (!username) {
+      setOwnershipLookupStatus('Enter a username to check.')
+      return
+    }
+    setOwnershipLookupStatus('Checking snapshot…')
+    try {
+      const response = await fetch(
+        `/api/admin/ownership?username=${encodeURIComponent(username)}`,
+        { credentials: 'include' },
+      )
+      if (!response.ok) {
+        throw new Error('Could not check ownership snapshot.')
+      }
+      const body = (await response.json()) as OwnershipLookupResponse
+      if (!body.ownership) {
+        setOwnershipLookupStatus(
+          `No cached snapshot found for @${username}. Import this username before shutdown to seed fallback.`,
+        )
+        return
+      }
+      const legendaryPlusCount = body.ownership.passes.filter((pass) => {
+        const rarity = pass.rarityLabel?.toLowerCase() ?? ''
+        return (
+          rarity.startsWith('legendary') ||
+          rarity.startsWith('mystic') ||
+          rarity.startsWith('iconic')
+        )
+      }).length
+      setOwnershipLookupStatus(
+        `Snapshot found for @${body.ownership.realUsername}: ${body.ownership.passes.length} total passes (${legendaryPlusCount} Legendary+). Users can recover these via Entry -> "Import from admin cached passes".`,
+      )
+    } catch (error) {
+      setOwnershipLookupStatus(
+        error instanceof Error ? error.message : 'Could not check ownership snapshot.',
+      )
+    }
+  }
 
   return (
     <div className="page-stack admin-page">
@@ -122,6 +174,28 @@ export default function AdminPage() {
           <p className="empty">{error}</p>
         </section>
       ) : null}
+
+      <CollapsiblePanel
+        title="Ownership snapshot lookup"
+        description="Verify fallback import availability for a username"
+        defaultOpen
+      >
+        <div className="button-row">
+          <label className="field inline-field rank-search-field">
+            <span>Username</span>
+            <input
+              type="search"
+              value={ownershipLookupUsername}
+              placeholder="@username"
+              onChange={(event) => setOwnershipLookupUsername(event.target.value)}
+            />
+          </label>
+          <button className="button" type="button" onClick={() => void lookupOwnership()}>
+            Check snapshot
+          </button>
+        </div>
+        {ownershipLookupStatus ? <p className="import-status">{ownershipLookupStatus}</p> : null}
+      </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Real usernames seen"

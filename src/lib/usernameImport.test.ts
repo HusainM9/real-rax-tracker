@@ -223,4 +223,76 @@ describe('importFromUsername', () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  it('forces calendar-year season labels for MLB imports', async () => {
+    const originalFetch = globalThis.fetch
+    const mlbFetch: typeof fetch = (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) : {}
+
+      if (url.includes('resolve-listing')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              playerPairs: ['555:2026:mlb'],
+              teamPairs: [],
+              user: { userId: 'abc', avatarKey: '1' },
+              rarities: { '555-2026-mlb': ['Legendary 1'] },
+              passSnapshots: [
+                {
+                  entityId: 555,
+                  season: 2026,
+                  sport: 'mlb',
+                  label: 'MLB Test',
+                  rarityLabel: 'Legendary 1',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+
+      if (url.includes('market-data') && body.action === 'get_user_otd_data') {
+        // Upstream occasionally reports split-year for MLB; import should normalize to calendar year.
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              playerRows: [
+                {
+                  entityId: 555,
+                  season: 2026,
+                  sport: 'mlb',
+                  seasonLabel: '2025-26',
+                  playerName: 'MLB Test',
+                },
+              ],
+              teamRows: [],
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+
+      if (url.includes('market-data') && body.action === 'get_daily_earnings') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ rows: [{ day: '2026-04-15', earnings: 12 }] }), {
+            status: 200,
+          }),
+        )
+      }
+
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
+    }
+    globalThis.fetch = mlbFetch
+
+    try {
+      const { data } = await importFromUsername(createEmptyData(), 'testuser')
+      expect(data.cards).toHaveLength(1)
+      expect(data.cards[0]?.sport).toBe('MLB')
+      expect(data.cards[0]?.season).toBe('2026')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

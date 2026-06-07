@@ -14,12 +14,29 @@ export function isGolfSport(sportRaw: string): boolean {
   return normalizeMeowbotSport(sportRaw) === 'golf'
 }
 
+export function isMlbSport(sportRaw: string): boolean {
+  return normalizeMeowbotSport(sportRaw) === 'mlb'
+}
+
+export function isWnbaSport(sportRaw: string): boolean {
+  return normalizeMeowbotSport(sportRaw) === 'wnba'
+}
+
+export function isCalendarYearSport(sportRaw: string): boolean {
+  return (
+    isUfcSport(sportRaw) ||
+    isGolfSport(sportRaw) ||
+    isMlbSport(sportRaw) ||
+    isWnbaSport(sportRaw)
+  )
+}
+
 export function seasonLabelFromPass(season: number, sportRaw: string): string {
   if (!Number.isInteger(season) || season < 1000) return String(season)
   if (isCollegeSport(sportRaw)) {
     return `${season}-${String(season + 1).slice(-2)}`
   }
-  if (isUfcSport(sportRaw) || isGolfSport(sportRaw)) {
+  if (isCalendarYearSport(sportRaw)) {
     return String(season)
   }
   return `${season - 1}-${String(season).slice(-2)}`

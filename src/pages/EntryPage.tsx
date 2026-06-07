@@ -77,6 +77,7 @@ export default function EntryPage() {
     updatePerformance,
     deletePerformance,
     importFromUsername,
+    importFromAdminOwnership,
     saveCardProfile,
     restoreCardProfile,
     deleteCardProfile,
@@ -98,6 +99,7 @@ export default function EntryPage() {
     null,
   )
   const [usernameImporting, setUsernameImporting] = useState(false)
+  const [adminSnapshotImporting, setAdminSnapshotImporting] = useState(false)
   const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
     FailedPlayerPassImport[]
   >([])
@@ -442,6 +444,34 @@ export default function EntryPage() {
     importAbortRef.current?.abort()
   }
 
+  const importFromAdminSnapshot = async () => {
+    const username = usernameImport.username.trim()
+    if (!username) return
+    setAdminSnapshotImporting(true)
+    setUsernameImportStatus('')
+    setUsernameImportProgress(null)
+    setUsernameImportFailedPasses([])
+    try {
+      const result = await importFromAdminOwnership(username)
+      const skipNote =
+        result.passesSkipped > 0
+          ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
+          : ''
+      setUsernameImportStatus(
+        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${skipNote}.`,
+      )
+      setCardsPage(1)
+    } catch (error) {
+      setUsernameImportStatus(
+        error instanceof Error
+          ? error.message
+          : 'Could not import from admin cached ownership.',
+      )
+    } finally {
+      setAdminSnapshotImporting(false)
+    }
+  }
+
   const cardEntrySubmitLabel =
     cardEntry.mode === 'new'
       ? cardEntry.earningsInput === 'paste' && cardEntry.rawJson.trim()
@@ -517,7 +547,7 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting || importDisabled}
+              disabled={usernameImporting || adminSnapshotImporting}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
@@ -531,7 +561,8 @@ export default function EntryPage() {
         </p>
         {importDisabled ? (
           <p className="import-status">
-            Automatic username import is closed. Existing imported data is still saved locally; use
+            Automatic username import is closed. If admin has cached your passes from earlier imports,
+            use the admin snapshot button below. Existing imported data is still saved locally; use
             Export JSON on Dashboard for backups and Add card &amp; earnings below for new cards.
           </p>
         ) : null}
@@ -539,10 +570,25 @@ export default function EntryPage() {
           <button
             className="button primary"
             type="submit"
-            disabled={usernameImporting || importDisabled || usernameImport.username.trim().length === 0}
+            disabled={
+              usernameImporting ||
+              adminSnapshotImporting ||
+              importDisabled ||
+              usernameImport.username.trim().length === 0
+            }
           >
             {usernameImporting ? 'Importing…' : 'Import Legendary+ passes'}
           </button>
+          {importDisabled ? (
+            <button
+              className="button"
+              type="button"
+              disabled={usernameImporting || adminSnapshotImporting || usernameImport.username.trim().length === 0}
+              onClick={() => void importFromAdminSnapshot()}
+            >
+              {adminSnapshotImporting ? 'Importing cached passes…' : 'Import from admin cached passes'}
+            </button>
+          ) : null}
           {usernameImporting ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>
               Cancel

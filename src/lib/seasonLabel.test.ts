@@ -21,6 +21,11 @@ describe('seasonLabelFromPass', () => {
     expect(seasonLabelFromPass(2025, 'golf')).toBe('2025')
     expect(seasonLabelFromPass(2026, 'golf')).toBe('2026')
   })
+
+  it('uses calendar year for MLB and WNBA passes', () => {
+    expect(seasonLabelFromPass(2026, 'mlb')).toBe('2026')
+    expect(seasonLabelFromPass(2026, 'wnba')).toBe('2026')
+  })
 })
 
 describe('isCollegeSport', () => {

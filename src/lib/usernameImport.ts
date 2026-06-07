@@ -14,7 +14,7 @@ import {
 import { playerEarningsCacheKey, upsertCachedPlayerEarnings } from './playerEarningsCache'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
-import { passMetadataKey, seasonLabelFromPass, isGolfSport } from './seasonLabel'
+import { passMetadataKey, seasonLabelFromPass, isCalendarYearSport } from './seasonLabel'
 import type {
   CachedPlayerEarningsProfile,
   PlayerCard,
@@ -136,6 +136,25 @@ export type UsernameImportOptions = {
   concurrency?: number
 }
 
+type OwnershipSnapshotPass = {
+  name: string
+  sport: string
+  season: string
+  seasonYear: number
+  entityId: number
+  rarityLabel?: string
+  externalKey: string
+  passKind: 'player' | 'team'
+}
+
+type OwnershipSnapshotPayload = {
+  source?: string
+  username?: string
+  importedAt?: string
+  updatedAt?: string
+  passes?: OwnershipSnapshotPass[]
+}
+
 function nowIso(): string {
   return new Date().toISOString()
 }
@@ -162,7 +181,7 @@ function resolvePassSeasonLabel(
   seasonLabelByKey: Map<string, string>,
   metaKey: string,
 ): string {
-  if (isGolfSport(pass.sportRaw)) {
+  if (isCalendarYearSport(pass.sportRaw)) {
     return String(pass.season)
   }
 
@@ -171,6 +190,44 @@ function resolvePassSeasonLabel(
     pass.seasonLabel ??
     seasonLabelFromPass(pass.season, pass.sportRaw)
   ).trim()
+}
+
+function rawSportFromDisplay(sport: string): string {
+  const normalized = sport.trim().toUpperCase()
+  switch (normalized) {
+    case 'NBA':
+      return 'nba'
+    case 'WNBA':
+      return 'wnba'
+    case 'NFL':
+      return 'nfl'
+    case 'CFB':
+      return 'ncaaf'
+    case 'MLB':
+      return 'mlb'
+    case 'NHL':
+      return 'nhl'
+    case 'CBB':
+      return 'ncaam'
+    case 'GOLF':
+      return 'golf'
+    case 'FC':
+      return 'fc'
+    case 'UFC':
+      return 'ufc'
+    default:
+      return normalized.toLowerCase()
+  }
+}
+
+function isLegendaryPlus(rarityLabel?: string): boolean {
+  if (!rarityLabel) return false
+  const normalized = rarityLabel.trim().toLowerCase()
+  return (
+    normalized.startsWith('legendary') ||
+    normalized.startsWith('mystic') ||
+    normalized.startsWith('iconic')
+  )
 }
 
 function upsertCards(
@@ -278,6 +335,38 @@ function mergePerformances(
     rowsImported: imported.length,
     skipped,
   }
+}
+
+async function fetchOwnershipSnapshotPayload(
+  username: string,
+  signal?: AbortSignal,
+): Promise<OwnershipSnapshotPayload> {
+  const response = await fetch('/api/import/ownership', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+    signal,
+  })
+  const text = await response.text()
+  let body: unknown = null
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = null
+    }
+  }
+  if (!body) {
+    throw new Error(`Ownership import returned non-JSON response (${response.status}).`)
+  }
+  if (!response.ok) {
+    const errorMessage =
+      body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
+        ? (body as { error: string }).error
+        : `Ownership import failed (${response.status}).`
+    throw new Error(errorMessage)
+  }
+  return body as OwnershipSnapshotPayload
 }
 
 export async function importFromUsername(
@@ -516,6 +605,89 @@ export async function importFromUsername(
       errors,
       passesWithNoEarnings,
       passFetchErrors,
+    },
+  }
+}
+
+export async function importFromAdminOwnership(
+  current: RaxTrackerData,
+  username: string,
+  options?: UsernameImportOptions,
+): Promise<{ data: RaxTrackerData; result: UsernameImportResult }> {
+  const reportProgress = options?.onProgress
+    ? createThrottledProgress(options.onProgress)
+    : undefined
+  reportProgress?.({ phase: 'resolving', current: 0, total: 1, label: 'Loading admin snapshot…' })
+
+  const snapshot = await fetchOwnershipSnapshotPayload(username, options?.signal)
+  const rawPasses = Array.isArray(snapshot.passes) ? snapshot.passes : []
+  const allPasses: MeowbotPlayerPass[] = rawPasses.map((pass) => {
+    const sportRaw = rawSportFromDisplay(pass.sport)
+    return {
+      entityId: pass.entityId,
+      season: pass.seasonYear,
+      sportRaw,
+      pair: `${pass.entityId}:${pass.seasonYear}:${sportRaw}`,
+      passKind: pass.passKind,
+      rarityLabel: pass.rarityLabel,
+      playerName: pass.name,
+      seasonLabel: pass.season,
+    }
+  })
+  const selectedPasses = allPasses.filter((pass) => isLegendaryPlus(pass.rarityLabel))
+  if (selectedPasses.length === 0) {
+    throw new Error('No Legendary+ passes found in admin ownership snapshot for this username.')
+  }
+
+  const cardDrafts: CardDraft[] = selectedPasses.map((pass) => {
+    const sport = mapMeowbotSport(pass.sportRaw)
+    return {
+      externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
+      name: pass.playerName ?? passLabel(pass),
+      sport,
+      season: (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim(),
+      notes: `Recovered from admin snapshot for @${username.replace(/^@/, '').trim()}`,
+      rarityLabel: pass.rarityLabel,
+      passKind: pass.passKind,
+    }
+  })
+  const { data: nextData, cardsCreated, cardsUpdated } = upsertCards(current, cardDrafts)
+
+  reportProgress?.({
+    phase: 'fetching',
+    current: selectedPasses.length,
+    total: selectedPasses.length,
+    label: 'Imported pass list from admin snapshot',
+  })
+
+  const ownedPasses: OwnedPassSnapshot[] = allPasses.map((pass) => {
+    const sport = mapMeowbotSport(pass.sportRaw) as Sport
+    return {
+      name: pass.playerName ?? passLabel(pass),
+      sport,
+      season: (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim(),
+      seasonYear: pass.season,
+      entityId: pass.entityId,
+      rarityLabel: pass.rarityLabel,
+      externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
+      passKind: pass.passKind,
+    }
+  })
+
+  return {
+    data: nextData,
+    result: {
+      cardsCreated,
+      cardsUpdated,
+      rowsImported: 0,
+      skipped: 0,
+      passesFetched: selectedPasses.length,
+      passesSkipped: allPasses.length - selectedPasses.length,
+      cachedPlayerPasses: 0,
+      ownedPasses,
+      errors: [],
+      passesWithNoEarnings: [],
+      passFetchErrors: [],
     },
   }
 }
