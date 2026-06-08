@@ -641,11 +641,14 @@ export async function importFromAdminOwnership(
 
   const cardDrafts: CardDraft[] = selectedPasses.map((pass) => {
     const sport = mapMeowbotSport(pass.sportRaw)
+    const seasonLabel = isCalendarYearSport(pass.sportRaw)
+      ? String(pass.season)
+      : (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
     return {
       externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
       name: pass.playerName ?? passLabel(pass),
       sport,
-      season: (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim(),
+      season: seasonLabel,
       notes: `Recovered from admin snapshot for @${username.replace(/^@/, '').trim()}`,
       rarityLabel: pass.rarityLabel,
       passKind: pass.passKind,
@@ -662,10 +665,13 @@ export async function importFromAdminOwnership(
 
   const ownedPasses: OwnedPassSnapshot[] = allPasses.map((pass) => {
     const sport = mapMeowbotSport(pass.sportRaw) as Sport
+    const seasonLabel = isCalendarYearSport(pass.sportRaw)
+      ? String(pass.season)
+      : (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
     return {
       name: pass.playerName ?? passLabel(pass),
       sport,
-      season: (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim(),
+      season: seasonLabel,
       seasonYear: pass.season,
       entityId: pass.entityId,
       rarityLabel: pass.rarityLabel,

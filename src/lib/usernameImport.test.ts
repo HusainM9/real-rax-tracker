@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyData } from './storage'
-import { getFailedPlayerPasses, importFromUsername } from './usernameImport'
+import { getFailedPlayerPasses, importFromAdminOwnership, importFromUsername } from './usernameImport'
 
 const samplePassesResponse = {
   playerPairs: ['100:2026:nba', '200:2026:nfl'],
@@ -289,6 +289,50 @@ describe('importFromUsername', () => {
     try {
       const { data } = await importFromUsername(createEmptyData(), 'testuser')
       expect(data.cards).toHaveLength(1)
+      expect(data.cards[0]?.sport).toBe('MLB')
+      expect(data.cards[0]?.season).toBe('2026')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('forces calendar-year season labels for MLB admin snapshot imports', async () => {
+    const originalFetch = globalThis.fetch
+    const snapshotFetch: typeof fetch = (input) => {
+      const url = String(input)
+      if (url === '/api/import/ownership') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ok: true,
+              source: 'admin_ownership_snapshot',
+              username: 'testuser',
+              passes: [
+                {
+                  name: 'Shohei Ohtani',
+                  sport: 'MLB',
+                  season: '2025-26',
+                  seasonYear: 2026,
+                  entityId: 999,
+                  rarityLabel: 'Legendary 1',
+                  externalKey: '999|2026|MLB',
+                  passKind: 'player',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
+    }
+    globalThis.fetch = snapshotFetch
+
+    try {
+      const { data, result } = await importFromAdminOwnership(createEmptyData(), 'testuser')
+      expect(result.passesFetched).toBe(1)
+      expect(data.cards).toHaveLength(1)
+      expect(data.cards[0]?.name).toContain('Ohtani')
       expect(data.cards[0]?.sport).toBe('MLB')
       expect(data.cards[0]?.season).toBe('2026')
     } finally {
