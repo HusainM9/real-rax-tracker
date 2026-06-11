@@ -1,7 +1,4 @@
-import {
-  normalizeRealAppToolsPaste,
-  parseRealAppToolsRows,
-} from '../src/lib/realAppToolsImport.ts'
+import { normalizeRealAppToolsPaste, parseRealAppToolsBaseRows } from './realAppToolsPaste'
 import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
@@ -90,11 +87,7 @@ export function manualCatalogUpsertPayload(
   const externalKey =
     input.externalKey?.trim() || buildCatalogExternalKey(input.entityId, input.seasonYear, sport)
 
-  const parsed = parseRealAppToolsRows(input.rawJson, {
-    sport,
-    rarityLabel: input.rarityLabel,
-    applyOtdMultiplier: false,
-  })
+  const parsed = parseRealAppToolsBaseRows(input.rawJson)
 
   if (parsed.rows.length === 0) {
     throw new Error('No valid daily earnings rows were found in the JSON paste.')
@@ -104,7 +97,7 @@ export function manualCatalogUpsertPayload(
   const dailyEarnings: CatalogDailyEarningInput[] = parsed.rows.map((row) => ({
     externalKey,
     claimDay: row.claimDay,
-    baseRaxEarned: row.baseRaxEarned ?? row.raxEarned,
+    baseRaxEarned: row.baseRaxEarned,
     playerBoxScoreId: boxScores.get(row.claimDay) ?? null,
   }))
 
