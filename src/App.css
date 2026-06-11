@@ -967,6 +967,113 @@ label.button input.sr-only {
   grid-column: 1 / -1;
 }
 
+.season-multi-select-field {
+  position: relative;
+}
+
+.season-filter-summary {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+  max-width: 42rem;
+}
+
+.season-multi-select {
+  position: relative;
+}
+
+.season-multi-select .field-label {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.season-multi-select-trigger {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-height: 2.65rem;
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
+.season-multi-select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.season-multi-select.is-open .season-multi-select-trigger {
+  border-color: var(--accent);
+}
+
+.season-multi-select-chevron {
+  color: var(--muted);
+  font-size: 0.85rem;
+  transition: transform 0.15s ease;
+}
+
+.season-multi-select.is-open .season-multi-select-chevron {
+  transform: rotate(180deg);
+}
+
+.season-multi-select-menu {
+  background: var(--surface-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  left: 0;
+  margin-top: 0.35rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: 0.35rem;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+}
+
+.season-multi-select-menu-title {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.45rem 0.55rem 0.35rem;
+}
+
+.season-multi-select-option {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  width: 100%;
+}
+
+.season-multi-select-option:hover {
+  background: var(--surface-hover);
+}
+
+.season-multi-select-option.is-selected {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.season-multi-select-check {
+  color: var(--text);
+  flex: 0 0 1rem;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
 .compact-actions {
   justify-content: flex-end;
 }

@@ -62,6 +62,8 @@ type SupabaseDailyRow = {
 }
 
 const MAX_SEARCH_LIMIT = 50
+const MAX_CANDIDATES_PAGE = 200
+const BULK_PROFILE_KEYS_BATCH = 40
 const PASS_UPSERT_BATCH_SIZE = 250
 const DAILY_UPSERT_BATCH_SIZE = 200
 const UPSERT_BATCH_PAUSE_MS = 300
@@ -362,6 +364,199 @@ export async function searchCatalogPasses(options: {
   }
 }
 
+function buildImportProfileFromPass(
+  pass: SupabasePassRow,
+  dailyRows: SupabaseDailyRow[],
+): CatalogImportProfile {
+  const mappedRows = dailyRows
+    .filter((row) => row.external_key === pass.external_key)
+    .map((row) => ({
+      claimDay: row.claim_day,
+      baseRaxEarned: Number(row.base_rax_earned),
+      playerBoxScoreId: row.player_box_score_id ?? undefined,
+    }))
+    .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
+  const { rows, totalBaseRax } = reconcileDailyRowsToPassTotal(
+    Number(pass.total_base_rax) || 0,
+    mappedRows,
+  )
+  const base = fromPassRow(pass)
+  const latestClaimDay = rows.length > 0 ? rows[rows.length - 1]?.claimDay : undefined
+  return {
+    ...base,
+    rowCount: rows.length,
+    totalBaseRax,
+    latestClaimDay,
+    rows,
+  }
+}
+
+/** When daily rows disagree with pass metadata (NFL/NHL imports), scale rows to the stored total. */
+export function reconcileDailyRowsToPassTotal(
+  storedTotalBaseRax: number,
+  rows: Array<{
+    claimDay: string
+    baseRaxEarned: number
+    playerBoxScoreId?: number | null
+  }>,
+): {
+  rows: Array<{
+    claimDay: string
+    baseRaxEarned: number
+    playerBoxScoreId?: number | null
+  }>
+  totalBaseRax: number
+} {
+  if (rows.length === 0) {
+    return { rows, totalBaseRax: storedTotalBaseRax }
+  }
+
+  const computedSum = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+  if (storedTotalBaseRax <= 0 || computedSum <= 0) {
+    return { rows, totalBaseRax: computedSum || storedTotalBaseRax }
+  }
+
+  const drift = Math.abs(computedSum - storedTotalBaseRax) / storedTotalBaseRax
+  if (drift <= 0.01) {
+    return { rows, totalBaseRax: computedSum }
+  }
+
+  const factor = storedTotalBaseRax / computedSum
+  const scaledRows = rows.map((row) => ({
+    ...row,
+    baseRaxEarned: row.baseRaxEarned * factor,
+  }))
+  return { rows: scaledRows, totalBaseRax: storedTotalBaseRax }
+}
+
+export async function listCatalogPassSummaries(options: {
+  sport: string
+  passKind?: CatalogPassKind
+  seasonYear?: number
+  hasEarnings?: boolean
+}): Promise<{ results: CatalogSearchResult[]; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { results: [], storageConfigured: false }
+  }
+
+  const sport = options.sport.trim()
+  if (!sport) {
+    return { results: [], storageConfigured: true }
+  }
+
+  const passKind = options.passKind ?? 'player'
+  const hasEarnings = options.hasEarnings !== false
+  const results: CatalogSearchResult[] = []
+
+  for (let offset = 0; ; offset += MAX_CANDIDATES_PAGE) {
+    const params = new URLSearchParams({
+      select:
+        'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
+      sport: `eq.${sport}`,
+      pass_kind: `eq.${passKind}`,
+      has_earnings: `eq.${hasEarnings}`,
+      order: 'total_base_rax.desc,name.asc',
+      limit: String(MAX_CANDIDATES_PAGE),
+      offset: String(offset),
+    })
+    if (options.seasonYear !== undefined && Number.isFinite(options.seasonYear)) {
+      params.set('season_year', `eq.${options.seasonYear}`)
+    }
+
+    const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
+    results.push(...passRows.map(fromPassRow))
+    if (passRows.length < MAX_CANDIDATES_PAGE) break
+  }
+
+  return { results, storageConfigured: true }
+}
+
+export async function fetchCatalogImportProfilesBulk(
+  externalKeys: string[],
+): Promise<{ profiles: CatalogImportProfile[]; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { profiles: [], storageConfigured: false }
+  }
+
+  const keys = [...new Set(externalKeys.map((key) => key.trim()).filter(Boolean))]
+  if (keys.length === 0) {
+    return { profiles: [], storageConfigured: true }
+  }
+
+  const profiles: CatalogImportProfile[] = []
+
+  for (let index = 0; index < keys.length; index += BULK_PROFILE_KEYS_BATCH) {
+    const batchKeys = keys.slice(index, index + BULK_PROFILE_KEYS_BATCH)
+    const passParams = new URLSearchParams({
+      select:
+        'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at',
+      external_key: quotedIn(batchKeys),
+    })
+    const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params: passParams })
+    const passByKey = new Map(passRows.map((row) => [row.external_key, row]))
+    const dailyRows = await fetchDailyRowsByExternalKeys(batchKeys)
+
+    for (const key of batchKeys) {
+      const pass = passByKey.get(key)
+      if (!pass) continue
+      profiles.push(buildImportProfileFromPass(pass, dailyRows))
+    }
+  }
+
+  return { profiles, storageConfigured: true }
+}
+
+export type CatalogSeasonYearOption = {
+  seasonYear: number
+  seasonLabel: string
+}
+
+export async function listCatalogSeasonYears(options: {
+  sport: string
+  passKind?: CatalogPassKind
+}): Promise<{ seasonYears: CatalogSeasonYearOption[]; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { seasonYears: [], storageConfigured: false }
+  }
+
+  const sport = options.sport.trim()
+  if (!sport) {
+    return { seasonYears: [], storageConfigured: true }
+  }
+
+  const passKind = options.passKind ?? 'player'
+  const byLabel = new Map<string, number>()
+
+  for (let offset = 0; ; offset += MAX_CANDIDATES_PAGE) {
+    const params = new URLSearchParams({
+      select: 'season_year,season_label',
+      sport: `eq.${sport}`,
+      pass_kind: `eq.${passKind}`,
+      order: 'season_year.desc',
+      limit: String(MAX_CANDIDATES_PAGE),
+      offset: String(offset),
+    })
+
+    const rows = await supabaseFetch<Array<{ season_year: number; season_label: string }>>(
+      'meowbot_passes',
+      { params },
+    )
+
+    for (const row of rows) {
+      const seasonLabel = row.season_label.trim() || String(row.season_year)
+      byLabel.set(seasonLabel, Math.max(byLabel.get(seasonLabel) ?? 0, row.season_year))
+    }
+
+    if (rows.length < MAX_CANDIDATES_PAGE) break
+  }
+
+  const seasonYears = [...byLabel.entries()]
+    .map(([seasonLabel, seasonYear]) => ({ seasonYear, seasonLabel }))
+    .sort((a, b) => b.seasonYear - a.seasonYear || b.seasonLabel.localeCompare(a.seasonLabel))
+
+  return { seasonYears, storageConfigured: true }
+}
+
 export async function getCatalogImportProfile(
   externalKey: string,
 ): Promise<{ profile: CatalogImportProfile | null; storageConfigured: boolean }> {
@@ -379,31 +574,9 @@ export async function getCatalogImportProfile(
   const pass = passRows[0]
   if (!pass) return { profile: null, storageConfigured: true }
 
-  const latestParams = new URLSearchParams({
-    select: 'claim_day',
-    external_key: `eq.${externalKey}`,
-    order: 'claim_day.desc',
-    limit: '1',
-  })
-  const latestRows = await supabaseFetch<Array<{ claim_day: string }>>('meowbot_daily_earnings', {
-    params: latestParams,
-  })
   const dailyRows = await fetchDailyRowsByExternalKeys([externalKey])
-  const rows = dailyRows.map((row) => ({
-    claimDay: row.claim_day,
-    baseRaxEarned: Number(row.base_rax_earned),
-    playerBoxScoreId: row.player_box_score_id ?? undefined,
-  }))
-  const base = fromPassRow(pass)
-  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
   return {
-    profile: {
-      ...base,
-      rowCount: rows.length,
-      totalBaseRax,
-      latestClaimDay: latestRows[0]?.claim_day ?? rows[0]?.claimDay,
-      rows,
-    },
+    profile: buildImportProfileFromPass(pass, dailyRows),
     storageConfigured: true,
   }
 }

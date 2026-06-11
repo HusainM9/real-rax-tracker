@@ -1,18 +1,40 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import { SeasonMultiSelect } from '../components/SeasonMultiSelect'
 import { displayRaxValue } from '../lib/displayRax'
-import { fetchCatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
+import {
+  fetchCatalogImportProfile,
+  fetchCatalogImportProfilesBulk,
+  fetchCatalogPassSummaries,
+  fetchCatalogSeasonYears,
+  type CatalogImportProfile,
+  type CatalogSearchResult,
+  type CatalogSeasonYearOption,
+} from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
+import {
+  rankAndRecommendAsync,
+  RECOMMENDATION_SIMULATED_RARITY,
+  recommendationCapsForSport,
+  selectSummariesForBulkFetch,
+  type PassRecommendationBundle,
+  seasonLabelForFilter,
+  type PassRecommendationProgress,
+  type PassRecommendationRow,
+} from '../lib/passRecommendation'
 import { realappToolsShutdownLabel } from '../lib/importShutdown'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
+
+const TOP_RECOMMENDATIONS = 20
+const DEFAULT_BUNDLE_SIZE = 3
 
 const EMPTY_FORM = {
   name: '',
@@ -304,6 +326,60 @@ function PotentialAnalysisResults({
   )
 }
 
+function applyCatalogProfileToForm(
+  profile: CatalogImportProfile,
+  setters: {
+    setEditingId: (id: string | null) => void
+    setPotentialRows: (rows: ParsedRealAppToolsRow[]) => void
+    setForm: React.Dispatch<React.SetStateAction<typeof EMPTY_FORM>>
+    setStatus: (status: string) => void
+  },
+): boolean {
+  if (profile.rows.length === 0) {
+    setters.setEditingId(null)
+    setters.setPotentialRows([])
+    setters.setForm({
+      name: profile.name,
+      sport: sportFromCatalog(profile.sport),
+      season: profile.seasonLabel || String(profile.seasonYear),
+      notes: 'Loaded from shared catalog (no earnings rows)',
+      rawJson: '',
+      previewAs: profile.rarityLabel ?? '',
+    })
+    setters.setStatus(
+      `${profile.name} is in the catalog but has no daily RAX rows yet — paste earnings manually below.`,
+    )
+    return false
+  }
+
+  const sport = sportFromCatalog(profile.sport)
+  const rawJson = catalogProfileToJson(profile)
+  const parsed = parseRealAppToolsRows(rawJson, {
+    sport,
+    rarityLabel: profile.rarityLabel,
+    applyOtdMultiplier: Boolean(profile.rarityLabel),
+    passKind: profile.passKind,
+  })
+  setters.setEditingId(null)
+  setters.setPotentialRows(parsed.rows)
+  setters.setForm({
+    name: profile.name,
+    sport,
+    season: profile.seasonLabel || String(profile.seasonYear),
+    notes: 'Loaded from shared Meowbot catalog',
+    rawJson,
+    previewAs: profile.rarityLabel ?? '',
+  })
+  setters.setStatus(
+    `Loaded ${profile.name} from catalog: ${parsed.rows.length} row${
+      parsed.rows.length === 1 ? '' : 's'
+    }, ${formatRax(profile.totalBaseRax)} base RAX${
+      parsed.skipped ? ` · skipped ${parsed.skipped} invalid row${parsed.skipped === 1 ? '' : 's'}` : ''
+    }. Analysis updates automatically below.`,
+  )
+  return true
+}
+
 export default function PotentialPage() {
   const { data, addPotentialCard, updatePotentialCard, deletePotentialCard } = useRaxData()
   const [form, setForm] = useState(EMPTY_FORM)
@@ -312,6 +388,27 @@ export default function PotentialPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showTutorial, setShowTutorial] = useState(true)
   const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
+  const [rankSport, setRankSport] = useState<Sport>('FC')
+  const [excludedRankSeasonLabels, setExcludedRankSeasonLabels] = useState<string[]>([])
+  const [bundleSize, setBundleSize] = useState(DEFAULT_BUNDLE_SIZE)
+  const [rankingInProgress, setRankingInProgress] = useState(false)
+  const [rankProgress, setRankProgress] = useState<PassRecommendationProgress | null>(null)
+  const [rankStatus, setRankStatus] = useState('')
+  const [recommendationRows, setRecommendationRows] = useState<PassRecommendationRow[]>([])
+  const [recommendationBundle, setRecommendationBundle] = useState<PassRecommendationBundle | null>(
+    null,
+  )
+  const [recommendationMeta, setRecommendationMeta] = useState<{
+    calculatedAt: string
+    skippedOwnedIconic: number
+    skippedNoRows: number
+    catalogCount: number
+    fetchTrimmed: number
+    prefilterTrimmed: number
+  } | null>(null)
+  const [profileByKey, setProfileByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
+  const [catalogSeasonOptions, setCatalogSeasonOptions] = useState<CatalogSeasonYearOption[]>([])
+  const rankAbortRef = useRef<AbortController | null>(null)
 
   const potentialAnalysis = useMemo(
     () =>
@@ -423,54 +520,204 @@ export default function PotentialPage() {
         setStatus('That pass was not found in the shared catalog. Try searching again.')
         return
       }
-      if (profile.rows.length === 0) {
-        setStatus(
-          `${profile.name} is in the catalog but has no daily RAX rows yet — paste earnings manually below.`,
-        )
-        setEditingId(null)
-        setPotentialRows([])
-        setForm({
-          name: profile.name,
-          sport: sportFromCatalog(profile.sport),
-          season: profile.seasonLabel || String(profile.seasonYear),
-          notes: 'Loaded from shared catalog (no earnings rows)',
-          rawJson: '',
-          previewAs: profile.rarityLabel ?? '',
-        })
-        return
-      }
-
-      const sport = sportFromCatalog(profile.sport)
-      const rawJson = catalogProfileToJson(profile)
-      const parsed = parseRealAppToolsRows(rawJson, {
-        sport,
-        rarityLabel: profile.rarityLabel,
-        applyOtdMultiplier: Boolean(profile.rarityLabel),
-        passKind: profile.passKind,
+      applyCatalogProfileToForm(profile, {
+        setEditingId,
+        setPotentialRows,
+        setForm,
+        setStatus,
       })
-      setEditingId(null)
-      setPotentialRows(parsed.rows)
-      setForm({
-        name: profile.name,
-        sport,
-        season: profile.seasonLabel || String(profile.seasonYear),
-        notes: 'Loaded from shared Meowbot catalog',
-        rawJson,
-        previewAs: profile.rarityLabel ?? '',
-      })
-      setStatus(
-        `Loaded ${profile.name} from catalog: ${parsed.rows.length} row${
-          parsed.rows.length === 1 ? '' : 's'
-        }, ${formatRax(profile.totalBaseRax)} base RAX${
-          parsed.skipped ? ` · skipped ${parsed.skipped} invalid row${parsed.skipped === 1 ? '' : 's'}` : ''
-        }. Analysis updates automatically below.`,
-      )
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not load catalog pass.')
     } finally {
       setCatalogLoadingKey('')
     }
   }
+
+  const loadRecommendationRow = (row: PassRecommendationRow) => {
+    const profile = profileByKey.get(row.externalKey)
+    if (!profile) {
+      setStatus('Catalog profile is no longer loaded — run Rank catalog passes again.')
+      return
+    }
+    applyCatalogProfileToForm(profile, {
+      setEditingId,
+      setPotentialRows,
+      setForm,
+      setStatus,
+    })
+    setForm((current) => ({ ...current, previewAs: RECOMMENDATION_SIMULATED_RARITY }))
+    document.getElementById('potential-card-form')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const cancelRanking = () => {
+    rankAbortRef.current?.abort()
+    rankAbortRef.current = null
+    setRankingInProgress(false)
+    setRankProgress(null)
+    setRankStatus('Ranking cancelled.')
+  }
+
+  const runCatalogRanking = async () => {
+    rankAbortRef.current?.abort()
+    const controller = new AbortController()
+    rankAbortRef.current = controller
+    setRankingInProgress(true)
+    setRankProgress(null)
+    setRankStatus('')
+    setRecommendationRows([])
+    setRecommendationBundle(null)
+    setRecommendationMeta(null)
+    setProfileByKey(new Map())
+
+    try {
+      if (
+        availableSeasonOptions.length > 0 &&
+        availableSeasonOptions.every((option) => excludedRankSeasonLabels.includes(option.value))
+      ) {
+        setRankStatus('Select at least one season to rank.')
+        return
+      }
+
+      const includedSeasonLabels = availableSeasonOptions
+        .filter((option) => !excludedRankSeasonLabels.includes(option.value))
+        .map((option) => option.label)
+
+      setRankStatus(`Loading ${rankSport} catalog passes…`)
+      const { results, storageConfigured } = await fetchCatalogPassSummaries(
+        { sport: rankSport, passKind: 'player' },
+        controller.signal,
+      )
+      if (!storageConfigured) {
+        setRankStatus('Shared catalog is not configured yet.')
+        return
+      }
+      if (results.length === 0) {
+        setRankStatus(`No player passes with earnings found for ${rankSport}.`)
+        return
+      }
+
+      const caps = recommendationCapsForSport(rankSport)
+      const seasonFilter = { excludedSeasonLabels: excludedRankSeasonLabels }
+      const { keys: candidateKeys, skippedOwnedIconic, fetchTrimmed } = selectSummariesForBulkFetch(
+        data,
+        results,
+        { ...seasonFilter, sport: rankSport },
+      )
+
+      if (candidateKeys.length === 0) {
+        setRankStatus(
+          skippedOwnedIconic > 0
+            ? `All eligible ${rankSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+            : `No player passes with earnings found for ${rankSport}.`,
+        )
+        return
+      }
+
+      setRankStatus(
+        `Fetching earnings for ${candidateKeys.length} passes${
+          fetchTrimmed > 0
+            ? ` (top ${candidateKeys.length} by base RAX of ${results.length - skippedOwnedIconic} eligible · cap ${caps.bulkFetchCap})`
+            : ''
+        }…`,
+      )
+      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
+        candidateKeys,
+        controller.signal,
+      )
+      if (!bulkConfigured) {
+        setRankStatus('Shared catalog is not configured yet.')
+        return
+      }
+
+      const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+      setProfileByKey(profileMap)
+
+      setRankStatus(`Analyzing top candidates at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`)
+      const { ranked, bundle } = await rankAndRecommendAsync(data, profiles, bundleSize, {
+        ...seasonFilter,
+        sport: rankSport,
+        signal: controller.signal,
+        batchSize: 24,
+        onProgress: setRankProgress,
+      })
+
+      setRecommendationRows(ranked.rows.slice(0, TOP_RECOMMENDATIONS))
+      setRecommendationBundle(bundle)
+      setRecommendationMeta({
+        calculatedAt: new Date().toISOString(),
+        skippedOwnedIconic: ranked.skippedOwnedIconic + skippedOwnedIconic,
+        skippedNoRows: ranked.skippedNoRows,
+        catalogCount: results.length,
+        fetchTrimmed,
+        prefilterTrimmed: ranked.prefilterTrimmed,
+      })
+      setRankStatus(
+        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} · showing top ${Math.min(TOP_RECOMMENDATIONS, ranked.rows.length)}${
+          includedSeasonLabels.length > 0 && includedSeasonLabels.length < availableSeasonOptions.length
+            ? ` · seasons ${includedSeasonLabels.join(', ')}`
+            : ''
+        }.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setRankStatus(error instanceof Error ? error.message : 'Could not rank catalog passes.')
+    } finally {
+      if (rankAbortRef.current === controller) {
+        rankAbortRef.current = null
+      }
+      setRankingInProgress(false)
+      setRankProgress(null)
+    }
+  }
+
+  const availableSeasonOptions = useMemo(() => {
+    const byLabel = new Map<string, { value: string; label: string; seasonYear: number }>()
+    for (const option of catalogSeasonOptions) {
+      const value = option.seasonLabel.trim() || String(option.seasonYear)
+      byLabel.set(value, {
+        value,
+        label: value,
+        seasonYear: option.seasonYear,
+      })
+    }
+    for (const profile of profileByKey.values()) {
+      const value = seasonLabelForFilter(profile)
+      const existing = byLabel.get(value)
+      byLabel.set(value, {
+        value,
+        label: value,
+        seasonYear: Math.max(existing?.seasonYear ?? 0, profile.seasonYear),
+      })
+    }
+    return [...byLabel.values()]
+      .sort((a, b) => b.seasonYear - a.seasonYear || b.label.localeCompare(a.label))
+      .map(({ value, label }) => ({ value, label }))
+  }, [catalogSeasonOptions, profileByKey])
+
+  const includedSeasonOptions = useMemo(
+    () => availableSeasonOptions.filter((option) => !excludedRankSeasonLabels.includes(option.value)),
+    [availableSeasonOptions, excludedRankSeasonLabels],
+  )
+
+  const excludedSeasonOptions = useMemo(
+    () => availableSeasonOptions.filter((option) => excludedRankSeasonLabels.includes(option.value)),
+    [availableSeasonOptions, excludedRankSeasonLabels],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchCatalogSeasonYears({ sport: rankSport, passKind: 'player' })
+      .then(({ seasonYears, storageConfigured }) => {
+        if (cancelled || !storageConfigured) return
+        setCatalogSeasonOptions(seasonYears)
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogSeasonOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [rankSport])
 
   return (
     <div className="page-stack">
@@ -479,14 +726,245 @@ export default function PotentialPage() {
           <p className="eyebrow">What-if</p>
           <h2>Potential card checker</h2>
           <p>
-            Test a player pass you do not own yet. Search the shared Meowbot catalog for daily RAX
-            and base totals, or paste JSON manually from realapp.com. Saved profiles stay out of your
-            real totals.
+            Test a player pass you do not own yet, or rank catalog passes by net claimable RAX for a
+            sport. Search the shared Meowbot catalog for daily RAX and base totals, or paste JSON
+            manually from realapp.com. Saved profiles stay out of your real totals.
           </p>
         </div>
         <Link className="button" to="/overlaps">
           View overlaps
         </Link>
+      </section>
+
+      <section className="panel" id="catalog-recommendations">
+        <div className="section-heading">
+          <div>
+            <h2>Rank catalog passes</h2>
+            <p>
+              Find player passes in the shared catalog that would add the most{' '}
+              <strong>net claimable RAX</strong> to your collection for a sport. Every candidate is
+              simulated at <strong>{RECOMMENDATION_SIMULATED_RARITY}</strong> OTD. Net claimable is
+              what the new pass would claim minus RAX your existing cards would lose to overlap.
+            </p>
+          </div>
+        </div>
+        <p className="import-hint">
+          Candidates come from the shared Meowbot catalog only. Passes already in your collection
+          at {RECOMMENDATION_SIMULATED_RARITY} or higher are skipped; lower-rarity owned passes stay
+          eligible. Only the top catalog passes by base RAX are fetched and analyzed (default 1000,
+          higher for MLB and other large sports). The catalog may be incomplete or outdated. The recommended bundle uses a{' '}
+          <strong>greedy</strong> pick: best pass first, then re-rank a shortlist with it virtually
+          added.
+        </p>
+        <div className="sort-controls">
+          <label className="field inline-field">
+            <span>Sport</span>
+            <select
+              value={rankSport}
+              disabled={rankingInProgress}
+              onChange={(event) => {
+                setRankSport(event.target.value as Sport)
+                setExcludedRankSeasonLabels([])
+              }}
+            >
+              {SPORTS.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field inline-field season-multi-select-field">
+            <SeasonMultiSelect
+              options={availableSeasonOptions}
+              excludedValues={excludedRankSeasonLabels}
+              onExcludedValuesChange={setExcludedRankSeasonLabels}
+              disabled={rankingInProgress}
+              label="Seasons"
+            />
+            {availableSeasonOptions.length > 0 ? (
+              <p className="season-filter-summary">
+                {includedSeasonOptions.length === availableSeasonOptions.length ? (
+                  <>Including all seasons ({availableSeasonOptions.map((option) => option.label).join(', ')})</>
+                ) : (
+                  <>
+                    <span>
+                      Including:{' '}
+                      {includedSeasonOptions.length > 0
+                        ? includedSeasonOptions.map((option) => option.label).join(', ')
+                        : 'none'}
+                    </span>
+                    {excludedSeasonOptions.length > 0 ? (
+                      <>
+                        {' '}
+                        · <span>Excluding: {excludedSeasonOptions.map((option) => option.label).join(', ')}</span>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </p>
+            ) : null}
+          </div>
+          <label className="field inline-field">
+            <span>Bundle size</span>
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={bundleSize}
+              disabled={rankingInProgress}
+              onChange={(event) => {
+                const next = Number(event.target.value)
+                if (Number.isFinite(next)) {
+                  setBundleSize(Math.max(1, Math.min(5, Math.floor(next))))
+                }
+              }}
+            />
+          </label>
+        </div>
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={rankingInProgress || (availableSeasonOptions.length > 0 && includedSeasonOptions.length === 0)}
+            onClick={() => void runCatalogRanking()}
+          >
+            {rankingInProgress ? 'Ranking…' : 'Rank catalog passes'}
+          </button>
+          {rankingInProgress ? (
+            <button className="button" type="button" onClick={cancelRanking}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {rankProgress ? (
+          <p className="import-progress">
+            Analyzing pass {rankProgress.current}/{rankProgress.total} — {rankProgress.label}
+          </p>
+        ) : null}
+        {rankStatus ? <p className="import-status">{rankStatus}</p> : null}
+
+        {recommendationBundle && recommendationBundle.picks.length > 0 ? (
+          <section className="panel nested-panel">
+            <div className="section-heading">
+              <div>
+                <h3>Recommended bundle (greedy)</h3>
+                <p>
+                  Top {recommendationBundle.picks.length} pass
+                  {recommendationBundle.picks.length === 1 ? '' : 'es'} to add one at a time.
+                </p>
+              </div>
+              <span className="badge">
+                {formatSignedRax(displayRaxValue(recommendationBundle.combinedNetDelta))} combined
+                net
+              </span>
+            </div>
+            <div className="list">
+              {recommendationBundle.picks.map((row, index) => (
+                <button
+                  className="list-row link-button-row"
+                  type="button"
+                  key={row.externalKey}
+                  onClick={() => loadRecommendationRow(row)}
+                >
+                  <span>
+                    <strong>
+                      {index + 1}. {row.name}
+                    </strong>
+                    <small>
+                      {row.season}
+                      {row.rarityLabel ? ` · ${row.rarityLabel}` : ''} ·{' '}
+                      {formatSignedRax(displayRaxValue(row.netClaimableDelta))} net
+                    </small>
+                  </span>
+                  <b>{formatRax(displayRaxValue(row.newClaimableRax))} claimable</b>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {recommendationRows.length > 0 ? (
+          <>
+            {recommendationMeta ? (
+              <p className="import-hint">
+                Saved {new Date(recommendationMeta.calculatedAt).toLocaleString()} ·{' '}
+                {recommendationMeta.catalogCount} catalog pass
+                {recommendationMeta.catalogCount === 1 ? '' : 'es'}
+                {recommendationMeta.skippedOwnedIconic > 0
+                  ? ` · ${recommendationMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
+                  : ''}
+                {recommendationMeta.fetchTrimmed > 0
+                  ? ` · ${recommendationMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
+                  : ''}
+                {recommendationMeta.prefilterTrimmed > 0
+                  ? ` · ${recommendationMeta.prefilterTrimmed} not fully simulated (Iconic 1 pre-filter)`
+                  : ''}
+                {recommendationMeta.skippedNoRows > 0
+                  ? ` · ${recommendationMeta.skippedNoRows} without earnings rows`
+                  : ''}
+                . Click a row to open detailed analysis below.
+              </p>
+            ) : null}
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Pass</th>
+                    <th>Net Δ</th>
+                    <th>New claimable</th>
+                    <th>Displaced</th>
+                    <th>Overlap</th>
+                    <th>Base RAX</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recommendationRows.map((row, index) => (
+                    <tr key={row.externalKey}>
+                      <td>{index + 1}</td>
+                      <td>
+                        <button
+                          className="link-button"
+                          type="button"
+                          onClick={() => loadRecommendationRow(row)}
+                        >
+                          {row.name}
+                        </button>
+                        <br />
+                        <small className="table-sub">
+                          {row.season}
+                          {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                        </small>
+                      </td>
+                      <td>
+                        <strong
+                          className={
+                            row.netClaimableDelta > 0
+                              ? 'sale-positive'
+                              : row.netClaimableDelta < 0
+                                ? 'sale-negative'
+                                : ''
+                          }
+                        >
+                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                        </strong>
+                      </td>
+                      <td>{formatRax(displayRaxValue(row.newClaimableRax))}</td>
+                      <td>
+                        {row.displacedRax > 0
+                          ? `−${formatRax(displayRaxValue(row.displacedRax))}`
+                          : '—'}
+                      </td>
+                      <td>{formatRax(displayRaxValue(row.overlapRax))}</td>
+                      <td>{formatRax(displayRaxValue(row.totalBaseRax))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : null}
       </section>
 
       <section className="panel help-section">
@@ -616,7 +1094,7 @@ export default function PotentialPage() {
         onSelect={loadFromCatalog}
       />
 
-      <form className="panel form-panel" onSubmit={submitAnalyze}>
+      <form className="panel form-panel" id="potential-card-form" onSubmit={submitAnalyze}>
         <div className="section-heading">
           <div>
             <h2>{editingId ? 'Edit profile' : 'New potential card'}</h2>
