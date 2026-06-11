@@ -1,10 +1,13 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { displayRaxValue } from '../lib/displayRax'
+import { fetchCatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
+import { sportFromCatalog } from '../lib/catalogImport'
+import { catalogProfileToJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
 import { realappToolsShutdownLabel } from '../lib/importShutdown'
-import { cachedEarningsToJson } from '../lib/playerEarningsCache'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
@@ -308,29 +311,7 @@ export default function PotentialPage() {
   const [status, setStatus] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showTutorial, setShowTutorial] = useState(true)
-  const [cachedProfileQuery, setCachedProfileQuery] = useState('')
-  const cachedEarningsProfiles = useMemo(
-    () => [...(data.cachedPlayerEarnings ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [data.cachedPlayerEarnings],
-  )
-  const filteredCachedEarningsProfiles = useMemo(() => {
-    const query = cachedProfileQuery.trim().toLowerCase()
-    if (!query) return []
-    return cachedEarningsProfiles
-      .filter((profile) =>
-        [
-          profile.name,
-          profile.sport,
-          profile.season,
-          String(profile.seasonYear),
-          profile.rarityLabel ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(query),
-      )
-      .slice(0, 24)
-  }, [cachedEarningsProfiles, cachedProfileQuery])
+  const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
 
   const potentialAnalysis = useMemo(
     () =>
@@ -429,24 +410,66 @@ export default function PotentialPage() {
     )
   }
 
-  const loadCachedEarnings = (cacheKey: string) => {
-    const profile = data.cachedPlayerEarnings?.find((item) => item.cacheKey === cacheKey)
-    if (!profile) return
-    setEditingId(null)
-    setPotentialRows([])
-    setForm({
-      name: profile.name,
-      sport: profile.sport,
-      season: profile.season,
-      notes: `Loaded from cached ${profile.source.replace('_', ' ')}`,
-      rawJson: cachedEarningsToJson(profile),
-      previewAs: profile.rarityLabel ?? '',
-    })
-    setStatus(
-      `Loaded cached earnings for ${profile.name} (${profile.rows.length} row${
-        profile.rows.length === 1 ? '' : 's'
-      }). Click Analyze potential card to run the what-if.`,
-    )
+  const loadFromCatalog = async (result: CatalogSearchResult) => {
+    setCatalogLoadingKey(result.externalKey)
+    setStatus('')
+    try {
+      const { profile, storageConfigured } = await fetchCatalogImportProfile(result.externalKey)
+      if (!storageConfigured) {
+        setStatus('Shared catalog search is not configured yet.')
+        return
+      }
+      if (!profile) {
+        setStatus('That pass was not found in the shared catalog. Try searching again.')
+        return
+      }
+      if (profile.rows.length === 0) {
+        setStatus(
+          `${profile.name} is in the catalog but has no daily RAX rows yet — paste earnings manually below.`,
+        )
+        setEditingId(null)
+        setPotentialRows([])
+        setForm({
+          name: profile.name,
+          sport: sportFromCatalog(profile.sport),
+          season: profile.seasonLabel || String(profile.seasonYear),
+          notes: 'Loaded from shared catalog (no earnings rows)',
+          rawJson: '',
+          previewAs: profile.rarityLabel ?? '',
+        })
+        return
+      }
+
+      const sport = sportFromCatalog(profile.sport)
+      const rawJson = catalogProfileToJson(profile)
+      const parsed = parseRealAppToolsRows(rawJson, {
+        sport,
+        rarityLabel: profile.rarityLabel,
+        applyOtdMultiplier: Boolean(profile.rarityLabel),
+        passKind: profile.passKind,
+      })
+      setEditingId(null)
+      setPotentialRows(parsed.rows)
+      setForm({
+        name: profile.name,
+        sport,
+        season: profile.seasonLabel || String(profile.seasonYear),
+        notes: 'Loaded from shared Meowbot catalog',
+        rawJson,
+        previewAs: profile.rarityLabel ?? '',
+      })
+      setStatus(
+        `Loaded ${profile.name} from catalog: ${parsed.rows.length} row${
+          parsed.rows.length === 1 ? '' : 's'
+        }, ${formatRax(profile.totalBaseRax)} base RAX${
+          parsed.skipped ? ` · skipped ${parsed.skipped} invalid row${parsed.skipped === 1 ? '' : 's'}` : ''
+        }. Analysis updates automatically below.`,
+      )
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not load catalog pass.')
+    } finally {
+      setCatalogLoadingKey('')
+    }
   }
 
   return (
@@ -456,9 +479,9 @@ export default function PotentialPage() {
           <p className="eyebrow">What-if</p>
           <h2>Potential card checker</h2>
           <p>
-            Test a player or team pass you do not own yet. Load cached player earnings from prior
-            imports or paste daily RAX JSON from realapp.com. Saved profiles stay out of your real
-            totals.
+            Test a player pass you do not own yet. Search the shared Meowbot catalog for daily RAX
+            and base totals, or paste JSON manually from realapp.com. Saved profiles stay out of your
+            real totals.
           </p>
         </div>
         <Link className="button" to="/overlaps">
@@ -471,8 +494,9 @@ export default function PotentialPage() {
           <div>
             <h2>Manual import walkthrough</h2>
             <p>
-              Username import closes after {realappToolsShutdownLabel()}; after that, use cached
-              earnings or paste one card at a time from realapp.com.
+              Username import closes after {realappToolsShutdownLabel()}. Use{' '}
+              <a href="#catalog-search">shared catalog search</a> below for player passes and RAX, or
+              paste one card at a time from realapp.com.
             </p>
           </div>
           <button className="button" type="button" onClick={() => setShowTutorial((current) => !current)}>
@@ -581,6 +605,17 @@ export default function PotentialPage() {
         )}
       </section>
 
+      <CatalogSearchPanel
+        sectionId="catalog-search"
+        title="Search player passes"
+        description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection. Results show row counts and total base RAX."
+        passKind="player"
+        actionLabel="Load for analysis"
+        loadingKey={catalogLoadingKey}
+        disabled={Boolean(catalogLoadingKey)}
+        onSelect={loadFromCatalog}
+      />
+
       <form className="panel form-panel" onSubmit={submitAnalyze}>
         <div className="section-heading">
           <div>
@@ -588,65 +623,11 @@ export default function PotentialPage() {
             <p>
               {editingId
                 ? 'Update fields or JSON, then analyze again or save.'
-                : 'Enter profile details, load cached earnings, or paste realapp.com JSON.'}
+                : 'Search the shared catalog above, or enter details and paste realapp.com JSON below.'}
             </p>
           </div>
           <span className="badge">{editingId ? 'Editing' : 'Draft'}</span>
         </div>
-        {cachedEarningsProfiles.length > 0 ? (
-          <section className="cached-profile-panel">
-            <div className="section-heading">
-              <div>
-                <h3>Cached player earnings</h3>
-                <p>
-                  Player daily earnings saved from previous imports. Search here to run a what-if
-                  without copying JSON again.
-                </p>
-              </div>
-              <span className="badge">{cachedEarningsProfiles.length} cached</span>
-            </div>
-            <label className="field">
-              <span>Search cached profiles</span>
-              <input
-                type="search"
-                value={cachedProfileQuery}
-                placeholder="Player name, sport, season, rarity…"
-                onChange={(event) => setCachedProfileQuery(event.target.value)}
-              />
-            </label>
-            {!cachedProfileQuery.trim() ? (
-              <p className="card-picker-empty">
-                Start typing to find cached base earnings from previous imports. These profiles are
-                reusable what-if inputs, not saved Potential cards.
-              </p>
-            ) : filteredCachedEarningsProfiles.length === 0 ? (
-              <p className="card-picker-empty">No cached profiles match that search.</p>
-            ) : (
-              <div className="cached-profile-list" role="listbox" aria-label="Cached player earnings">
-                {filteredCachedEarningsProfiles.map((profile) => (
-                  <button
-                    key={profile.cacheKey}
-                    type="button"
-                    className="cached-profile-item"
-                    onClick={() => loadCachedEarnings(profile.cacheKey)}
-                  >
-                    <strong>{profile.name}</strong>
-                    <small>
-                      {profile.sport} · {profile.season || profile.seasonYear}
-                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
-                      row{profile.rows.length === 1 ? '' : 's'}
-                    </small>
-                    <span>Use in Potential</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="import-hint">
-              Cached profiles are reusable base earnings. Pick a profile, choose a rarity in
-              Preview as, then analyze the impact against your collection.
-            </p>
-          </section>
-        ) : null}
         <div className="form-grid">
           <label className="field">
             <span>Player / team name</span>

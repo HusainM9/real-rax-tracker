@@ -28,6 +28,11 @@ import {
 import { createId } from '../lib/id'
 import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
+import {
+  importCatalogProfileIntoData,
+  type CatalogProfileImportResult,
+} from '../lib/catalogImport'
+import type { CatalogImportProfile } from '../lib/catalogApi'
 import type {
   AppSettings,
   PlayerCard,
@@ -84,6 +89,7 @@ type RaxDataContextValue = {
     username: string,
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
+  importCatalogProfile: (profile: CatalogImportProfile) => CatalogProfileImportResult
   resetAll: () => void
 }
 
@@ -347,6 +353,25 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           settings: { ...nextData.settings, savedUsername: trimmed },
         })
         return result
+      },
+      importCatalogProfile: (profile) => {
+        let result: CatalogProfileImportResult | null = null
+        setData((current) => {
+          const imported = importCatalogProfileIntoData(current, profile, {
+            nowIso: nowIso(),
+            createId,
+          })
+          result = imported.result
+          return imported.data
+        })
+        return (
+          result ?? {
+            cardId: '',
+            cardCreated: false,
+            rowsImported: 0,
+            rowsUpdated: 0,
+          }
+        )
       },
       resetAll: () => setData(createEmptyData()),
     }),

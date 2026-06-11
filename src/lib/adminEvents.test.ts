@@ -15,6 +15,7 @@ function emptyResult(overrides: Partial<UsernameImportResult> = {}): UsernameImp
     passesSkipped: 0,
     cachedPlayerPasses: 0,
     ownedPasses: [],
+    cachedProfiles: [],
     errors: [],
     passesWithNoEarnings: [],
     passFetchErrors: [],

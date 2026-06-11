@@ -44,3 +44,8 @@ export async function getImportOwnershipSnapshot(
         : validated.importedAt,
   }
 }
+
+export async function listImportOwnershipUsernames(): Promise<string[]> {
+  if (!adminStorageConfigured()) return []
+  return kv.smembers(OWNERSHIP_USERNAMES_KEY)
+}

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { ADMIN_EVENT_TYPES, type AdminEvent, type AdminUserSummary } from '../../lib/adminEventTypes'
+import {
+  fetchCatalogImportProfile,
+  type CatalogSearchResult,
+} from '../lib/catalogApi'
+import { catalogProfileToJson } from '../lib/catalogProfileJson'
 
 type EventsResponse = {
   events: AdminEvent[]
@@ -25,6 +31,49 @@ type OwnershipLookupResponse = {
   storageConfigured: boolean
 }
 
+type CatalogImportResponse = {
+  ok: boolean
+  mode: 'saved-usernames' | 'usernames' | 'pass' | 'otd-table' | 'manual-upsert'
+  totals?: {
+    usernames: number
+    passesScanned: number
+    passesUpserted: number
+    rowsUpserted: number
+    passesWithNoEarnings: number
+    failures: number
+  }
+  usernamesImported?: Array<{
+    username: string
+    passesScanned: number
+    passesUpserted: number
+    rowsUpserted: number
+    passesWithNoEarnings: number
+    failures: string[]
+  }>
+  passesScanned?: number
+  passesUpserted?: number
+  rowsUpserted?: number
+  passesWithNoEarnings?: number
+  failures?: string[]
+  skippedRows?: number
+  error?: string
+}
+
+type UsernameOwnershipResponse = {
+  ok: boolean
+  usernamesSaved?: Array<{
+    username: string
+    passesSaved: number
+    error?: string
+  }>
+  totals?: {
+    usernames: number
+    passesSaved: number
+    failures: number
+  }
+  error?: string
+}
+
 const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
   pass_no_earnings: 'No earnings',
@@ -43,6 +92,43 @@ export default function AdminPage() {
   const [usernameFilter, setUsernameFilter] = useState('')
   const [ownershipLookupUsername, setOwnershipLookupUsername] = useState('')
   const [ownershipLookupStatus, setOwnershipLookupStatus] = useState('')
+  const [catalogUsernames, setCatalogUsernames] = useState('')
+  const [ownershipSaveUsernames, setOwnershipSaveUsernames] = useState('')
+  const [ownershipSaveStatus, setOwnershipSaveStatus] = useState('')
+  const [ownershipSaving, setOwnershipSaving] = useState(false)
+  const [catalogSavedLimit, setCatalogSavedLimit] = useState('25')
+  const [catalogStatus, setCatalogStatus] = useState('')
+  const [catalogImporting, setCatalogImporting] = useState(false)
+  const [otdImport, setOtdImport] = useState({
+    seasons: '2026,2025',
+    sport: '',
+    includePlayers: true,
+    includeTeams: true,
+    maxPasses: '250',
+  })
+  const [passImport, setPassImport] = useState({
+    entityId: '',
+    seasonYear: '',
+    sport: 'NBA',
+    passKind: 'player' as 'player' | 'team',
+    name: '',
+    rarityLabel: '',
+    seasonLabel: '',
+  })
+  const [manualUpsert, setManualUpsert] = useState({
+    externalKey: '',
+    entityId: '',
+    seasonYear: '',
+    sport: 'NBA',
+    passKind: 'player' as 'player' | 'team',
+    name: '',
+    rarityLabel: '',
+    seasonLabel: '',
+    rawJson: '',
+  })
+  const [manualUpsertLoadingKey, setManualUpsertLoadingKey] = useState('')
+  const [manualUpsertBusy, setManualUpsertBusy] = useState(false)
+  const [manualUpsertStatus, setManualUpsertStatus] = useState('')
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -127,6 +213,195 @@ export default function AdminPage() {
     }
   }
 
+  const postCatalogImport = async (body: Record<string, unknown>): Promise<CatalogImportResponse> => {
+    const response = await fetch('/api/admin/catalog-import', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = (await response.json()) as CatalogImportResponse
+    if (!response.ok) {
+      throw new Error(data.error || `Catalog import failed (${response.status}).`)
+    }
+    return data
+  }
+
+  const summarizeCatalogImport = (data: CatalogImportResponse): string => {
+    if (data.totals) {
+      return `Imported ${data.totals.usernames} username${data.totals.usernames === 1 ? '' : 's'}: ${data.totals.passesUpserted} pass${data.totals.passesUpserted === 1 ? '' : 'es'}, ${data.totals.rowsUpserted} RAX row${data.totals.rowsUpserted === 1 ? '' : 's'} saved to Supabase (${data.totals.passesWithNoEarnings} with no earnings, ${data.totals.failures} failure${data.totals.failures === 1 ? '' : 's'}).`
+    }
+    return `Imported pass: ${data.passesUpserted ?? 0} pass${data.passesUpserted === 1 ? '' : 'es'}, ${data.rowsUpserted ?? 0} RAX row${data.rowsUpserted === 1 ? '' : 's'} saved to Supabase (${data.passesWithNoEarnings ?? 0} with no earnings, ${(data.failures ?? []).length} failure${(data.failures ?? []).length === 1 ? '' : 's'}).`
+  }
+
+  const importSavedUsernames = async () => {
+    setCatalogImporting(true)
+    setCatalogStatus('Importing saved usernames into Supabase catalog…')
+    try {
+      const data = await postCatalogImport({
+        mode: 'saved-usernames',
+        limit: Number(catalogSavedLimit) || 25,
+      })
+      setCatalogStatus(summarizeCatalogImport(data))
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+    } finally {
+      setCatalogImporting(false)
+    }
+  }
+
+  const importManualUsernames = async () => {
+    setCatalogImporting(true)
+    setCatalogStatus('Importing usernames into Supabase catalog…')
+    try {
+      const data = await postCatalogImport({
+        mode: 'usernames',
+        usernames: catalogUsernames,
+      })
+      setCatalogStatus(summarizeCatalogImport(data))
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+    } finally {
+      setCatalogImporting(false)
+    }
+  }
+
+  const saveUsernameOwnership = async () => {
+    setOwnershipSaving(true)
+    setOwnershipSaveStatus('Resolving passes from Meowbot and saving ownership snapshot…')
+    try {
+      const response = await fetch('/api/admin/username-ownership', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: ownershipSaveUsernames }),
+      })
+      const data = (await response.json()) as UsernameOwnershipResponse
+      if (!response.ok) {
+        throw new Error(data.error || `Ownership save failed (${response.status}).`)
+      }
+      const totals = data.totals
+      if (!totals) {
+        setOwnershipSaveStatus('Ownership save completed.')
+        return
+      }
+      const failed = (data.usernamesSaved ?? []).filter((entry) => entry.error)
+      setOwnershipSaveStatus(
+        `Saved ownership for ${totals.usernames} username${totals.usernames === 1 ? '' : 's'} (${totals.passesSaved} pass${totals.passesSaved === 1 ? '' : 'es'} total${totals.failures > 0 ? `, ${totals.failures} failure${totals.failures === 1 ? '' : 's'}` : ''}).` +
+          (failed.length > 0
+            ? ` Errors: ${failed.map((entry) => `@${entry.username}: ${entry.error}`).join('; ')}`
+            : ' Users can recover pass lists from Entry after Meowbot shuts down; attach RAX from the shared catalog separately.'),
+      )
+    } catch (error) {
+      setOwnershipSaveStatus(error instanceof Error ? error.message : 'Ownership save failed.')
+    } finally {
+      setOwnershipSaving(false)
+    }
+  }
+
+  const importSpecificPass = async () => {
+    setCatalogImporting(true)
+    setCatalogStatus('Importing specific pass into Supabase catalog…')
+    try {
+      const data = await postCatalogImport({
+        mode: 'pass',
+        ...passImport,
+        entityId: Number(passImport.entityId),
+        seasonYear: Number(passImport.seasonYear),
+      })
+      setCatalogStatus(summarizeCatalogImport(data))
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+    } finally {
+      setCatalogImporting(false)
+    }
+  }
+
+  const importOtdTable = async () => {
+    setCatalogImporting(true)
+    setCatalogStatus('Discovering passes from OTD tables and importing daily RAX into Supabase…')
+    try {
+      const data = await postCatalogImport({
+        mode: 'otd-table',
+        seasons: otdImport.seasons,
+        sport: otdImport.sport || undefined,
+        includePlayers: otdImport.includePlayers,
+        includeTeams: otdImport.includeTeams,
+        maxPasses: Number(otdImport.maxPasses) || 250,
+      })
+      setCatalogStatus(summarizeCatalogImport(data))
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+    } finally {
+      setCatalogImporting(false)
+    }
+  }
+
+  const loadManualUpsertPass = async (result: CatalogSearchResult) => {
+    setManualUpsertLoadingKey(result.externalKey)
+    setManualUpsertStatus('Loading pass from shared catalog…')
+    try {
+      const { profile, storageConfigured } = await fetchCatalogImportProfile(result.externalKey)
+      if (!storageConfigured) {
+        setManualUpsertStatus('Shared catalog search is not configured yet.')
+        return
+      }
+      if (!profile) {
+        setManualUpsertStatus('That pass was not found in the shared catalog. Try searching again.')
+        return
+      }
+
+      setManualUpsert({
+        externalKey: profile.externalKey,
+        entityId: String(profile.entityId),
+        seasonYear: String(profile.seasonYear),
+        sport: profile.sport,
+        passKind: profile.passKind,
+        name: profile.name,
+        rarityLabel: profile.rarityLabel ?? '',
+        seasonLabel: profile.seasonLabel,
+        rawJson:
+          profile.rows.length > 0
+            ? catalogProfileToJson(profile)
+            : '{\n  "earnings": []\n}',
+      })
+      setManualUpsertStatus(
+        `Loaded ${profile.name} (${profile.rowCount} existing RAX row${profile.rowCount === 1 ? '' : 's'}). Edit the JSON below, then upsert to Supabase without calling Meowbot.`,
+      )
+    } catch (error) {
+      setManualUpsertStatus(error instanceof Error ? error.message : 'Could not load catalog pass.')
+    } finally {
+      setManualUpsertLoadingKey('')
+    }
+  }
+
+  const submitManualUpsert = async () => {
+    setManualUpsertBusy(true)
+    setManualUpsertStatus('Saving manual catalog override to Supabase…')
+    try {
+      const data = await postCatalogImport({
+        mode: 'manual-upsert',
+        externalKey: manualUpsert.externalKey || undefined,
+        entityId: Number(manualUpsert.entityId),
+        seasonYear: Number(manualUpsert.seasonYear),
+        sport: manualUpsert.sport,
+        passKind: manualUpsert.passKind,
+        name: manualUpsert.name,
+        rarityLabel: manualUpsert.rarityLabel || undefined,
+        seasonLabel: manualUpsert.seasonLabel || undefined,
+        rawJson: manualUpsert.rawJson,
+      })
+      const skipped = data.skippedRows ?? 0
+      setManualUpsertStatus(
+        `Saved ${data.passesUpserted ?? 0} pass with ${data.rowsUpserted ?? 0} RAX row${(data.rowsUpserted ?? 0) === 1 ? '' : 's'} to Supabase${skipped > 0 ? ` (${skipped} row${skipped === 1 ? '' : 's'} skipped in JSON)` : ''}.`,
+      )
+    } catch (error) {
+      setManualUpsertStatus(error instanceof Error ? error.message : 'Manual catalog upsert failed.')
+    } finally {
+      setManualUpsertBusy(false)
+    }
+  }
+
   return (
     <div className="page-stack admin-page">
       <section className="hero-card">
@@ -174,6 +449,455 @@ export default function AdminPage() {
           <p className="empty">{error}</p>
         </section>
       ) : null}
+
+      <CollapsiblePanel
+        title="Shared Meowbot catalog imports"
+        description="Seed Supabase, save username ownership failsafes, or override bad RAX"
+        defaultOpen
+      >
+        <section className="import-hint">
+          <p>
+            No known Meowbot action in this codebase enumerates every pass globally. These tools use
+            the reliable user/pass-specific Meowbot requests and save the results to Supabase for
+            future Entry search.
+          </p>
+        </section>
+        <div className="form-grid">
+          <label className="field">
+            <span>Saved usernames limit</span>
+            <input
+              type="number"
+              min="1"
+              max="50"
+              value={catalogSavedLimit}
+              disabled={catalogImporting}
+              onChange={(event) => setCatalogSavedLimit(event.target.value)}
+            />
+          </label>
+          <div className="field">
+            <span>Saved usernames</span>
+            <button
+              className="button primary"
+              type="button"
+              disabled={catalogImporting}
+              onClick={() => void importSavedUsernames()}
+            >
+              Import saved usernames
+            </button>
+          </div>
+        </div>
+        <label className="field">
+          <span>Manual usernames</span>
+          <textarea
+            className="bulk-import-textarea"
+            value={catalogUsernames}
+            placeholder="@user1, @user2, @user3"
+            disabled={catalogImporting}
+            onChange={(event) => setCatalogUsernames(event.target.value)}
+          />
+        </label>
+        <div className="button-row">
+          <button
+            className="button"
+            type="button"
+            disabled={catalogImporting || catalogUsernames.trim().length === 0}
+            onClick={() => void importManualUsernames()}
+          >
+            Import manual usernames
+          </button>
+        </div>
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>Username ownership failsafe</h3>
+              <p className="subsection-note">
+                Resolve @username from Meowbot and save pass IDs (entity, season, sport, name,
+                rarity) to the ownership cache only. Does not fetch daily RAX — pair this with
+                catalog import or manual RAX override so Entry can attach earnings later if Meowbot
+                import fails or shuts down.
+              </p>
+            </div>
+          </div>
+          <label className="field">
+            <span>Usernames to save</span>
+            <textarea
+              className="bulk-import-textarea"
+              value={ownershipSaveUsernames}
+              placeholder="@friend, @anotheruser"
+              disabled={ownershipSaving || catalogImporting}
+              onChange={(event) => setOwnershipSaveUsernames(event.target.value)}
+            />
+          </label>
+          <div className="button-row">
+            <button
+              className="button primary"
+              type="button"
+              disabled={
+                ownershipSaving ||
+                catalogImporting ||
+                ownershipSaveUsernames.trim().length === 0
+              }
+              onClick={() => void saveUsernameOwnership()}
+            >
+              {ownershipSaving ? 'Saving ownership…' : 'Save username pass ownership'}
+            </button>
+          </div>
+          {ownershipSaveStatus ? <p className="import-status">{ownershipSaveStatus}</p> : null}
+        </div>
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>OTD table discovery import</h3>
+              <p className="subsection-note">
+                Uses realapp.tools OTD table endpoints to discover many player/team passes by
+                season, then fetches daily earnings for each discovered pass.
+              </p>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Seasons</span>
+              <input
+                value={otdImport.seasons}
+                placeholder="2026,2025,2024"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setOtdImport((current) => ({ ...current, seasons: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Sport filter</span>
+              <input
+                value={otdImport.sport}
+                placeholder="Optional, e.g. NBA or mlb"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setOtdImport((current) => ({ ...current, sport: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Max passes this run</span>
+              <input
+                type="number"
+                min="1"
+                max="1000"
+                value={otdImport.maxPasses}
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setOtdImport((current) => ({ ...current, maxPasses: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={otdImport.includePlayers}
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setOtdImport((current) => ({
+                    ...current,
+                    includePlayers: event.target.checked,
+                  }))
+                }
+              />
+              Players
+            </label>
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={otdImport.includeTeams}
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setOtdImport((current) => ({
+                    ...current,
+                    includeTeams: event.target.checked,
+                  }))
+                }
+              />
+              Teams
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={
+                catalogImporting ||
+                (!otdImport.includePlayers && !otdImport.includeTeams) ||
+                otdImport.seasons.trim().length === 0
+              }
+              onClick={() => void importOtdTable()}
+            >
+              Import from OTD tables
+            </button>
+          </div>
+        </div>
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>Specific pass import</h3>
+              <p className="subsection-note">
+                Use this when you know the player/team entity ID, season year, and sport.
+              </p>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Entity ID</span>
+              <input
+                value={passImport.entityId}
+                placeholder="100"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, entityId: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Season year</span>
+              <input
+                value={passImport.seasonYear}
+                placeholder="2026"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, seasonYear: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Sport</span>
+              <input
+                value={passImport.sport}
+                placeholder="NBA"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, sport: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Pass type</span>
+              <select
+                value={passImport.passKind}
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({
+                    ...current,
+                    passKind: event.target.value as 'player' | 'team',
+                  }))
+                }
+              >
+                <option value="player">Player</option>
+                <option value="team">Team</option>
+              </select>
+            </label>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Name override</span>
+              <input
+                value={passImport.name}
+                placeholder="Optional"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Rarity</span>
+              <input
+                value={passImport.rarityLabel}
+                placeholder="Optional"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, rarityLabel: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Season label</span>
+              <input
+                value={passImport.seasonLabel}
+                placeholder="Optional, e.g. 2025-26"
+                disabled={catalogImporting}
+                onChange={(event) =>
+                  setPassImport((current) => ({ ...current, seasonLabel: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <button
+              className="button"
+              type="button"
+              disabled={
+                catalogImporting ||
+                !passImport.entityId.trim() ||
+                !passImport.seasonYear.trim() ||
+                !passImport.sport.trim()
+              }
+              onClick={() => void importSpecificPass()}
+            >
+              Import specific pass
+            </button>
+          </div>
+        </div>
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>Manual catalog override</h3>
+              <p className="subsection-note">
+                Fix incorrect Meowbot earnings by loading an existing pass from the shared catalog,
+                editing its JSON (paste from realapp.com if needed), and upserting directly to
+                Supabase without calling Meowbot.
+              </p>
+            </div>
+          </div>
+
+          <CatalogSearchPanel
+            sectionId="admin-manual-upsert-search"
+            title="Load existing pass"
+            description="Search the shared catalog and load pass metadata plus current RAX rows into the editor below."
+            badge="Admin override"
+            actionLabel="Load pass"
+            loadingLabel="Loading pass…"
+            loadingKey={manualUpsertLoadingKey}
+            disabled={manualUpsertBusy || Boolean(manualUpsertLoadingKey)}
+            emptyHint="Search for a player or team pass to pre-fill entity ID, season, sport, name, and current RAX JSON."
+            onSelect={loadManualUpsertPass}
+          />
+
+          <div className="form-grid">
+            <label className="field">
+              <span>Entity ID</span>
+              <input
+                value={manualUpsert.entityId}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, entityId: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Season year</span>
+              <input
+                value={manualUpsert.seasonYear}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, seasonYear: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Sport</span>
+              <input
+                value={manualUpsert.sport}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, sport: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Pass type</span>
+              <select
+                value={manualUpsert.passKind}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({
+                    ...current,
+                    passKind: event.target.value as 'player' | 'team',
+                  }))
+                }
+              >
+                <option value="player">Player</option>
+                <option value="team">Team</option>
+              </select>
+            </label>
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Name</span>
+              <input
+                value={manualUpsert.name}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, name: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Rarity</span>
+              <input
+                value={manualUpsert.rarityLabel}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, rarityLabel: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Season label</span>
+              <input
+                value={manualUpsert.seasonLabel}
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, seasonLabel: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>External key</span>
+              <input
+                value={manualUpsert.externalKey}
+                placeholder="Auto from entity · season · sport"
+                disabled={manualUpsertBusy}
+                onChange={(event) =>
+                  setManualUpsert((current) => ({ ...current, externalKey: event.target.value }))
+                }
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Daily RAX JSON</span>
+            <textarea
+              className="bulk-import-textarea"
+              value={manualUpsert.rawJson}
+              placeholder='Paste realapp.com JSON with an "earnings" array, or edit the loaded "rows" JSON.'
+              disabled={manualUpsertBusy}
+              onChange={(event) =>
+                setManualUpsert((current) => ({ ...current, rawJson: event.target.value }))
+              }
+            />
+          </label>
+          <div className="button-row">
+            <button
+              className="button primary"
+              type="button"
+              disabled={
+                manualUpsertBusy ||
+                !manualUpsert.entityId.trim() ||
+                !manualUpsert.seasonYear.trim() ||
+                !manualUpsert.sport.trim() ||
+                !manualUpsert.name.trim() ||
+                !manualUpsert.rawJson.trim()
+              }
+              onClick={() => void submitManualUpsert()}
+            >
+              Upsert to Supabase
+            </button>
+          </div>
+          {manualUpsertStatus ? <p className="import-status">{manualUpsertStatus}</p> : null}
+        </div>
+        {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
+      </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Ownership snapshot lookup"

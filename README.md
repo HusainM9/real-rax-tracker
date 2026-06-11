@@ -77,9 +77,23 @@ AUTH_SESSION_SECRET=
 ADMIN_PASSWORD=
 KV_REST_API_URL=
 KV_REST_API_TOKEN=
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+MEOWBOT_GLOBAL_CATALOG_URL=
+MEOWBOT_GLOBAL_CATALOG_TOKEN=
 ```
 
 `ADMIN_PASSWORD` gates the unlisted `/admin` operator area (requires a normal site login first). `KV_*` vars come from linking a **Vercel KV** or **Redis** store to the project — used for central import events and minimal username/pass ownership snapshots. Without KV, the app works normally; admin logs and ownership cache stay empty.
+
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` enable the shared Meowbot RAX catalog used by Entry page search. Create the catalog tables by running [`supabase/meowbot_catalog.sql`](supabase/meowbot_catalog.sql) in the Supabase SQL editor. Catalog imports save pass metadata even when Meowbot returns no daily earnings (`has_earnings = false` on `meowbot_passes`). Filter no-earnings passes in Supabase with `select * from meowbot_passes where has_earnings = false`. Each pass stores summed Meowbot base RAX in `total_base_rax` (for example `select name, total_base_rax from meowbot_passes where season_year = 2018 order by total_base_rax desc`). If you created the tables earlier, run the commented `alter table` statements at the bottom of [`supabase/meowbot_catalog.sql`](supabase/meowbot_catalog.sql) once, including the backfill `update` for `total_base_rax`. Successful username imports and existing browser cached profiles are uploaded into this shared catalog when Supabase is configured, so future users can search/import those RAX rows from the database. `MEOWBOT_GLOBAL_CATALOG_URL` points the admin sync route at a Meowbot export/global endpoint; `MEOWBOT_GLOBAL_CATALOG_TOKEN` is optional and is sent as a bearer token when set.
+
+To seed the shared catalog locally without relying on `/api/*` dev routes, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`, then run:
+
+```bash
+node scripts/seed-meowbot-catalog.mjs --seasons=2026,2025 --types=players,teams --limit=250 --concurrency=8
+```
+
+The script is dry-run by default. Add `--write` when you are ready to save rows to Supabase. Add `--sport=nba` or another sport to run smaller batches. Plain `npm run dev` is Vite-only, so browser calls to `/api/*` do not execute Vercel functions locally.
 
 ## Deployment (Vercel)
 

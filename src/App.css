@@ -818,6 +818,18 @@ label.button input.sr-only {
   line-height: 1.4;
 }
 
+.catalog-accuracy-disclaimer {
+  border: 1px solid rgba(228, 160, 36, 0.28);
+  border-radius: var(--radius-md);
+  background: var(--accent-muted);
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0.65rem 0 0;
+  max-width: 42rem;
+  padding: 0.65rem 0.85rem;
+}
+
 .card-picker-empty {
   color: var(--muted);
   font-size: 0.9rem;
@@ -925,6 +937,19 @@ label.button input.sr-only {
 .button-row a.button {
   flex: 1 1 auto;
   min-width: min(100%, 9rem);
+}
+
+.inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.inline-toggle input {
+  width: auto;
+  accent-color: var(--accent);
 }
 
 .sort-controls {

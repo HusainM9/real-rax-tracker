@@ -125,15 +125,11 @@ describe('importFromUsername', () => {
       expect(result.rowsImported).toBe(2)
       expect(result.passesFetched).toBe(2)
       expect(result.passesSkipped).toBe(2)
-      expect(result.cachedPlayerPasses).toBe(2)
+      expect(result.cachedPlayerPasses).toBe(0)
       expect(result.ownedPasses).toHaveLength(4)
       expect(data.cards).toHaveLength(2)
       expect(data.performances).toHaveLength(2)
-      expect(data.cachedPlayerEarnings).toHaveLength(2)
-      expect((data.cachedPlayerEarnings ?? []).map((profile) => profile.name).sort()).toEqual([
-        'Other Player',
-        'Test Player',
-      ])
+      expect(data.cachedPlayerEarnings ?? []).toHaveLength(0)
       expect(data.cards[0]?.externalKey).toBe('100|2026|NBA')
       expect(data.performances[0]?.claimDay).toBe('2025-08-22')
       expect(data.performances[0]?.raxEarned).toBe(650)
@@ -168,6 +164,11 @@ describe('importFromUsername', () => {
     const noEarningsFetch: typeof fetch = (input, init) => {
       const url = String(input)
       const body = init?.body ? JSON.parse(String(init.body)) : {}
+      if (url.startsWith('/api/catalog/import?')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ storageConfigured: true, profile: null }), { status: 200 }),
+        )
+      }
       if (
         url.includes('market-data') &&
         (body.action === 'get_daily_earnings' || body.action === 'get_team_daily_earnings') &&
@@ -190,7 +191,7 @@ describe('importFromUsername', () => {
           passKind: 'player',
         }),
       ])
-      expect(result.errors.some((error) => error.includes('no daily earnings'))).toBe(true)
+      expect(result.errors.some((error) => error.includes('Meowbot or shared catalog'))).toBe(true)
       expect(getFailedPlayerPasses(result)).toEqual([
         expect.objectContaining({
           name: 'Test Player',
@@ -200,6 +201,60 @@ describe('importFromUsername', () => {
       ])
       expect(data.cards.find((card) => card.externalKey === '100|2026|NBA')).toBeDefined()
       expect(data.performances.filter((perf) => perf.cardId === data.cards[0]?.id)).toHaveLength(0)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('falls back to shared catalog when Meowbot returns no earnings', async () => {
+    const originalFetch = globalThis.fetch
+    const catalogFallbackFetch: typeof fetch = (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) : {}
+      if (url.startsWith('/api/catalog/import?externalKey=100%7C2026%7CNBA')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              storageConfigured: true,
+              profile: {
+                externalKey: '100|2026|NBA',
+                entityId: 100,
+                passKind: 'player',
+                sport: 'NBA',
+                seasonYear: 2026,
+                seasonLabel: '2025-26',
+                name: 'Test Player',
+                rarityLabel: 'Legendary 1',
+                cachedAt: '2026-06-11T00:00:00.000Z',
+                rowCount: 1,
+                totalBaseRax: 26,
+                rows: [{ claimDay: '2025-08-22', baseRaxEarned: 26 }],
+              },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      if (
+        url.includes('market-data') &&
+        (body.action === 'get_daily_earnings' || body.action === 'get_team_daily_earnings') &&
+        body.payload.entityId === 100
+      ) {
+        return Promise.resolve(new Response(JSON.stringify({ rows: [] }), { status: 200 }))
+      }
+      return mockFetch(input, init)
+    }
+    globalThis.fetch = catalogFallbackFetch
+
+    try {
+      const { data, result } = await importFromUsername(createEmptyData(), 'testuser')
+
+      expect(result.passesWithNoEarnings).toHaveLength(0)
+      expect(result.rowsImported).toBe(2)
+      const testPlayerPerf = data.performances.find(
+        (performance) => performance.claimDay === '2025-08-22' && performance.raxEarned === 650,
+      )
+      expect(testPlayerPerf).toBeDefined()
     } finally {
       globalThis.fetch = originalFetch
     }
@@ -324,6 +379,30 @@ describe('importFromUsername', () => {
           ),
         )
       }
+      if (url.startsWith('/api/catalog/import?')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              storageConfigured: true,
+              profile: {
+                externalKey: '999|2026|MLB',
+                entityId: 999,
+                passKind: 'player',
+                sport: 'MLB',
+                seasonYear: 2026,
+                seasonLabel: '2026',
+                name: 'Shohei Ohtani',
+                rarityLabel: 'Legendary 1',
+                cachedAt: '2026-06-11T00:00:00.000Z',
+                rowCount: 1,
+                totalBaseRax: 10,
+                rows: [{ claimDay: '2026-04-01', baseRaxEarned: 10 }],
+              },
+            }),
+            { status: 200 },
+          ),
+        )
+      }
       return Promise.resolve(new Response(JSON.stringify({ error: 'unexpected' }), { status: 500 }))
     }
     globalThis.fetch = snapshotFetch
@@ -331,10 +410,14 @@ describe('importFromUsername', () => {
     try {
       const { data, result } = await importFromAdminOwnership(createEmptyData(), 'testuser')
       expect(result.passesFetched).toBe(1)
+      expect(result.rowsImported).toBe(1)
       expect(data.cards).toHaveLength(1)
       expect(data.cards[0]?.name).toContain('Ohtani')
       expect(data.cards[0]?.sport).toBe('MLB')
       expect(data.cards[0]?.season).toBe('2026')
+      expect(data.cards[0]?.rarityLabel).toBe('Legendary 1')
+      expect(data.performances).toHaveLength(1)
+      expect(data.performances[0]?.baseRaxEarned).toBe(10)
     } finally {
       globalThis.fetch = originalFetch
     }

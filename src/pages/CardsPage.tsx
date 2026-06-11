@@ -5,7 +5,9 @@ import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer
 import {
   CARD_SORT_OPTIONS,
   filterCardsByRarityPreset,
+  filterCardsBySearch,
   filterCardsBySport,
+  filterCardsByTeamPass,
   sortCards,
   type CardSortKey,
   type RarityFilterValue,
@@ -37,6 +39,8 @@ export default function CardsPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [sportFilter, setSportFilter] = useState<Sport | 'All'>('All')
   const [rarityFilter, setRarityFilter] = useState<RarityFilterValue>('All')
+  const [cardSearchQuery, setCardSearchQuery] = useState('')
+  const [showTeamCards, setShowTeamCards] = useState(true)
   const [cardsPage, setCardsPage] = useState(1)
 
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
@@ -44,11 +48,17 @@ export default function CardsPage() {
 
   const filteredCards = useMemo(
     () =>
-      filterCardsByRarityPreset(
-        filterCardsBySport(rollup.cards, sportFilter),
-        rarityFilter,
+      filterCardsBySearch(
+        filterCardsByTeamPass(
+          filterCardsByRarityPreset(
+            filterCardsBySport(rollup.cards, sportFilter),
+            rarityFilter,
+          ),
+          showTeamCards,
+        ),
+        cardSearchQuery,
       ),
-    [rollup.cards, sportFilter, rarityFilter],
+    [rollup.cards, sportFilter, rarityFilter, showTeamCards, cardSearchQuery],
   )
 
   const sortedCards = useMemo(
@@ -70,7 +80,7 @@ export default function CardsPage() {
 
   useEffect(() => {
     setCardsPage(1)
-  }, [sportFilter, rarityFilter, sortKey, secondarySortKey, sortDirection])
+  }, [sportFilter, rarityFilter, sortKey, secondarySortKey, sortDirection, cardSearchQuery, showTeamCards])
 
   useEffect(() => {
     if (cardsPage > cardsPageTotal) {
@@ -95,6 +105,23 @@ export default function CardsPage() {
         }
       >
         <div className="sort-controls">
+          <label className="field inline-field rank-search-field">
+            <span>Search cards</span>
+            <input
+              type="search"
+              value={cardSearchQuery}
+              placeholder="Player, team, sport, season…"
+              onChange={(event) => setCardSearchQuery(event.target.value)}
+            />
+          </label>
+          <label className="inline-toggle">
+            <input
+              type="checkbox"
+              checked={showTeamCards}
+              onChange={(event) => setShowTeamCards(event.target.checked)}
+            />
+            Team passes
+          </label>
           <label className="field inline-field">
             <span>Sport</span>
             <select
@@ -194,7 +221,7 @@ export default function CardsPage() {
               ) : filteredCards.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="empty-cell">
-                    No cards match the current sport and rarity filters.
+                    No cards match the current search, sport, rarity, or team-pass filters.
                   </td>
                 </tr>
               ) : (

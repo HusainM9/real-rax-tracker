@@ -1,3 +1,5 @@
+import { importCatalogProfileIntoData, sportFromCatalog } from './catalogImport'
+import { fetchCatalogImportProfile, type CatalogImportProfile } from './catalogApi'
 import { createId } from './id'
 import {
   buildPlayerExternalKey,
@@ -11,16 +13,14 @@ import {
   runWithConcurrency,
   type MeowbotPlayerPass,
 } from './meowbotApi'
-import { playerEarningsCacheKey, upsertCachedPlayerEarnings } from './playerEarningsCache'
+import { computeOtdRax } from './otdRax'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
 import { passMetadataKey, seasonLabelFromPass, isCalendarYearSport } from './seasonLabel'
 import type {
-  CachedPlayerEarningsProfile,
   PlayerCard,
   RaxPerformance,
   RaxTrackerData,
-  SavedCardEarningsRow,
   Sport,
 } from '../types/rax'
 
@@ -40,6 +40,7 @@ export type UsernameImportResult = {
   passesSkipped: number
   cachedPlayerPasses: number
   ownedPasses: OwnedPassSnapshot[]
+  cachedProfiles: []
   errors: string[]
   passesWithNoEarnings: PassWithNoEarnings[]
   passFetchErrors: PassFetchError[]
@@ -162,6 +163,173 @@ function nowIso(): string {
 function passLabel(pass: MeowbotPlayerPass): string {
   if (pass.playerName) return pass.playerName
   return pass.passKind === 'team' ? `Team ${pass.entityId}` : `Player ${pass.entityId}`
+}
+
+function resolvePassMeta(pass: MeowbotPlayerPass, seasonLabelByKey?: Map<string, string>): {
+  sport: Sport
+  seasonLabel: string
+  externalKey: string
+  passName: string
+} {
+  const sport = mapMeowbotSport(pass.sportRaw) as Sport
+  const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
+  const seasonLabel = isCalendarYearSport(pass.sportRaw)
+    ? String(pass.season)
+    : (pass.seasonLabel ?? seasonLabelByKey?.get(metaKey) ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
+  return {
+    sport,
+    seasonLabel,
+    externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
+    passName: pass.playerName ?? passLabel(pass),
+  }
+}
+
+async function attachCatalogEarningsForPasses(
+  current: RaxTrackerData,
+  passes: MeowbotPlayerPass[],
+  options?: Pick<UsernameImportOptions, 'signal' | 'onProgress'>,
+): Promise<{
+  data: RaxTrackerData
+  rowsImported: number
+  rowsUpdated: number
+  passesWithNoEarnings: PassWithNoEarnings[]
+  passFetchErrors: PassFetchError[]
+  errors: string[]
+  catalogConfigured: boolean
+}> {
+  const passesWithNoEarnings: PassWithNoEarnings[] = []
+  const passFetchErrors: PassFetchError[] = []
+  const errors: string[] = []
+  let data = current
+  let rowsImported = 0
+  let rowsUpdated = 0
+  let catalogConfigured = true
+  let completed = 0
+  const total = passes.length
+  const reportProgress = options?.onProgress
+    ? createThrottledProgress(options.onProgress)
+    : undefined
+
+  await runWithConcurrency(
+    passes,
+    DEFAULT_IMPORT_CONCURRENCY,
+    async (pass) => {
+      const { sport, seasonLabel, externalKey, passName } = resolvePassMeta(pass)
+      const passMeta = {
+        name: passName,
+        sport,
+        season: seasonLabel,
+        rarityLabel: pass.rarityLabel,
+        externalKey,
+        passKind: pass.passKind,
+      }
+
+      try {
+        const { profile, storageConfigured } = await fetchCatalogImportProfile(
+          externalKey,
+          options?.signal,
+        )
+        if (!storageConfigured) {
+          catalogConfigured = false
+          return
+        }
+        if (!profile) {
+          if (pass.passKind === 'player') {
+            passFetchErrors.push({
+              ...passMeta,
+              message: 'Pass was not found in the shared catalog.',
+            })
+            errors.push(`${passName}: not found in shared catalog.`)
+          }
+          return
+        }
+        if (profile.rows.length === 0) {
+          if (pass.passKind === 'player') {
+            passesWithNoEarnings.push(passMeta)
+            errors.push(`${passName}: no daily RAX rows in shared catalog yet.`)
+          }
+          return
+        }
+
+        const enrichedProfile: CatalogImportProfile = {
+          ...profile,
+          name: profile.name.trim() || passName,
+          rarityLabel: pass.rarityLabel ?? profile.rarityLabel,
+          passKind: pass.passKind,
+        }
+        const imported = importCatalogProfileIntoData(data, enrichedProfile, {
+          nowIso: nowIso(),
+          createId,
+        })
+        data = imported.data
+        rowsImported += imported.result.rowsImported
+        rowsUpdated += imported.result.rowsUpdated
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not load catalog earnings.'
+        if (pass.passKind === 'player') {
+          passFetchErrors.push({ ...passMeta, message })
+        }
+        errors.push(`${passName}: ${message}`)
+      } finally {
+        completed += 1
+        reportProgress?.({
+          phase: 'fetching',
+          current: completed,
+          total,
+          label: `${passName} · catalog RAX`,
+        })
+      }
+    },
+    options?.signal,
+  )
+
+  return {
+    data,
+    rowsImported,
+    rowsUpdated,
+    passesWithNoEarnings,
+    passFetchErrors,
+    errors:
+      !catalogConfigured && passes.length > 0
+        ? [...errors, 'Shared catalog is not configured — cards were added without RAX.']
+        : errors,
+    catalogConfigured,
+  }
+}
+
+function catalogPerformanceDrafts(
+  cardId: string,
+  profile: CatalogImportProfile,
+): PerformanceDraft[] {
+  const sport = sportFromCatalog(profile.sport)
+  return profile.rows.map((row) => ({
+    cardId,
+    claimDay: row.claimDay,
+    raxEarned: computeOtdRax(row.baseRaxEarned, sport, profile.rarityLabel, profile.passKind),
+    baseRaxEarned: row.baseRaxEarned,
+    note: `Meowbot catalog source ${row.claimDay}${
+      row.playerBoxScoreId ? ` · box score ${row.playerBoxScoreId}` : ''
+    } · OTD adjusted`,
+  }))
+}
+
+async function loadCatalogPerformanceDrafts(
+  externalKey: string,
+  pass: MeowbotPlayerPass,
+  passName: string,
+  cardId: string,
+  signal?: AbortSignal,
+): Promise<PerformanceDraft[]> {
+  const { profile, storageConfigured } = await fetchCatalogImportProfile(externalKey, signal)
+  if (!storageConfigured || !profile || profile.rows.length === 0) return []
+
+  const enrichedProfile: CatalogImportProfile = {
+    ...profile,
+    name: profile.name.trim() || passName,
+    rarityLabel: pass.rarityLabel ?? profile.rarityLabel,
+    passKind: pass.passKind,
+  }
+  return catalogPerformanceDrafts(cardId, enrichedProfile)
 }
 
 function uniquePasses(passes: MeowbotPlayerPass[]): MeowbotPlayerPass[] {
@@ -395,9 +563,7 @@ export async function importFromUsername(
     ),
   )
   const passesSkipped = allPasses.length - selectedPasses.length
-  const selectedPassKeys = new Set(selectedPasses.map((pass) => `${pass.passKind}|${pass.pair}`))
-  const cacheCandidatePasses = resolved.playerPasses
-  const passesToFetch = uniquePasses([...selectedPasses, ...cacheCandidatePasses])
+  const passesToFetch = uniquePasses(selectedPasses)
 
   if (selectedPasses.length === 0) {
     throw new Error('No Legendary+ passes found for this username.')
@@ -407,7 +573,7 @@ export async function importFromUsername(
   const selectedPlayerPairs = passesToFetch
     .filter((pass) => pass.passKind === 'player')
     .map((pass) => pass.pair)
-  const selectedTeamPairs = selectedPasses
+  const selectedTeamPairs = passesToFetch
     .filter((pass) => pass.passKind === 'team')
     .map((pass) => pass.pair)
 
@@ -458,7 +624,6 @@ export async function importFromUsername(
 
   const cardIdsToReplace = new Set(cardIdByExternalKey.values())
   const performanceDrafts: PerformanceDraft[] = []
-  const cachedProfiles: CachedPlayerEarningsProfile[] = []
   let fetchSkipped = 0
   const total = passesToFetch.length
   let completed = 0
@@ -469,7 +634,6 @@ export async function importFromUsername(
     async (pass) => {
       const sport = mapMeowbotSport(pass.sportRaw) as Sport
       const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
-      const isSelectedPass = selectedPassKeys.has(`${pass.passKind}|${pass.pair}`)
       const label = passLabel(pass)
       const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
       const seasonLabel = resolvePassSeasonLabel(pass, seasonLabelByKey, metaKey)
@@ -482,6 +646,7 @@ export async function importFromUsername(
         externalKey,
         passKind: pass.passKind,
       }
+      const cardId = cardIdByExternalKey.get(externalKey)
 
       try {
         const dailyRows = await fetchDailyEarnings(
@@ -494,39 +659,7 @@ export async function importFromUsername(
           },
           options?.signal,
         )
-        const cardId = cardIdByExternalKey.get(externalKey)
-        if (dailyRows.length > 0) {
-          const cached = parseRealAppToolsDailyRows(dailyRows)
-          if (pass.passKind === 'player' && cached.rows.length > 0) {
-            cachedProfiles.push({
-              cacheKey: playerEarningsCacheKey({
-                passKind: pass.passKind,
-                sport,
-                seasonYear: pass.season,
-                entityId: pass.entityId,
-              }),
-              entityId: pass.entityId,
-              sport,
-              season: seasonLabel.trim(),
-              seasonYear: pass.season,
-              passKind: pass.passKind,
-              name: passName,
-              rarityLabel: pass.rarityLabel,
-              externalKey,
-              rows: cached.rows.map(
-                (row): SavedCardEarningsRow => ({
-                  claimDay: row.claimDay,
-                  raxEarned: row.baseRaxEarned ?? row.raxEarned,
-                  baseRaxEarned: row.baseRaxEarned ?? row.raxEarned,
-                  note: row.note,
-                }),
-              ),
-              source: 'username_import',
-              updatedAt: nowIso(),
-            })
-          }
-        }
-        if (isSelectedPass && cardId && dailyRows.length > 0) {
+        if (cardId && dailyRows.length > 0) {
           const parsed = parseRealAppToolsDailyRows(dailyRows, {
             sport: normalizeMeowbotSport(pass.sportRaw),
             rarityLabel: pass.rarityLabel,
@@ -543,18 +676,45 @@ export async function importFromUsername(
               note: entry.note,
             })
           }
-        } else if (isSelectedPass && cardId && dailyRows.length === 0) {
-          passesWithNoEarnings.push(passMeta)
-          errors.push(
-            `${passName}: no daily earnings returned — add RAX manually on the Entry page (Add card & earnings).`,
+        } else if (cardId && dailyRows.length === 0) {
+          const catalogDrafts = await loadCatalogPerformanceDrafts(
+            externalKey,
+            pass,
+            passName,
+            cardId,
+            options?.signal,
           )
+          if (catalogDrafts.length > 0) {
+            performanceDrafts.push(...catalogDrafts)
+          } else {
+            passesWithNoEarnings.push(passMeta)
+            errors.push(
+              `${passName}: no daily earnings from Meowbot or shared catalog — add RAX manually on the Entry page (Add card & earnings).`,
+            )
+          }
         }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Could not fetch daily earnings.'
-        if (isSelectedPass) {
-          passFetchErrors.push({ ...passMeta, message })
-          errors.push(`${passName}: ${message}`)
+        if (cardId) {
+          try {
+            const catalogDrafts = await loadCatalogPerformanceDrafts(
+              externalKey,
+              pass,
+              passName,
+              cardId,
+              options?.signal,
+            )
+            if (catalogDrafts.length > 0) {
+              performanceDrafts.push(...catalogDrafts)
+            } else {
+              passFetchErrors.push({ ...passMeta, message })
+              errors.push(`${passName}: ${message}`)
+            }
+          } catch {
+            passFetchErrors.push({ ...passMeta, message })
+            errors.push(`${passName}: ${message}`)
+          }
         }
       } finally {
         completed += 1
@@ -570,7 +730,7 @@ export async function importFromUsername(
   )
 
   const { data: finalData, rowsImported, skipped } = mergePerformances(
-    upsertCachedPlayerEarnings(withCards, cachedProfiles),
+    withCards,
     performanceDrafts,
     cardIdsToReplace,
   )
@@ -600,8 +760,9 @@ export async function importFromUsername(
       skipped: skipped + fetchSkipped,
       passesFetched: selectedPasses.length,
       passesSkipped,
-      cachedPlayerPasses: cachedProfiles.length,
+      cachedPlayerPasses: 0,
       ownedPasses,
+      cachedProfiles: [],
       errors,
       passesWithNoEarnings,
       passFetchErrors,
@@ -656,11 +817,14 @@ export async function importFromAdminOwnership(
   })
   const { data: nextData, cardsCreated, cardsUpdated } = upsertCards(current, cardDrafts)
 
+  const catalogAttach = await attachCatalogEarningsForPasses(nextData, selectedPasses, options)
+  const finalData = catalogAttach.data
+
   reportProgress?.({
     phase: 'fetching',
     current: selectedPasses.length,
     total: selectedPasses.length,
-    label: 'Imported pass list from admin snapshot',
+    label: 'Finished admin snapshot import',
   })
 
   const ownedPasses: OwnedPassSnapshot[] = allPasses.map((pass) => {
@@ -681,19 +845,20 @@ export async function importFromAdminOwnership(
   })
 
   return {
-    data: nextData,
+    data: finalData,
     result: {
       cardsCreated,
       cardsUpdated,
-      rowsImported: 0,
+      rowsImported: catalogAttach.rowsImported,
       skipped: 0,
       passesFetched: selectedPasses.length,
       passesSkipped: allPasses.length - selectedPasses.length,
       cachedPlayerPasses: 0,
       ownedPasses,
-      errors: [],
-      passesWithNoEarnings: [],
-      passFetchErrors: [],
+      cachedProfiles: [],
+      errors: catalogAttach.errors,
+      passesWithNoEarnings: catalogAttach.passesWithNoEarnings,
+      passFetchErrors: catalogAttach.passFetchErrors,
     },
   }
 }

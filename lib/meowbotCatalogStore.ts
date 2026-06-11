@@ -1,0 +1,465 @@
+export type CatalogPassKind = 'player' | 'team'
+
+export type CatalogPassInput = {
+  externalKey: string
+  entityId: number
+  passKind: CatalogPassKind
+  sport: string
+  seasonYear: number
+  seasonLabel: string
+  name: string
+  rarityLabel?: string
+  hasEarnings?: boolean
+  totalBaseRax?: number
+  sourceUpdatedAt?: string
+}
+
+export type CatalogDailyEarningInput = {
+  externalKey: string
+  claimDay: string
+  baseRaxEarned: number
+  playerBoxScoreId?: number | null
+}
+
+export type CatalogSearchResult = CatalogPassInput & {
+  cachedAt: string
+  sourceUpdatedAt?: string
+  rowCount: number
+  totalBaseRax: number
+  latestClaimDay?: string
+}
+
+export type CatalogImportProfile = CatalogSearchResult & {
+  rows: {
+    claimDay: string
+    baseRaxEarned: number
+    playerBoxScoreId?: number | null
+  }[]
+}
+
+type SupabasePassRow = {
+  external_key: string
+  entity_id: number
+  pass_kind: CatalogPassKind
+  sport: string
+  season_year: number
+  season_label: string
+  name: string
+  rarity_label?: string | null
+  has_earnings: boolean
+  total_base_rax: number | string
+  source_updated_at?: string | null
+  cached_at: string
+  meowbot_daily_earnings?: Array<{ count: number }>
+}
+
+type SupabaseDailyRow = {
+  external_key: string
+  claim_day: string
+  base_rax_earned: number | string
+  player_box_score_id?: number | null
+  cached_at?: string
+}
+
+const MAX_SEARCH_LIMIT = 50
+const PASS_UPSERT_BATCH_SIZE = 250
+const DAILY_UPSERT_BATCH_SIZE = 200
+const UPSERT_BATCH_PAUSE_MS = 300
+const SUPABASE_MAX_RETRIES = 5
+const SUPABASE_RETRY_BASE_MS = 1000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function formatSupabaseError(status: number, detail: string): string {
+  const trimmed = detail.trim()
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    return `Supabase catalog request failed (${status}). The database gateway is temporarily unavailable — wait a minute and retry with a smaller import batch.`
+  }
+  if (trimmed.includes('57014') || trimmed.includes('statement timeout')) {
+    return `Supabase catalog request failed (${status}). Database statement timed out — retry with a smaller import batch.`
+  }
+  if (trimmed.includes('40P01') || trimmed.includes('deadlock')) {
+    return `Supabase catalog request failed (${status}). Database deadlock while saving catalog rows — retrying usually succeeds.`
+  }
+  if (trimmed.length > 400) {
+    return `Supabase catalog request failed (${status}). ${trimmed.slice(0, 400)}…`
+  }
+  return `Supabase catalog request failed (${status}). ${trimmed}`.trim()
+}
+
+function isRetryableSupabaseError(status: number, detail: string): boolean {
+  if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) {
+    return true
+  }
+  if (
+    status === 500 &&
+    (detail.includes('57014') ||
+      detail.includes('statement timeout') ||
+      detail.includes('40P01') ||
+      detail.includes('deadlock'))
+  ) {
+    return true
+  }
+  return false
+}
+
+let catalogWriteTail: Promise<unknown> = Promise.resolve()
+
+function withCatalogWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = catalogWriteTail.then(fn, fn)
+  catalogWriteTail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+function sortCatalogPasses(passes: CatalogPassInput[]): CatalogPassInput[] {
+  return [...passes].sort((a, b) => a.externalKey.localeCompare(b.externalKey))
+}
+
+function sortCatalogDailyEarnings(rows: CatalogDailyEarningInput[]): CatalogDailyEarningInput[] {
+  return [...rows]
+    .filter(
+      (row) =>
+        row.externalKey &&
+        /^\d{4}-\d{2}-\d{2}/.test(row.claimDay) &&
+        Number.isFinite(row.baseRaxEarned) &&
+        row.baseRaxEarned > 0,
+    )
+    .sort(
+      (a, b) =>
+        a.externalKey.localeCompare(b.externalKey) || a.claimDay.localeCompare(b.claimDay),
+    )
+}
+
+async function upsertInBatches<T>(
+  items: T[],
+  batchSize: number,
+  upsert: (batch: T[]) => Promise<number>,
+): Promise<number> {
+  let count = 0
+  for (let index = 0; index < items.length; index += batchSize) {
+    count += await upsert(items.slice(index, index + batchSize))
+    if (index + batchSize < items.length) {
+      await sleep(UPSERT_BATCH_PAUSE_MS)
+    }
+  }
+  return count
+}
+
+export function meowbotCatalogConfigured(): boolean {
+  return Boolean(
+    process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+  )
+}
+
+function normalizeSupabaseProjectUrl(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\/$/, '')
+    .replace(/\/rest\/v1$/i, '')
+}
+
+function supabaseRestUrl(path: string, params?: URLSearchParams): string {
+  const baseUrl = normalizeSupabaseProjectUrl(process.env.SUPABASE_URL ?? '')
+  if (!baseUrl) throw new Error('SUPABASE_URL is not configured.')
+  const url = new URL(`${baseUrl}/rest/v1/${path}`)
+  if (params) {
+    for (const [key, value] of params) {
+      url.searchParams.append(key, value)
+    }
+  }
+  return url.toString()
+}
+
+function supabaseHeaders(prefer?: string): HeadersInit {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured.')
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    ...(prefer ? { Prefer: prefer } : {}),
+  }
+}
+
+async function supabaseFetch<T>(
+  path: string,
+  init: RequestInit & { params?: URLSearchParams } = {},
+): Promise<T> {
+  if (!meowbotCatalogConfigured()) {
+    throw new Error('Meowbot catalog storage is not configured.')
+  }
+
+  const url = supabaseRestUrl(path, init.params)
+  const requestInit: RequestInit = {
+    ...init,
+    headers: {
+      ...supabaseHeaders(),
+      ...(init.headers ?? {}),
+    },
+  }
+
+  let lastError = 'Supabase catalog request failed.'
+  for (let attempt = 0; attempt <= SUPABASE_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(url, requestInit)
+    if (response.ok) {
+      if (response.status === 204) return undefined as T
+      const text = await response.text()
+      if (!text) return undefined as T
+      return JSON.parse(text) as T
+    }
+
+    const detail = await response.text().catch(() => '')
+    lastError = formatSupabaseError(response.status, detail)
+    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status, detail)) {
+      throw new Error(lastError)
+    }
+
+    const delayMs = SUPABASE_RETRY_BASE_MS * 2 ** attempt
+    await sleep(delayMs)
+  }
+
+  throw new Error(lastError)
+}
+
+function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> {
+  return {
+    external_key: input.externalKey,
+    entity_id: input.entityId,
+    pass_kind: input.passKind,
+    sport: input.sport,
+    season_year: input.seasonYear,
+    season_label: input.seasonLabel,
+    name: input.name,
+    rarity_label: input.rarityLabel ?? null,
+    has_earnings: input.hasEarnings !== false,
+    total_base_rax: Math.max(0, Number(input.totalBaseRax) || 0),
+    source_updated_at: input.sourceUpdatedAt ?? null,
+  }
+}
+
+function toDailyRow(input: CatalogDailyEarningInput): Omit<SupabaseDailyRow, 'cached_at'> {
+  return {
+    external_key: input.externalKey,
+    claim_day: input.claimDay,
+    base_rax_earned: input.baseRaxEarned,
+    player_box_score_id: input.playerBoxScoreId ?? null,
+  }
+}
+
+function dailyRowCount(row: SupabasePassRow): number {
+  const count = row.meowbot_daily_earnings?.[0]?.count
+  return Number.isFinite(count) ? Number(count) : 0
+}
+
+function fromPassRow(row: SupabasePassRow): CatalogSearchResult {
+  const rowCount = dailyRowCount(row)
+  return {
+    externalKey: row.external_key,
+    entityId: row.entity_id,
+    passKind: row.pass_kind,
+    sport: row.sport,
+    seasonYear: row.season_year,
+    seasonLabel: row.season_label,
+    name: row.name,
+    rarityLabel: row.rarity_label ?? undefined,
+    hasEarnings: row.has_earnings ?? true,
+    totalBaseRax: Number(row.total_base_rax) || 0,
+    cachedAt: row.cached_at,
+    sourceUpdatedAt: row.source_updated_at ?? undefined,
+    rowCount,
+  }
+}
+
+export function attachPassTotals(
+  passes: CatalogPassInput[],
+  dailyEarnings: CatalogDailyEarningInput[],
+): CatalogPassInput[] {
+  const totals = new Map<string, number>()
+  for (const row of dailyEarnings) {
+    totals.set(row.externalKey, (totals.get(row.externalKey) ?? 0) + row.baseRaxEarned)
+  }
+
+  return passes.map((pass) => ({
+    ...pass,
+    totalBaseRax: totals.get(pass.externalKey) ?? pass.totalBaseRax ?? 0,
+  }))
+}
+
+function normalizeSearchQuery(query: string): string {
+  return query
+    .trim()
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80)
+}
+
+function quotedIn(values: string[]): string {
+  return `in.(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(',')})`
+}
+
+const DAILY_FETCH_PAGE_SIZE = 1000
+
+async function fetchDailyRowsPage(
+  filter: URLSearchParams,
+  offset: number,
+): Promise<SupabaseDailyRow[]> {
+  const params = new URLSearchParams(filter)
+  params.set('select', 'external_key,claim_day,base_rax_earned,player_box_score_id,cached_at')
+  params.set('order', 'claim_day.desc')
+  params.set('limit', String(DAILY_FETCH_PAGE_SIZE))
+  params.set('offset', String(offset))
+  return supabaseFetch<SupabaseDailyRow[]>('meowbot_daily_earnings', { params })
+}
+
+async function fetchAllDailyRows(filter: URLSearchParams): Promise<SupabaseDailyRow[]> {
+  const rows: SupabaseDailyRow[] = []
+  for (let offset = 0; ; offset += DAILY_FETCH_PAGE_SIZE) {
+    const page = await fetchDailyRowsPage(filter, offset)
+    rows.push(...page)
+    if (page.length < DAILY_FETCH_PAGE_SIZE) break
+  }
+  return rows
+}
+
+async function fetchDailyRowsByExternalKeys(keys: string[]): Promise<SupabaseDailyRow[]> {
+  if (keys.length === 0) return []
+  const filter = new URLSearchParams({ external_key: quotedIn(keys) })
+  return fetchAllDailyRows(filter)
+}
+
+export async function searchCatalogPasses(options: {
+  query: string
+  limit?: number
+}): Promise<{ results: CatalogSearchResult[]; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { results: [], storageConfigured: false }
+  }
+
+  const query = normalizeSearchQuery(options.query)
+  if (query.length < 2) {
+    return { results: [], storageConfigured: true }
+  }
+
+  const limit = Math.min(Math.max(options.limit ?? 24, 1), MAX_SEARCH_LIMIT)
+  const search = `*${query.replace(/\*/g, ' ')}*`
+  const params = new URLSearchParams({
+    select:
+      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
+    or: `(name.ilike.${search},sport.ilike.${search},season_label.ilike.${search})`,
+    order: 'name.asc',
+    limit: String(limit),
+  })
+
+  const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
+  return {
+    results: passRows.map(fromPassRow),
+    storageConfigured: true,
+  }
+}
+
+export async function getCatalogImportProfile(
+  externalKey: string,
+): Promise<{ profile: CatalogImportProfile | null; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { profile: null, storageConfigured: false }
+  }
+
+  const passParams = new URLSearchParams({
+    select:
+      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at',
+    external_key: `eq.${externalKey}`,
+    limit: '1',
+  })
+  const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params: passParams })
+  const pass = passRows[0]
+  if (!pass) return { profile: null, storageConfigured: true }
+
+  const latestParams = new URLSearchParams({
+    select: 'claim_day',
+    external_key: `eq.${externalKey}`,
+    order: 'claim_day.desc',
+    limit: '1',
+  })
+  const latestRows = await supabaseFetch<Array<{ claim_day: string }>>('meowbot_daily_earnings', {
+    params: latestParams,
+  })
+  const dailyRows = await fetchDailyRowsByExternalKeys([externalKey])
+  const rows = dailyRows.map((row) => ({
+    claimDay: row.claim_day,
+    baseRaxEarned: Number(row.base_rax_earned),
+    playerBoxScoreId: row.player_box_score_id ?? undefined,
+  }))
+  const base = fromPassRow(pass)
+  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+  return {
+    profile: {
+      ...base,
+      rowCount: rows.length,
+      totalBaseRax,
+      latestClaimDay: latestRows[0]?.claim_day ?? rows[0]?.claimDay,
+      rows,
+    },
+    storageConfigured: true,
+  }
+}
+
+async function upsertCatalogPassBatch(passes: CatalogPassInput[]): Promise<number> {
+  if (passes.length === 0) return 0
+  await supabaseFetch<void>('meowbot_passes', {
+    method: 'POST',
+    params: new URLSearchParams({ on_conflict: 'external_key' }),
+    headers: supabaseHeaders('resolution=merge-duplicates,return=minimal'),
+    body: JSON.stringify(passes.map(toPassRow)),
+  })
+  return passes.length
+}
+
+async function upsertCatalogDailyEarningBatch(rows: CatalogDailyEarningInput[]): Promise<number> {
+  if (rows.length === 0) return 0
+  await supabaseFetch<void>('meowbot_daily_earnings', {
+    method: 'POST',
+    params: new URLSearchParams({ on_conflict: 'external_key,claim_day' }),
+    headers: supabaseHeaders('resolution=merge-duplicates,return=minimal'),
+    body: JSON.stringify(rows.map(toDailyRow)),
+  })
+  return rows.length
+}
+
+export async function upsertCatalogSnapshot(
+  passes: CatalogPassInput[],
+  dailyEarnings: CatalogDailyEarningInput[],
+): Promise<{ passesUpserted: number; rowsUpserted: number }> {
+  return withCatalogWriteLock(async () => {
+    const passesUpserted = await upsertInBatches(
+      sortCatalogPasses(passes),
+      PASS_UPSERT_BATCH_SIZE,
+      upsertCatalogPassBatch,
+    )
+    const rowsUpserted = await upsertInBatches(
+      sortCatalogDailyEarnings(dailyEarnings),
+      DAILY_UPSERT_BATCH_SIZE,
+      upsertCatalogDailyEarningBatch,
+    )
+    return { passesUpserted, rowsUpserted }
+  })
+}
+
+export async function upsertCatalogPasses(passes: CatalogPassInput[]): Promise<number> {
+  return withCatalogWriteLock(() =>
+    upsertInBatches(sortCatalogPasses(passes), PASS_UPSERT_BATCH_SIZE, upsertCatalogPassBatch),
+  )
+}
+
+export async function upsertCatalogDailyEarnings(rows: CatalogDailyEarningInput[]): Promise<number> {
+  const validRows = sortCatalogDailyEarnings(rows)
+  if (validRows.length === 0) return 0
+  return withCatalogWriteLock(() =>
+    upsertInBatches(validRows, DAILY_UPSERT_BATCH_SIZE, upsertCatalogDailyEarningBatch),
+  )
+}
+

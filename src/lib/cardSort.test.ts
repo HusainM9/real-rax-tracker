@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterCardsByRarityPreset, filterCardsBySport, sortCards } from './cardSort'
+import { filterCardsByRarityPreset, filterCardsBySearch, filterCardsBySport, filterCardsByTeamPass, sortCards } from './cardSort'
 import type { CardRollup, PlayerCard } from '../types/rax'
 
 function rollup(
@@ -78,5 +78,19 @@ describe('cardSort', () => {
     ]
     const filtered = filterCardsByRarityPreset(mixed, 'Unknown')
     expect(filtered.map((row) => row.card.name)).toEqual(['No rarity'])
+  })
+
+  it('filters cards by search query', () => {
+    const filtered = filterCardsBySearch(cards, 'alpha')
+    expect(filtered.map((row) => row.card.name)).toEqual(['Alpha FC'])
+  })
+
+  it('can hide team passes', () => {
+    const mixed = [
+      { ...rollup('1', 'LeBron James', 'NBA', 10, 'Legendary 1'), card: { ...rollup('1', 'LeBron James', 'NBA', 10, 'Legendary 1').card, passKind: 'player' as const } },
+      { ...rollup('2', 'LAL Lakers', 'NBA', 10, 'Legendary 1'), card: { ...rollup('2', 'LAL Lakers', 'NBA', 10, 'Legendary 1').card, passKind: 'team' as const } },
+    ]
+    expect(filterCardsByTeamPass(mixed, false).map((row) => row.card.name)).toEqual(['LeBron James'])
+    expect(filterCardsByTeamPass(mixed, true)).toHaveLength(2)
   })
 })

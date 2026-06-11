@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { usernameImportDisabled, realappToolsShutdownLabel } from '../lib/importShutdown'
-import { cachedEarningsToJson } from '../lib/playerEarningsCache'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
+import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
+import { sportFromCatalog } from '../lib/catalogImport'
+import { catalogProfileToJson } from '../lib/catalogProfileJson'
 import {
   getFailedPlayerPasses,
   type FailedPlayerPassImport,
@@ -66,6 +69,31 @@ function emptyCardEntry(cards: { id: string }[], existingCardId = '') {
   }
 }
 
+function pageForCardIndex(index: number, pageSize: number): number {
+  if (index < 0) return 1
+  return Math.floor(index / pageSize) + 1
+}
+
+function cardEntryFromCatalogProfile(
+  cards: { id: string }[],
+  profile: CatalogImportProfile,
+  cardId: string,
+): ReturnType<typeof emptyCardEntry> {
+  return {
+    ...emptyCardEntry(cards, cardId),
+    mode: 'existing',
+    existingCardId: cardId,
+    name: profile.name,
+    sport: sportFromCatalog(profile.sport),
+    season: profile.seasonLabel || String(profile.seasonYear),
+    rarityLabel: profile.rarityLabel ?? '',
+    passKind: profile.passKind,
+    notes: profile.rows.length > 0 ? 'Imported from Meowbot catalog' : '',
+    earningsInput: 'paste',
+    rawJson: profile.rows.length > 0 ? catalogProfileToJson(profile) : '',
+  }
+}
+
 export default function EntryPage() {
   const {
     data,
@@ -81,6 +109,7 @@ export default function EntryPage() {
     saveCardProfile,
     restoreCardProfile,
     deleteCardProfile,
+    importCatalogProfile,
   } = useRaxData()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
@@ -104,33 +133,12 @@ export default function EntryPage() {
     FailedPlayerPassImport[]
   >([])
   const [existingCardQuery, setExistingCardQuery] = useState('')
-  const [cachedProfileQuery, setCachedProfileQuery] = useState('')
+  const [catalogImportingKey, setCatalogImportingKey] = useState('')
+  const [catalogStatus, setCatalogStatus] = useState('')
   const importAbortRef = useRef<AbortController | null>(null)
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
-  const cachedEarningsProfiles = useMemo(
-    () => [...(data.cachedPlayerEarnings ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [data.cachedPlayerEarnings],
-  )
-  const filteredCachedEarningsProfiles = useMemo(() => {
-    const query = cachedProfileQuery.trim().toLowerCase()
-    if (!query) return []
-    return cachedEarningsProfiles
-      .filter((profile) =>
-        [
-          profile.name,
-          profile.sport,
-          profile.season,
-          String(profile.seasonYear),
-          profile.rarityLabel ?? '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(query),
-      )
-      .slice(0, 24)
-  }, [cachedEarningsProfiles, cachedProfileQuery])
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -164,26 +172,60 @@ export default function EntryPage() {
         ? `${filteredExistingCards.length} match${filteredExistingCards.length === 1 ? '' : 'es'}`
         : `Showing first ${Math.min(sortedExistingCards.length, EXISTING_CARD_SEARCH_LIMIT)} of ${sortedExistingCards.length} — search to narrow`
 
-  const loadCachedEarnings = (cacheKey: string) => {
-    const profile = data.cachedPlayerEarnings?.find((item) => item.cacheKey === cacheKey)
-    if (!profile) return
-    const rawJson = cachedEarningsToJson(profile)
-    setCardEntry((current) => ({
-      ...current,
-      mode: 'new',
-      name: profile.name,
-      sport: profile.sport,
-      season: profile.season,
-      rarityLabel: profile.rarityLabel ?? current.rarityLabel,
-      passKind: profile.passKind,
-      earningsInput: 'paste',
-      rawJson,
-    }))
-    setCardEntryStatus(
-      `Loaded cached earnings for ${profile.name} (${profile.rows.length} row${
-        profile.rows.length === 1 ? '' : 's'
-      }). Review the card details, then import earnings.`,
-    )
+  const importFromCatalog = async (result: CatalogSearchResult) => {
+    setCatalogImportingKey(result.externalKey)
+    setCatalogStatus('')
+    try {
+      const { profile, storageConfigured } = await fetchCatalogImportProfile(result.externalKey)
+      if (!storageConfigured) {
+        setCatalogStatus('Meowbot catalog search is not configured yet.')
+        return
+      }
+      if (!profile) {
+        setCatalogStatus('That catalog player was not found. Try searching again.')
+        return
+      }
+
+      const imported = importCatalogProfile(profile)
+      const cardIndex = imported.cardCreated
+        ? data.cards.length
+        : data.cards.findIndex((card) => card.id === imported.cardId)
+      setCardsPage(pageForCardIndex(cardIndex, ENTRY_PAGE_SIZE))
+      setPerformancesPage(1)
+      setCardEntry(cardEntryFromCatalogProfile(data.cards, profile, imported.cardId))
+      setCardEntryStatus('')
+
+      if (profile.rows.length > 0) {
+        saveCardProfile(imported.cardId, catalogProfileToJson(profile))
+      }
+
+      if (profile.rows.length === 0) {
+        setCatalogStatus(
+          `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name} in your collection. This pass has no catalog earnings yet — add RAX in the form below.`,
+        )
+        cardEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+
+      const earningsNote = `${profile.rows.length} RAX row${profile.rows.length === 1 ? '' : 's'}`
+      const changeNote =
+        imported.rowsImported > 0 || imported.rowsUpdated > 0
+          ? ` (${imported.rowsImported} new${
+              imported.rowsUpdated > 0
+                ? `, ${imported.rowsUpdated} updated`
+                : ''
+            })`
+          : ' (already up to date)'
+
+      setCatalogStatus(
+        `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name} to your collection with ${earningsNote}${changeNote}.`,
+      )
+      document.getElementById('player-cards')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } catch (error) {
+      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+    } finally {
+      setCatalogImportingKey('')
+    }
   }
 
   const sortedPerformances = useMemo(
@@ -416,9 +458,7 @@ export default function EntryPage() {
           result.passesFetched
         } pass${result.passesFetched === 1 ? '' : 'es'} (${result.cardsCreated} new card${
           result.cardsCreated === 1 ? '' : 's'
-        }, ${result.cardsUpdated} updated) · cached ${result.cachedPlayerPasses} player earning profile${
-          result.cachedPlayerPasses === 1 ? '' : 's'
-        } for manual Entry/Potential use${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
+        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
       )
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
         setShowHeavyTables(false)
@@ -452,15 +492,31 @@ export default function EntryPage() {
     setUsernameImportProgress(null)
     setUsernameImportFailedPasses([])
     try {
-      const result = await importFromAdminOwnership(username)
+      const result = await importFromAdminOwnership(username, {
+        onProgress: setUsernameImportProgress,
+      })
+      const failedPlayerPasses = getFailedPlayerPasses(result)
+      setUsernameImportFailedPasses(failedPlayerPasses)
       const skipNote =
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
           : ''
+      const raxNote =
+        result.rowsImported > 0
+          ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from shared catalog (OTD adjusted from saved rarity)`
+          : ' · no RAX rows found in shared catalog yet'
+      const issueNote =
+        failedPlayerPasses.length > 0
+          ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
+          : ''
       setUsernameImportStatus(
-        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${skipNote}.`,
+        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${issueNote}.`,
       )
       setCardsPage(1)
+      if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
+        setShowHeavyTables(false)
+      }
+      setPerformancesPage(1)
     } catch (error) {
       setUsernameImportStatus(
         error instanceof Error
@@ -469,6 +525,7 @@ export default function EntryPage() {
       )
     } finally {
       setAdminSnapshotImporting(false)
+      setUsernameImportProgress(null)
     }
   }
 
@@ -525,6 +582,20 @@ export default function EntryPage() {
 
   return (
     <div className="page-stack">
+      <CatalogSearchPanel
+        sectionId="catalog-search"
+        title="Search player passes"
+        description="One click adds the pass to your collection and imports its daily RAX from the shared catalog. No separate card entry step when earnings exist."
+        actionLabel="Add to collection"
+        loadingLabel="Adding to collection…"
+        loadingKey={catalogImportingKey}
+        disabled={Boolean(catalogImportingKey)}
+        onSelect={importFromCatalog}
+      />
+      {catalogStatus ? (
+        <p className="import-status panel form-panel">{catalogStatus}</p>
+      ) : null}
+
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
         <div className="section-heading">
           <div>
@@ -561,9 +632,10 @@ export default function EntryPage() {
         </p>
         {importDisabled ? (
           <p className="import-status">
-            Automatic username import is closed. If admin has cached your passes from earlier imports,
-            use the admin snapshot button below. Existing imported data is still saved locally; use
-            Export JSON on Dashboard for backups and Add card &amp; earnings below for new cards.
+            Automatic username import is closed. Search the{' '}
+            <a href="#catalog-search">shared catalog</a> above to import passes and RAX. If admin
+            cached your passes from earlier imports, use the snapshot button below. Existing imported
+            data stays in this browser — use Export JSON on Dashboard for backups.
           </p>
         ) : null}
         <div className="button-row">
@@ -613,7 +685,7 @@ export default function EntryPage() {
                 {usernameImportFailedPasses.length} player pass
                 {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
               </strong>{' '}
-              Use{' '}
+              Use <a href="#catalog-search">shared catalog search</a> or{' '}
               <a href="#add-card-earnings">Add card &amp; earnings</a> below to finish these passes
               {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings') ? (
                 <>
@@ -641,7 +713,7 @@ export default function EntryPage() {
                   </button>
                 </>
               ) : (
-                <> — paste from realapp.com, cached earnings, or old realapp.tools JSON if you have it</>
+                <> — search the shared catalog above or paste from realapp.com if you have it</>
               )}
               .
             </p>
@@ -705,67 +777,12 @@ export default function EntryPage() {
           <div>
             <h2>Add card & earnings</h2>
             <p>
-              Set up the player pass and paste daily RAX in one step — or add earnings to a card
-              that username import skipped.
+              Set up the player pass and paste daily RAX manually — or use{' '}
+              <a href="#catalog-search">shared catalog search</a> above to import from the database.
             </p>
           </div>
           <span className="badge">{data.cards.length} cards saved</span>
         </div>
-
-        {cachedEarningsProfiles.length > 0 ? (
-          <section className="cached-profile-panel">
-            <div className="section-heading">
-              <div>
-                <h3>Cached player earnings</h3>
-                <p>
-                  Player daily earnings saved from previous imports. Search here to prefill a new
-                  manual card without copying JSON again.
-                </p>
-              </div>
-              <span className="badge">{cachedEarningsProfiles.length} cached</span>
-            </div>
-            <label className="field">
-              <span>Search cached profiles</span>
-              <input
-                type="search"
-                value={cachedProfileQuery}
-                placeholder="Player name, sport, season, rarity…"
-                onChange={(event) => setCachedProfileQuery(event.target.value)}
-              />
-            </label>
-            {!cachedProfileQuery.trim() ? (
-              <p className="card-picker-empty">
-                Start typing to find a cached player. These are saved base earnings from prior
-                imports, not cards currently in your collection.
-              </p>
-            ) : filteredCachedEarningsProfiles.length === 0 ? (
-              <p className="card-picker-empty">No cached profiles match that search.</p>
-            ) : (
-              <div className="cached-profile-list" role="listbox" aria-label="Cached player earnings">
-                {filteredCachedEarningsProfiles.map((profile) => (
-                  <button
-                    key={profile.cacheKey}
-                    type="button"
-                    className="cached-profile-item"
-                    onClick={() => loadCachedEarnings(profile.cacheKey)}
-                  >
-                    <strong>{profile.name}</strong>
-                    <small>
-                      {profile.sport} · {profile.season || profile.seasonYear}
-                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
-                      row{profile.rows.length === 1 ? '' : 's'}
-                    </small>
-                    <span>Use cached earnings</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="import-hint">
-              Cached profiles are not extra cards in your collection. Choosing one fills the new
-              card form and earnings JSON below so you can review and save it manually.
-            </p>
-          </section>
-        ) : null}
 
         <div className="entry-mode-toggle" role="group" aria-label="Card entry mode">
           <button
@@ -1126,7 +1143,7 @@ export default function EntryPage() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel" id="player-cards">
         <div className="section-heading">
           <div>
             <h2>Player cards</h2>

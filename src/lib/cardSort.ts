@@ -1,4 +1,5 @@
-import type { CardRollup, Sport } from '../types/rax'
+import type { CardRollup, PlayerCard, Sport } from '../types/rax'
+import { isTeamPass } from './passKind'
 import { normalizeRarityTier, RARITY_TIERS, legendaryPlusRarityFilter, type RarityTier } from './rarityFilter'
 
 export type RarityFilterValue = 'All' | 'Legendary+' | 'Unknown' | RarityTier
@@ -88,6 +89,33 @@ export function sortCards(
 export function filterCardsBySport(cards: CardRollup[], sport: Sport | 'All'): CardRollup[] {
   if (sport === 'All') return cards
   return cards.filter((rollup) => rollup.card.sport === sport)
+}
+
+export function matchesCardSearch(
+  query: string,
+  card: Pick<PlayerCard, 'name' | 'sport' | 'season' | 'rarityLabel'>,
+): boolean {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return true
+
+  const haystack = [card.name, card.sport, card.season, card.rarityLabel ?? '']
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(normalized)
+}
+
+export function filterCardsBySearch(cards: CardRollup[], query: string): CardRollup[] {
+  const normalized = query.trim()
+  if (!normalized) return cards
+  return cards.filter((rollup) => matchesCardSearch(normalized, rollup.card))
+}
+
+export function filterCardsByTeamPass(
+  cards: CardRollup[],
+  includeTeamPasses: boolean,
+): CardRollup[] {
+  if (includeTeamPasses) return cards
+  return cards.filter((rollup) => !isTeamPass(rollup.card))
 }
 
 export function cardRarityTier(card: CardRollup['card']): RarityTier | 'Unknown' {
