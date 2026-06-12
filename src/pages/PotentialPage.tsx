@@ -22,6 +22,7 @@ import {
   greedyPickBundleAsync,
   isAtLeastIconic1Rarity,
   rankAndRecommendAsync,
+  RECOMMENDATION_GREEDY_RERANK_CAP,
   RECOMMENDATION_MAX_BUNDLE_SIZE,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForSport,
@@ -50,7 +51,7 @@ import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
-import { SPORTS, type Sport } from '../types/rax'
+import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
 const RANKING_PAGE_SIZE = 25
@@ -809,7 +810,11 @@ export default function PotentialPage() {
             ...seasonFilter,
             adjustments: rankAdjustments,
             signal: controller.signal,
-            analysisCap: SPORT_OPPORTUNITY_ANALYSIS_CAP,
+            caps: {
+              bulkFetchCap: SPORT_OPPORTUNITY_FETCH_CAP,
+              analysisCap: SPORT_OPPORTUNITY_ANALYSIS_CAP,
+              greedyRerankCap: RECOMMENDATION_GREEDY_RERANK_CAP,
+            },
             batchSize: 24,
           },
         )

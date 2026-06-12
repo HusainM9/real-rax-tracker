@@ -39,11 +39,12 @@ function perf(id: string, cardId: string, rax: number, claimDay: string): RaxPer
 }
 
 const data: RaxTrackerData = {
+  version: 1,
   cards: [],
   performances: [],
   potentialCards: [],
   savedCardProfiles: [],
-  settings: { proBonusEnabled: false },
+  settings: { proBonusEnabled: false, savedUsername: '' },
 }
 
 const collection = {
