@@ -1,3 +1,5 @@
+import { readResponseJson } from './readResponseJson'
+
 export type CatalogPassKind = 'player' | 'team'
 
 export type CatalogSearchResult = {
@@ -36,11 +38,11 @@ export async function searchCatalog(query: string, signal?: AbortSignal): Promis
 }> {
   const params = new URLSearchParams({ q: query, limit: '24' })
   const response = await fetch(`/api/catalog/search?${params}`, { signal })
-  const data = (await response.json()) as {
+  const data = await readResponseJson<{
     results?: CatalogSearchResult[]
     storageConfigured?: boolean
     error?: string
-  }
+  }>(response)
 
   if (!response.ok) {
     throw new Error(data.error || `Catalog search failed (${response.status}).`)
@@ -61,11 +63,11 @@ export async function fetchCatalogImportProfile(
 }> {
   const params = new URLSearchParams({ externalKey })
   const response = await fetch(`/api/catalog/import?${params}`, { signal })
-  const data = (await response.json()) as {
+  const data = await readResponseJson<{
     profile?: CatalogImportProfile | null
     storageConfigured?: boolean
     error?: string
-  }
+  }>(response)
 
   if (!response.ok) {
     throw new Error(data.error || `Catalog import failed (${response.status}).`)
@@ -97,11 +99,11 @@ export async function fetchCatalogPassSummaries(
   }
 
   const response = await fetch(`/api/catalog/candidates?${params}`, { signal })
-  const data = (await response.json()) as {
+  const data = await readResponseJson<{
     results?: CatalogSearchResult[]
     storageConfigured?: boolean
     error?: string
-  }
+  }>(response)
 
   if (!response.ok) {
     throw new Error(data.error || `Catalog candidates failed (${response.status}).`)
@@ -137,11 +139,11 @@ export async function fetchCatalogImportProfilesBulk(
       body: JSON.stringify({ externalKeys: batchKeys }),
       signal,
     })
-    const data = (await response.json()) as {
+    const data = await readResponseJson<{
       profiles?: CatalogImportProfile[]
       storageConfigured?: boolean
       error?: string
-    }
+    }>(response)
 
     if (!response.ok) {
       throw new Error(data.error || `Catalog bulk import failed (${response.status}).`)
@@ -174,11 +176,11 @@ export async function fetchCatalogSeasonYears(
   })
 
   const response = await fetch(`/api/catalog/season-years?${params}`, { signal })
-  const data = (await response.json()) as {
+  const data = await readResponseJson<{
     seasonYears?: CatalogSeasonYearOption[]
     storageConfigured?: boolean
     error?: string
-  }
+  }>(response)
 
   if (!response.ok) {
     throw new Error(data.error || `Catalog season years failed (${response.status}).`)
@@ -189,4 +191,3 @@ export async function fetchCatalogSeasonYears(
     storageConfigured: data.storageConfigured !== false,
   }
 }
-

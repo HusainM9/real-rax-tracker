@@ -32,6 +32,16 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'externalKeys exceeds maximum of 2000' }, { status: 400 })
   }
 
-  const result = await fetchCatalogImportProfilesBulk(externalKeys)
-  return Response.json(result)
+  try {
+    const result = await fetchCatalogImportProfilesBulk(externalKeys)
+    return Response.json(result)
+  } catch (error) {
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : 'Catalog bulk import failed.',
+        storageConfigured: false,
+      },
+      { status: 500 },
+    )
+  }
 }

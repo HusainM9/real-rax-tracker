@@ -1,4 +1,5 @@
 import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
+import { readResponseError, readResponseJson } from './readResponseJson'
 import { importTrackerData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
 
@@ -20,8 +21,7 @@ export type CloudProfileSaveResult = {
 }
 
 async function parseError(response: Response): Promise<string> {
-  const data = (await response.json().catch(() => null)) as { error?: string } | null
-  return data?.error ?? `Cloud sync failed (${response.status}).`
+  return readResponseError(response, 'Cloud sync failed')
 }
 
 export async function loadCloudProfile(
@@ -43,13 +43,13 @@ export async function loadCloudProfile(
     throw new Error(await parseError(response))
   }
 
-  const payload = (await response.json()) as {
+  const payload = await readResponseJson<{
     data?: unknown
     updatedAt?: string
     cardCount?: number
     performanceCount?: number
     storageConfigured?: boolean
-  }
+  }>(response)
 
   const parsed = importTrackerData(JSON.stringify(payload.data ?? {}))
   const reportedCards = Number(payload.cardCount) || 0
@@ -101,12 +101,12 @@ export async function saveCloudProfile(
     throw new Error(await parseError(response))
   }
 
-  const payload = (await response.json()) as {
+  const payload = await readResponseJson<{
     updatedAt?: string
     cardCount?: number
     performanceCount?: number
     storageConfigured?: boolean
-  }
+  }>(response)
 
   return {
     meta: {
@@ -141,12 +141,12 @@ export async function changeCloudProfilePin(
     throw new Error(await parseError(response))
   }
 
-  const payload = (await response.json()) as {
+  const payload = await readResponseJson<{
     updatedAt?: string
     cardCount?: number
     performanceCount?: number
     storageConfigured?: boolean
-  }
+  }>(response)
 
   return {
     meta: {

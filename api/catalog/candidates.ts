@@ -25,12 +25,23 @@ export default async function handler(request: Request): Promise<Response> {
   const seasonYear =
     seasonYearRaw && Number.isFinite(Number(seasonYearRaw)) ? Number(seasonYearRaw) : undefined
 
-  const result = await listCatalogPassSummaries({
-    sport,
-    passKind,
-    seasonYear,
-    hasEarnings: true,
-  })
+  try {
+    const result = await listCatalogPassSummaries({
+      sport,
+      passKind,
+      seasonYear,
+      hasEarnings: true,
+    })
 
-  return Response.json(result)
+    return Response.json(result)
+  } catch (error) {
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : 'Catalog candidates failed.',
+        storageConfigured: false,
+        results: [],
+      },
+      { status: 500 },
+    )
+  }
 }
