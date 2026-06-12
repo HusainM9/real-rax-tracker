@@ -295,11 +295,12 @@ export function loadTrackerData(): RaxTrackerData {
   }
 }
 
-export function saveTrackerData(data: RaxTrackerData): void {
+export function saveTrackerData(data: RaxTrackerData): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    return true
   } catch {
-    // Ignore private-mode and quota failures.
+    return false
   }
 }
 

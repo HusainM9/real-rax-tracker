@@ -1,12 +1,42 @@
 import { kv } from '@vercel/kv'
 import { adminStorageConfigured } from './adminEventStore'
+import {
+  decodeStoredProfilePayload,
+  encodeStoredProfilePayload,
+  encodedProfileByteLength,
+} from './cloudSyncCompression'
+import {
+  compactTrackerProfileForCloudSync,
+  trackerProfileJsonByteLength,
+} from './cloudSyncPayload'
 import { normalizeRealUsername } from './importOwnershipTypes'
 import { validateSyncPin } from './syncPinRules'
 import { hashSyncPassphrase } from './syncPassphrase'
 
 const PROFILE_PREFIX = 'rax:tracker-profile:'
 const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'
-const MAX_PROFILE_BYTES = 900_000
+/** Max gzip-compressed blob stored in KV (Upstash allows up to 100 MB). */
+const MAX_COMPRESSED_PROFILE_BYTES = 4_000_000
+/** Reject absurd payloads before compression work. */
+const MAX_UNCOMPRESSED_PROFILE_BYTES = 15_000_000
+
+function profileTooLargeError(input: {
+  compressedBytes?: number
+  uncompressedBytes: number
+}): Error {
+  const limitKb = Math.ceil(MAX_COMPRESSED_PROFILE_BYTES / 1024)
+  if (input.compressedBytes !== undefined) {
+    const usedKb = Math.ceil(input.compressedBytes / 1024)
+    return new Error(
+      `Tracker profile is too large for cloud sync (${usedKb} KB compressed; limit ${limitKb} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
+    )
+  }
+
+  const usedKb = Math.ceil(input.uncompressedBytes / 1024)
+  return new Error(
+    `Tracker profile is too large for cloud sync (${usedKb} KB uncompressed; limit ${Math.ceil(MAX_UNCOMPRESSED_PROFILE_BYTES / 1024)} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
+  )
+}
 
 export type TrackerProfileAdminSummary = {
   username: string
@@ -18,7 +48,10 @@ export type TrackerProfileAdminSummary = {
 export type StoredTrackerProfile = {
   username: string
   passphraseHash: string
-  data: unknown
+  /** Legacy uncompressed payload — still read for older saves. */
+  data?: unknown
+  dataBlob?: string
+  dataEncoding?: 'gzip-base64'
   updatedAt: string
   cardCount: number
   performanceCount: number
@@ -139,7 +172,12 @@ export async function getTrackerProfile(
     return { profile: null, storageConfigured: true, unauthorized: true }
   }
 
-  return { profile: stored, storageConfigured: true, unauthorized: false }
+  const data = await decodeStoredProfilePayload(stored)
+  return {
+    profile: { ...stored, data },
+    storageConfigured: true,
+    unauthorized: false,
+  }
 }
 
 export async function saveTrackerProfile(input: {
@@ -175,9 +213,16 @@ export async function saveTrackerProfile(input: {
     throw new Error('Invalid tracker profile payload.')
   }
 
-  const serialized = JSON.stringify(input.data)
-  if (serialized.length > MAX_PROFILE_BYTES) {
-    throw new Error('Tracker profile is too large for cloud sync.')
+  const profileData = compactTrackerProfileForCloudSync(input.data)
+  const uncompressedBytes = trackerProfileJsonByteLength(profileData)
+  if (uncompressedBytes > MAX_UNCOMPRESSED_PROFILE_BYTES) {
+    throw profileTooLargeError({ uncompressedBytes })
+  }
+
+  const encoded = await encodeStoredProfilePayload(profileData)
+  const compressedBytes = encodedProfileByteLength(encoded.dataBlob)
+  if (compressedBytes > MAX_COMPRESSED_PROFILE_BYTES) {
+    throw profileTooLargeError({ compressedBytes, uncompressedBytes })
   }
 
   const key = profileKey(normalizedUsername)
@@ -207,11 +252,12 @@ export async function saveTrackerProfile(input: {
   }
 
   const updatedAt = new Date().toISOString()
-  const counts = profileMeta(input.data)
+  const counts = profileMeta(profileData)
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
     passphraseHash,
-    data: input.data,
+    dataBlob: encoded.dataBlob,
+    dataEncoding: encoded.dataEncoding,
     updatedAt,
     ...counts,
   }

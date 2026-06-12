@@ -16,6 +16,7 @@ import {
   exportTrackerData,
   importTrackerData,
   loadTrackerData,
+  normalizeData,
   saveTrackerData,
 } from '../lib/storage'
 import {
@@ -81,6 +82,7 @@ type RaxDataContextValue = {
   clearSellRankings: () => void
   exportJson: () => string
   importJson: (json: string) => void
+  replaceData: (next: RaxTrackerData) => void
   importFromUsername: (
     username: string,
     options?: ImportFromUsernameOptions,
@@ -103,7 +105,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<RaxTrackerData>(loadTrackerData)
 
   useEffect(() => {
-    saveTrackerData(data)
+    if (!saveTrackerData(data)) {
+      console.warn(
+        'Could not save tracker data to browser storage — your collection may not persist after refresh. Export a JSON backup.',
+      )
+    }
   }, [data])
 
   const value = useMemo<RaxDataContextValue>(
@@ -336,6 +342,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       },
       exportJson: () => exportTrackerData(data),
       importJson: (json) => setData(importTrackerData(json)),
+      replaceData: (next) => setData(normalizeData(next)),
       importFromUsername: async (username, options) => {
         const { data: nextData, result } = await runUsernameImport(data, username, options)
         const trimmed = username.replace(/^@/, '').trim()

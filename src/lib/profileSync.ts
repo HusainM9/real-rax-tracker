@@ -1,3 +1,4 @@
+import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
 import { importTrackerData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
 
@@ -50,12 +51,26 @@ export async function loadCloudProfile(
     storageConfigured?: boolean
   }
 
+  const parsed = importTrackerData(JSON.stringify(payload.data ?? {}))
+  const reportedCards = Number(payload.cardCount) || 0
+  const reportedPerformances = Number(payload.performanceCount) || 0
+  if (reportedCards > 0 && parsed.cards.length === 0) {
+    throw new Error(
+      'Cloud profile could not be restored — the server reported cards but none were returned. Try saving again from your other device.',
+    )
+  }
+  if (reportedPerformances > 0 && parsed.performances.length === 0) {
+    throw new Error(
+      'Cloud profile could not be restored — the server reported earnings rows but none were returned. Try saving again from your other device.',
+    )
+  }
+
   return {
-    data: importTrackerData(JSON.stringify(payload.data ?? {})),
+    data: parsed,
     meta: {
       updatedAt: payload.updatedAt ?? new Date().toISOString(),
-      cardCount: Number(payload.cardCount) || 0,
-      performanceCount: Number(payload.performanceCount) || 0,
+      cardCount: parsed.cards.length || reportedCards,
+      performanceCount: parsed.performances.length || reportedPerformances,
     },
     storageConfigured: payload.storageConfigured !== false,
   }
@@ -74,7 +89,7 @@ export async function saveCloudProfile(
     body: JSON.stringify({
       username: username.trim(),
       passphrase,
-      data,
+      data: compactTrackerProfileForCloudSync(data),
       ifUnmodifiedSince: options?.ifUnmodifiedSince,
     }),
   })

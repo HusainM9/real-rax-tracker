@@ -28,7 +28,7 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
 }
 
 export default function DashboardPage() {
-  const { data, setSettings, exportJson, importJson, resetAll } = useRaxData()
+  const { data, setSettings, exportJson, importJson, replaceData, resetAll } = useRaxData()
   const [showOnboarding, setShowOnboarding] = useState(
     () => data.cards.length === 0 && !isOnboardingDismissed(),
   )
@@ -169,13 +169,18 @@ export default function DashboardPage() {
         setCloudStatus('Cloud load cancelled.')
         return
       }
-      importJson(JSON.stringify(result.data))
-      setSettings({
-        savedUsername: username,
-        lastCloudSyncAt: result.meta.updatedAt,
+      replaceData({
+        ...result.data,
+        settings: {
+          ...result.data.settings,
+          savedUsername: username,
+          lastCloudSyncAt: result.meta.updatedAt,
+        },
       })
       persistRememberedCredentials()
-      setCloudStatus(`Loaded cloud profile · ${formatCloudProfileMeta(result.meta)}`)
+      setCloudStatus(
+        `Loaded ${result.data.cards.length} card${result.data.cards.length === 1 ? '' : 's'} and ${result.data.performances.length} earnings row${result.data.performances.length === 1 ? '' : 's'} into your collection. No username import needed — open Cards or Calendar to explore.`,
+      )
     } catch (error) {
       setCloudStatus(error instanceof Error ? error.message : 'Could not load cloud profile.')
     } finally {
@@ -325,8 +330,11 @@ export default function DashboardPage() {
           </div>
         </div>
         <p className="import-hint">
-          Cloud sync stores cards, earnings, saved profiles, potential cards, sell rankings, and
-          settings. Your sync PIN is required to load or save. After an admin reset, sign in with
+          Cloud sync stores cards, earnings, saved profiles, potential cards, and settings.{' '}
+          <strong>Load from cloud</strong> replaces your local collection — you do not need a
+          separate username import afterward. Cached player earnings, sell-ranking snapshots, and
+          original JSON pastes are omitted to save space. Your sync PIN is required to load or save.
+          After an admin reset, sign in with
           the PIN they gave you, then use <strong>Change sync PIN</strong> below to pick your own.
           Forgot your PIN? Ask an admin to reset it.
         </p>
