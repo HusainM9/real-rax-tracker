@@ -8,15 +8,17 @@ import {
   fetchCatalogImportProfilesBulk,
   fetchCatalogPassSummaries,
   fetchCatalogSeasonYears,
+  searchCatalog,
   type CatalogImportProfile,
   type CatalogSearchResult,
-  type CatalogSeasonYearOption,
 } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
 import {
+  applyRecommendationBaseline,
+  isAtLeastIconic1Rarity,
   rankAndRecommendAsync,
   RECOMMENDATION_MAX_BUNDLE_SIZE,
   RECOMMENDATION_SIMULATED_RARITY,
@@ -24,7 +26,9 @@ import {
   recommendationCapsForSports,
   selectSummariesForBulkFetch,
   type PassRecommendationBundle,
-  seasonLabelForFilter,
+  type RecommendationPassAdjustment,
+  type RecommendationPassAdjustmentMode,
+  sportSeasonFilterKey,
   type PassRecommendationProgress,
   type PassRecommendationRow,
 } from '../lib/passRecommendation'
@@ -35,11 +39,37 @@ import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
-const TOP_RECOMMENDATIONS = 20
+const TOP_RANKING_RESULTS = 50
+const RANKING_PAGE_SIZE = 25
 const DEFAULT_BUNDLE_SIZE = 3
 const ALL_SPORTS_RANK = 'ALL' as const
 
 type RankSportChoice = Sport | typeof ALL_SPORTS_RANK
+
+function paginate<T>(items: T[], page: number, pageSize: number): T[] {
+  const start = (page - 1) * pageSize
+  return items.slice(start, start + pageSize)
+}
+
+function pageCount(count: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(count / pageSize))
+}
+
+type CatalogSportSeasonOption = {
+  sport: Sport
+  seasonYear: number
+  seasonLabel: string
+}
+
+type ExcludedSportSeason = {
+  key: string
+  sport: Sport
+  seasonLabel: string
+}
+
+function formatExcludedSportSeason(entry: ExcludedSportSeason): string {
+  return `${entry.sport} · ${entry.seasonLabel}`
+}
 
 const EMPTY_FORM = {
   name: '',
@@ -395,25 +425,37 @@ export default function PotentialPage() {
   const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
-  const [excludedRankSeasonLabels, setExcludedRankSeasonLabels] = useState<string[]>([])
+  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>([])
+  const [excludeFormSport, setExcludeFormSport] = useState<Sport>('NFL')
+  const [excludeFormSeasonLabel, setExcludeFormSeasonLabel] = useState('')
+  const [excludeFormSeasonOptions, setExcludeFormSeasonOptions] = useState<CatalogSportSeasonOption[]>([])
+  const [excludeFormSeasonsLoading, setExcludeFormSeasonsLoading] = useState(false)
   const [bundleSize, setBundleSize] = useState(DEFAULT_BUNDLE_SIZE)
   const [rankingInProgress, setRankingInProgress] = useState(false)
   const [rankProgress, setRankProgress] = useState<PassRecommendationProgress | null>(null)
   const [rankStatus, setRankStatus] = useState('')
   const [recommendationRows, setRecommendationRows] = useState<PassRecommendationRow[]>([])
+  const [rankResultsPage, setRankResultsPage] = useState(1)
   const [recommendationBundle, setRecommendationBundle] = useState<PassRecommendationBundle | null>(
     null,
   )
   const [recommendationMeta, setRecommendationMeta] = useState<{
     calculatedAt: string
     skippedOwnedIconic: number
+    skippedAdjusted: number
     skippedNoRows: number
     catalogCount: number
     fetchTrimmed: number
     prefilterTrimmed: number
+    baselineAdjustmentCount: number
   } | null>(null)
   const [profileByKey, setProfileByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
-  const [catalogSeasonOptions, setCatalogSeasonOptions] = useState<CatalogSeasonYearOption[]>([])
+  const [rankAdjustments, setRankAdjustments] = useState<RecommendationPassAdjustment[]>([])
+  const [ownedQuickAddFilter, setOwnedQuickAddFilter] = useState('')
+  const [adjustmentSearchQuery, setAdjustmentSearchQuery] = useState('')
+  const [adjustmentSearchResults, setAdjustmentSearchResults] = useState<CatalogSearchResult[]>([])
+  const [adjustmentSearchBusy, setAdjustmentSearchBusy] = useState(false)
+  const [adjustmentSearchStatus, setAdjustmentSearchStatus] = useState('')
   const rankAbortRef = useRef<AbortController | null>(null)
 
   const potentialAnalysis = useMemo(
@@ -565,6 +607,231 @@ export default function PotentialPage() {
 
   const rankAllSports = rankSport === ALL_SPORTS_RANK
 
+  const excludedSportSeasonKeys = useMemo(
+    () => excludedSportSeasons.map((entry) => entry.key),
+    [excludedSportSeasons],
+  )
+
+  const addExcludedSportSeason = () => {
+    const seasonLabel = excludeFormSeasonLabel.trim()
+    if (!seasonLabel) return
+    const key = sportSeasonFilterKey(excludeFormSport, seasonLabel)
+    if (excludedSportSeasons.some((entry) => entry.key === key)) return
+    setExcludedSportSeasons((current) => [
+      ...current,
+      { key, sport: excludeFormSport, seasonLabel },
+    ])
+  }
+
+  const removeExcludedSportSeason = (key: string) => {
+    setExcludedSportSeasons((current) => current.filter((entry) => entry.key !== key))
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    setExcludeFormSeasonsLoading(true)
+
+    fetchCatalogSeasonYears({ sport: excludeFormSport, passKind: 'player' })
+      .then(({ seasonYears, storageConfigured }) => {
+        if (cancelled) return
+        if (!storageConfigured) {
+          setExcludeFormSeasonOptions([])
+          return
+        }
+        const options = seasonYears.map((option) => ({
+          sport: excludeFormSport,
+          seasonYear: option.seasonYear,
+          seasonLabel: option.seasonLabel.trim() || String(option.seasonYear),
+        }))
+        setExcludeFormSeasonOptions(options)
+        setExcludeFormSeasonLabel((current) => {
+          if (current && options.some((option) => option.seasonLabel === current)) {
+            return current
+          }
+          return options[0]?.seasonLabel ?? ''
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setExcludeFormSeasonOptions([])
+      })
+      .finally(() => {
+        if (!cancelled) setExcludeFormSeasonsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [excludeFormSport])
+
+  const ownedAdjustableCards = useMemo(
+    () =>
+      [...data.cards]
+        .filter(
+          (card) => card.passKind !== 'team' && !isAtLeastIconic1Rarity(card.rarityLabel),
+        )
+        .sort(
+          (a, b) =>
+            a.name.localeCompare(b.name) ||
+            a.sport.localeCompare(b.sport) ||
+            a.season.localeCompare(b.season),
+        ),
+    [data.cards],
+  )
+
+  const filteredOwnedQuickAddCards = useMemo(() => {
+    const query = ownedQuickAddFilter.trim().toLowerCase()
+    if (!query) return ownedAdjustableCards
+    return ownedAdjustableCards.filter((card) => {
+      const haystack = [card.name, card.sport, card.season, card.rarityLabel ?? '', card.externalKey ?? '']
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [ownedAdjustableCards, ownedQuickAddFilter])
+
+  const adjustmentExternalKeys = useMemo(
+    () => new Set(rankAdjustments.map((adjustment) => adjustment.externalKey)),
+    [rankAdjustments],
+  )
+
+  const addRankAdjustment = (
+    result: Pick<CatalogSearchResult, 'externalKey' | 'name' | 'sport' | 'seasonLabel' | 'seasonYear'>,
+    mode: RecommendationPassAdjustmentMode = 'assume-iconic-1',
+  ) => {
+    if (adjustmentExternalKeys.has(result.externalKey)) {
+      setAdjustmentSearchStatus('That pass is already in the adjustment list.')
+      return
+    }
+    setRankAdjustments((current) => [
+      ...current,
+      {
+        externalKey: result.externalKey,
+        name: result.name,
+        sport: sportFromCatalog(result.sport),
+        season: result.seasonLabel.trim() || String(result.seasonYear),
+        mode,
+      },
+    ])
+    setAdjustmentSearchStatus(`Added ${result.name} — ${mode === 'assume-iconic-1' ? `assume ${RECOMMENDATION_SIMULATED_RARITY}` : 'exclude from ranking'}.`)
+    setAdjustmentSearchQuery('')
+    setAdjustmentSearchResults([])
+  }
+
+  const addOwnedCardAdjustment = (card: (typeof ownedAdjustableCards)[number]) => {
+    if (!card.externalKey) {
+      setAdjustmentSearchStatus(
+        `${card.name} has no catalog link — use catalog search below or re-import with a linked pass.`,
+      )
+      return
+    }
+    addRankAdjustment({
+      externalKey: card.externalKey,
+      name: card.name,
+      sport: card.sport,
+      seasonLabel: card.season,
+      seasonYear: 0,
+    })
+  }
+
+  const addableFilteredOwnedCards = useMemo(
+    () =>
+      filteredOwnedQuickAddCards.filter(
+        (card) => card.externalKey && !adjustmentExternalKeys.has(card.externalKey),
+      ),
+    [adjustmentExternalKeys, filteredOwnedQuickAddCards],
+  )
+
+  const addAllFilteredOwnedAdjustments = () => {
+    if (addableFilteredOwnedCards.length === 0) {
+      setAdjustmentSearchStatus(
+        'No eligible passes to add — they may already be listed, lack a catalog link, or not match the filter.',
+      )
+      return
+    }
+
+    setRankAdjustments((current) => {
+      const existingKeys = new Set(current.map((adjustment) => adjustment.externalKey))
+      const next = [...current]
+      for (const card of addableFilteredOwnedCards) {
+        if (!card.externalKey || existingKeys.has(card.externalKey)) continue
+        existingKeys.add(card.externalKey)
+        next.push({
+          externalKey: card.externalKey,
+          name: card.name,
+          sport: card.sport,
+          season: card.season,
+          mode: 'assume-iconic-1',
+        })
+      }
+      return next
+    })
+
+    const skipped = filteredOwnedQuickAddCards.length - addableFilteredOwnedCards.length
+    setAdjustmentSearchStatus(
+      `Added ${addableFilteredOwnedCards.length} pass${addableFilteredOwnedCards.length === 1 ? '' : 'es'} as assume ${RECOMMENDATION_SIMULATED_RARITY}.${
+        skipped > 0 ? ` Skipped ${skipped} without catalog link or already listed.` : ''
+      }`,
+    )
+  }
+
+  const removeRankAdjustment = (externalKey: string) => {
+    setRankAdjustments((current) =>
+      current.filter((adjustment) => adjustment.externalKey !== externalKey),
+    )
+  }
+
+  const setRankAdjustmentMode = (
+    externalKey: string,
+    mode: RecommendationPassAdjustmentMode,
+  ) => {
+    setRankAdjustments((current) =>
+      current.map((adjustment) =>
+        adjustment.externalKey === externalKey ? { ...adjustment, mode } : adjustment,
+      ),
+    )
+  }
+
+  useEffect(() => {
+    const trimmed = adjustmentSearchQuery.trim()
+    if (trimmed.length < 2) {
+      setAdjustmentSearchResults([])
+      setAdjustmentSearchStatus('')
+      setAdjustmentSearchBusy(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      setAdjustmentSearchBusy(true)
+      searchCatalog(trimmed, controller.signal)
+        .then((result) => {
+          if (!result.storageConfigured) {
+            setAdjustmentSearchStatus('Shared catalog search is not configured yet.')
+            setAdjustmentSearchResults([])
+            return
+          }
+          const playerResults = result.results.filter((item) => item.passKind === 'player')
+          setAdjustmentSearchResults(playerResults)
+          setAdjustmentSearchStatus(
+            playerResults.length === 0 ? 'No player passes match that search.' : '',
+          )
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return
+          setAdjustmentSearchResults([])
+          setAdjustmentSearchStatus(error instanceof Error ? error.message : 'Catalog search failed.')
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setAdjustmentSearchBusy(false)
+        })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [adjustmentSearchQuery])
+
   const rankSportOptions = useMemo(
     () => SPORTS.map((sport) => ({ value: sport, label: sport })),
     [],
@@ -588,6 +855,7 @@ export default function PotentialPage() {
     setRankProgress(null)
     setRankStatus('')
     setRecommendationRows([])
+    setRankResultsPage(1)
     setRecommendationBundle(null)
     setRecommendationMeta(null)
     setProfileByKey(new Map())
@@ -600,21 +868,13 @@ export default function PotentialPage() {
         return
       }
 
-      if (
-        availableSeasonOptions.length > 0 &&
-        availableSeasonOptions.every((option) => excludedRankSeasonLabels.includes(option.value))
-      ) {
-        setRankStatus('Select at least one season to rank.')
-        return
+      const seasonFilter = {
+        excludedSportSeasonKeys,
+        adjustments: rankAdjustments,
       }
-
-      const includedSeasonLabels = availableSeasonOptions
-        .filter((option) => !excludedRankSeasonLabels.includes(option.value))
-        .map((option) => option.label)
-
-      const seasonFilter = { excludedSeasonLabels: excludedRankSeasonLabels }
       let catalogCount = 0
       let skippedOwnedIconic = 0
+      let skippedAdjusted = 0
       let fetchTrimmed = 0
       const candidateKeys: string[] = []
       const seenCandidateKeys = new Set<string>()
@@ -642,6 +902,7 @@ export default function PotentialPage() {
 
         const selected = selectSummariesForBulkFetch(data, results, { ...seasonFilter, sport })
         skippedOwnedIconic += selected.skippedOwnedIconic
+        skippedAdjusted += selected.skippedAdjusted
         fetchTrimmed += selected.fetchTrimmed
         for (const key of selected.keys) {
           if (!seenCandidateKeys.has(key)) {
@@ -688,10 +949,35 @@ export default function PotentialPage() {
       }
 
       const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+
+      const assumeIconicKeys = rankAdjustments
+        .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
+        .map((adjustment) => adjustment.externalKey)
+        .filter((key) => !profileMap.has(key))
+      if (assumeIconicKeys.length > 0) {
+        setRankStatus(`Loading ${assumeIconicKeys.length} baseline adjustment pass${assumeIconicKeys.length === 1 ? '' : 'es'}…`)
+        const { profiles: assumeProfiles, storageConfigured: assumeConfigured } =
+          await fetchCatalogImportProfilesBulk(assumeIconicKeys, controller.signal)
+        if (!assumeConfigured) {
+          setRankStatus('Shared catalog is not configured yet.')
+          return
+        }
+        for (const profile of assumeProfiles) {
+          profileMap.set(profile.externalKey, profile)
+        }
+      }
+
       setProfileByKey(profileMap)
 
+      const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
+      const baselineAdjustmentCount = rankAdjustments.filter(
+        (adjustment) =>
+          adjustment.mode === 'assume-iconic-1' &&
+          (profileMap.get(adjustment.externalKey)?.rows.length ?? 0) > 0,
+      ).length
+
       setRankStatus(`Analyzing top candidates at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`)
-      const { ranked, bundle } = await rankAndRecommendAsync(data, profiles, bundleSize, {
+      const { ranked, bundle } = await rankAndRecommendAsync(baselineData, profiles, bundleSize, {
         ...seasonFilter,
         ...(rankAllSports ? { caps } : { sport: rankSport }),
         signal: controller.signal,
@@ -699,15 +985,18 @@ export default function PotentialPage() {
         onProgress: setRankProgress,
       })
 
-      setRecommendationRows(ranked.rows.slice(0, TOP_RECOMMENDATIONS))
+      setRecommendationRows(ranked.rows.slice(0, TOP_RANKING_RESULTS))
+      setRankResultsPage(1)
       setRecommendationBundle(bundle)
       setRecommendationMeta({
         calculatedAt: new Date().toISOString(),
         skippedOwnedIconic: ranked.skippedOwnedIconic + skippedOwnedIconic,
+        skippedAdjusted: skippedAdjusted + ranked.skippedAdjusted,
         skippedNoRows: ranked.skippedNoRows,
         catalogCount,
         fetchTrimmed,
         prefilterTrimmed: ranked.prefilterTrimmed,
+        baselineAdjustmentCount,
       })
       const sportLabel = rankAllSports
         ? rankSports.length === SPORTS.length
@@ -715,9 +1004,9 @@ export default function PotentialPage() {
           : rankSports.join(', ')
         : rankSport
       setRankStatus(
-        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · showing top ${Math.min(TOP_RECOMMENDATIONS, ranked.rows.length)}${
-          includedSeasonLabels.length > 0 && includedSeasonLabels.length < availableSeasonOptions.length
-            ? ` · seasons ${includedSeasonLabels.join(', ')}`
+        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · showing top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)}${
+          excludedSportSeasons.length > 0
+            ? ` · excluding ${excludedSportSeasons.map(formatExcludedSportSeason).join(', ')}`
             : ''
         }.`,
       )
@@ -733,95 +1022,17 @@ export default function PotentialPage() {
     }
   }
 
-  const availableSeasonOptions = useMemo(() => {
-    const byLabel = new Map<string, { value: string; label: string; seasonYear: number }>()
-    for (const option of catalogSeasonOptions) {
-      const value = option.seasonLabel.trim() || String(option.seasonYear)
-      byLabel.set(value, {
-        value,
-        label: value,
-        seasonYear: option.seasonYear,
-      })
-    }
-    for (const profile of profileByKey.values()) {
-      const value = seasonLabelForFilter(profile)
-      const existing = byLabel.get(value)
-      byLabel.set(value, {
-        value,
-        label: value,
-        seasonYear: Math.max(existing?.seasonYear ?? 0, profile.seasonYear),
-      })
-    }
-    return [...byLabel.values()]
-      .sort((a, b) => b.seasonYear - a.seasonYear || b.label.localeCompare(a.label))
-      .map(({ value, label }) => ({ value, label }))
-  }, [catalogSeasonOptions, profileByKey])
-
-  const includedSeasonOptions = useMemo(
-    () => availableSeasonOptions.filter((option) => !excludedRankSeasonLabels.includes(option.value)),
-    [availableSeasonOptions, excludedRankSeasonLabels],
-  )
-
-  const excludedSeasonOptions = useMemo(
-    () => availableSeasonOptions.filter((option) => excludedRankSeasonLabels.includes(option.value)),
-    [availableSeasonOptions, excludedRankSeasonLabels],
+  const rankResultsPageTotal = pageCount(recommendationRows.length, RANKING_PAGE_SIZE)
+  const paginatedRecommendationRows = useMemo(
+    () => paginate(recommendationRows, rankResultsPage, RANKING_PAGE_SIZE),
+    [recommendationRows, rankResultsPage],
   )
 
   useEffect(() => {
-    let cancelled = false
-
-    const loadSeasonOptions = async () => {
-      const seasonSports =
-        rankSport === ALL_SPORTS_RANK
-          ? SPORTS.filter((sport) => !excludedRankSports.includes(sport))
-          : [rankSport]
-
-      if (rankSport === ALL_SPORTS_RANK) {
-        const byLabel = new Map<string, CatalogSeasonYearOption>()
-        for (const sport of seasonSports) {
-          const { seasonYears, storageConfigured } = await fetchCatalogSeasonYears({
-            sport,
-            passKind: 'player',
-          })
-          if (cancelled) return
-          if (!storageConfigured) {
-            setCatalogSeasonOptions([])
-            return
-          }
-          for (const option of seasonYears) {
-            const value = option.seasonLabel.trim() || String(option.seasonYear)
-            const existing = byLabel.get(value)
-            if (!existing || option.seasonYear > existing.seasonYear) {
-              byLabel.set(value, option)
-            }
-          }
-        }
-        if (!cancelled) {
-          setCatalogSeasonOptions(
-            [...byLabel.values()].sort(
-              (a, b) => b.seasonYear - a.seasonYear || a.seasonLabel.localeCompare(b.seasonLabel),
-            ),
-          )
-        }
-        return
-      }
-
-      const { seasonYears, storageConfigured } = await fetchCatalogSeasonYears({
-        sport: rankSport,
-        passKind: 'player',
-      })
-      if (cancelled || !storageConfigured) return
-      setCatalogSeasonOptions(seasonYears)
+    if (rankResultsPage > rankResultsPageTotal) {
+      setRankResultsPage(rankResultsPageTotal)
     }
-
-    void loadSeasonOptions().catch(() => {
-      if (!cancelled) setCatalogSeasonOptions([])
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [excludedRankSports, rankSport])
+  }, [rankResultsPage, rankResultsPageTotal])
 
   return (
     <div className="page-stack">
@@ -867,6 +1078,195 @@ export default function PotentialPage() {
             </>
           ) : null}
         </p>
+
+        <section className="panel nested-panel recommendation-adjustments">
+          <div className="section-heading">
+            <div>
+              <h3>Ranking baseline adjustments</h3>
+              <p>
+                Temporarily change how your collection is treated for this ranking only. Does not
+                modify your saved cards.
+              </p>
+            </div>
+            {rankAdjustments.length > 0 ? (
+              <span className="badge">{rankAdjustments.length} adjusted</span>
+            ) : null}
+          </div>
+          <p className="import-hint">
+            <strong>Assume {RECOMMENDATION_SIMULATED_RARITY}</strong> — treat a pass as already at{' '}
+            {RECOMMENDATION_SIMULATED_RARITY} in your collection (for passes you are upgrading, like
+            a lower-tier Ashton Jeanty). Rankings for other passes use that baseline and the pass
+            will not appear as a recommendation. <strong>Exclude</strong> — skip a pass from
+            recommendations without adding it to your baseline.
+          </p>
+
+          {ownedAdjustableCards.length > 0 ? (
+            <div className="recommendation-adjustment-owned">
+              <div className="section-heading recommendation-adjustment-owned-heading">
+                <div>
+                  <h4>Quick add from your collection</h4>
+                  <p className="import-hint">
+                    All player passes below {RECOMMENDATION_SIMULATED_RARITY} in your saved
+                    collection ({ownedAdjustableCards.length} total).
+                  </p>
+                </div>
+                {ownedQuickAddFilter.trim() ? (
+                  <span className="badge">
+                    {filteredOwnedQuickAddCards.length} match
+                    {filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}
+                  </span>
+                ) : null}
+              </div>
+              <div className="sort-controls">
+                <label className="field inline-field recommendation-adjustment-owned-search">
+                  <span>Filter your collection</span>
+                  <input
+                    value={ownedQuickAddFilter}
+                    disabled={rankingInProgress}
+                    placeholder="Name, sport, season, or rarity"
+                    onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
+                  />
+                </label>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={rankingInProgress || addableFilteredOwnedCards.length === 0}
+                  onClick={addAllFilteredOwnedAdjustments}
+                >
+                  Add all{addableFilteredOwnedCards.length > 0 ? ` (${addableFilteredOwnedCards.length})` : ''}
+                </button>
+              </div>
+              {filteredOwnedQuickAddCards.length > 0 ? (
+                <div className="recommendation-adjustment-owned-list button-row wrap-row">
+                  {filteredOwnedQuickAddCards.map((card) => {
+                    const alreadyAdded = card.externalKey
+                      ? adjustmentExternalKeys.has(card.externalKey)
+                      : false
+                    const missingCatalogLink = !card.externalKey
+                    return (
+                      <button
+                        className="button compact"
+                        type="button"
+                        key={card.id}
+                        disabled={rankingInProgress || alreadyAdded || missingCatalogLink}
+                        title={
+                          missingCatalogLink
+                            ? 'No catalog link on this card — use catalog search below'
+                            : alreadyAdded
+                              ? 'Already in adjustment list'
+                              : `Add ${card.name} as assume ${RECOMMENDATION_SIMULATED_RARITY}`
+                        }
+                        onClick={() => addOwnedCardAdjustment(card)}
+                      >
+                        {card.name}
+                        {card.season ? ` · ${card.season}` : ''}
+                        {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="empty">No collection passes match that filter.</p>
+              )}
+            </div>
+          ) : null}
+
+          <div className="sort-controls">
+            <label className="field inline-field recommendation-adjustment-search">
+              <span>Search catalog to add</span>
+              <input
+                value={adjustmentSearchQuery}
+                disabled={rankingInProgress}
+                placeholder="Player name, e.g. Ashton Jeanty"
+                onChange={(event) => setAdjustmentSearchQuery(event.target.value)}
+              />
+            </label>
+          </div>
+          {adjustmentSearchBusy ? (
+            <p className="import-hint">Searching catalog…</p>
+          ) : null}
+          {adjustmentSearchStatus ? <p className="import-status">{adjustmentSearchStatus}</p> : null}
+          {adjustmentSearchResults.length > 0 ? (
+            <div className="list recommendation-adjustment-search-results">
+              {adjustmentSearchResults.slice(0, 8).map((result) => (
+                <div className="list-row" key={result.externalKey}>
+                  <span>
+                    <strong>{result.name}</strong>
+                    <small>
+                      {sportFromCatalog(result.sport)} ·{' '}
+                      {result.seasonLabel.trim() || result.seasonYear} ·{' '}
+                      {result.rowCount} row{result.rowCount === 1 ? '' : 's'}
+                    </small>
+                  </span>
+                  <span className="button-row compact-actions">
+                    <button
+                      className="button compact"
+                      type="button"
+                      disabled={
+                        rankingInProgress || adjustmentExternalKeys.has(result.externalKey)
+                      }
+                      onClick={() => addRankAdjustment(result, 'assume-iconic-1')}
+                    >
+                      Assume {RECOMMENDATION_SIMULATED_RARITY}
+                    </button>
+                    <button
+                      className="button compact"
+                      type="button"
+                      disabled={
+                        rankingInProgress || adjustmentExternalKeys.has(result.externalKey)
+                      }
+                      onClick={() => addRankAdjustment(result, 'exclude')}
+                    >
+                      Exclude
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {rankAdjustments.length > 0 ? (
+            <div className="list recommendation-adjustment-list">
+              {rankAdjustments.map((adjustment) => (
+                <div className="list-row" key={adjustment.externalKey}>
+                  <span>
+                    <strong>{adjustment.name}</strong>
+                    <small>
+                      {adjustment.sport} · {adjustment.season}
+                    </small>
+                  </span>
+                  <span className="button-row compact-actions">
+                    <select
+                      className="adjustment-mode-select"
+                      value={adjustment.mode}
+                      disabled={rankingInProgress}
+                      onChange={(event) =>
+                        setRankAdjustmentMode(
+                          adjustment.externalKey,
+                          event.target.value as RecommendationPassAdjustmentMode,
+                        )
+                      }
+                    >
+                      <option value="assume-iconic-1">Assume {RECOMMENDATION_SIMULATED_RARITY}</option>
+                      <option value="exclude">Exclude from ranking</option>
+                    </select>
+                    <button
+                      className="button danger compact"
+                      type="button"
+                      disabled={rankingInProgress}
+                      onClick={() => removeRankAdjustment(adjustment.externalKey)}
+                    >
+                      Remove
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">No adjustments — ranking uses your collection as saved.</p>
+          )}
+        </section>
+
         <div className="sort-controls">
           <label className="field inline-field">
             <span>Sport</span>
@@ -876,7 +1276,6 @@ export default function PotentialPage() {
               onChange={(event) => {
                 const next = event.target.value
                 setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                setExcludedRankSeasonLabels([])
                 if (next !== ALL_SPORTS_RANK) {
                   setExcludedRankSports([])
                 }
@@ -919,37 +1318,6 @@ export default function PotentialPage() {
               )}
             </div>
           ) : null}
-          <div className="field inline-field season-multi-select-field">
-            <SeasonMultiSelect
-              options={availableSeasonOptions}
-              excludedValues={excludedRankSeasonLabels}
-              onExcludedValuesChange={setExcludedRankSeasonLabels}
-              disabled={rankingInProgress}
-              label="Seasons"
-            />
-            {availableSeasonOptions.length > 0 ? (
-              <p className="season-filter-summary">
-                {includedSeasonOptions.length === availableSeasonOptions.length ? (
-                  <>Including all seasons ({availableSeasonOptions.map((option) => option.label).join(', ')})</>
-                ) : (
-                  <>
-                    <span>
-                      Including:{' '}
-                      {includedSeasonOptions.length > 0
-                        ? includedSeasonOptions.map((option) => option.label).join(', ')
-                        : 'none'}
-                    </span>
-                    {excludedSeasonOptions.length > 0 ? (
-                      <>
-                        {' '}
-                        · <span>Excluding: {excludedSeasonOptions.map((option) => option.label).join(', ')}</span>
-                      </>
-                    ) : null}
-                  </>
-                )}
-              </p>
-            ) : null}
-          </div>
           <label className="field inline-field">
             <span>Bundle size</span>
             <input
@@ -969,14 +1337,109 @@ export default function PotentialPage() {
             />
           </label>
         </div>
+
+        <section className="panel nested-panel recommendation-exclusions">
+          <div className="section-heading recommendation-adjustment-owned-heading">
+            <div>
+              <h4>Exclude sport + season from ranking</h4>
+              <p className="import-hint">
+                Skip catalog passes for a specific sport and season (e.g. NFL · 2022-23 no longer on
+                Real). Exclusions stay when you change the rank sport above.
+              </p>
+            </div>
+            {excludedSportSeasons.length > 0 ? (
+              <span className="badge">{excludedSportSeasons.length} excluded</span>
+            ) : null}
+          </div>
+          <div className="sort-controls">
+            <label className="field inline-field">
+              <span>Sport</span>
+              <select
+                value={excludeFormSport}
+                disabled={rankingInProgress}
+                onChange={(event) => setExcludeFormSport(event.target.value as Sport)}
+              >
+                {SPORTS.map((sport) => (
+                  <option key={sport} value={sport}>
+                    {sport}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field inline-field">
+              <span>Season</span>
+              {excludeFormSeasonOptions.length > 0 ? (
+                <select
+                  value={excludeFormSeasonLabel}
+                  disabled={rankingInProgress || excludeFormSeasonsLoading}
+                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
+                >
+                  {excludeFormSeasonOptions.map((option) => (
+                    <option key={option.seasonLabel} value={option.seasonLabel}>
+                      {option.seasonLabel}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={excludeFormSeasonLabel}
+                  disabled={rankingInProgress || excludeFormSeasonsLoading}
+                  placeholder="e.g. 2022-23"
+                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
+                />
+              )}
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={
+                rankingInProgress ||
+                excludeFormSeasonsLoading ||
+                !excludeFormSeasonLabel.trim() ||
+                excludedSportSeasons.some(
+                  (entry) =>
+                    entry.key ===
+                    sportSeasonFilterKey(excludeFormSport, excludeFormSeasonLabel.trim()),
+                )
+              }
+              onClick={addExcludedSportSeason}
+            >
+              Exclude pair
+            </button>
+          </div>
+          {excludeFormSeasonsLoading ? (
+            <p className="import-hint">Loading seasons for {excludeFormSport}…</p>
+          ) : null}
+          {excludedSportSeasons.length > 0 ? (
+            <div className="list recommendation-adjustment-list">
+              {excludedSportSeasons.map((entry) => (
+                <div className="list-row" key={entry.key}>
+                  <span>
+                    <strong>{formatExcludedSportSeason(entry)}</strong>
+                  </span>
+                  <button
+                    className="button danger compact"
+                    type="button"
+                    disabled={rankingInProgress}
+                    onClick={() => removeExcludedSportSeason(entry.key)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">No exclusions — all catalog sport + season pairs are eligible.</p>
+          )}
+        </section>
+
         <div className="button-row">
           <button
             className="button primary"
             type="button"
             disabled={
               rankingInProgress ||
-              (rankAllSports && includedRankSports.length === 0) ||
-              (availableSeasonOptions.length > 0 && includedSeasonOptions.length === 0)
+              (rankAllSports && includedRankSports.length === 0)
             }
             onClick={() => void runCatalogRanking()}
           >
@@ -1045,6 +1508,12 @@ export default function PotentialPage() {
                 {recommendationMeta.skippedOwnedIconic > 0
                   ? ` · ${recommendationMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
                   : ''}
+                {recommendationMeta.skippedAdjusted > 0
+                  ? ` · ${recommendationMeta.skippedAdjusted} skipped by your adjustments`
+                  : ''}
+                {recommendationMeta.baselineAdjustmentCount > 0
+                  ? ` · ${recommendationMeta.baselineAdjustmentCount} assumed at ${RECOMMENDATION_SIMULATED_RARITY} in baseline`
+                  : ''}
                 {recommendationMeta.fetchTrimmed > 0
                   ? ` · ${recommendationMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
                   : ''}
@@ -1071,9 +1540,11 @@ export default function PotentialPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recommendationRows.map((row, index) => (
+                  {paginatedRecommendationRows.map((row, index) => {
+                    const rankNumber = (rankResultsPage - 1) * RANKING_PAGE_SIZE + index + 1
+                    return (
                     <tr key={row.externalKey}>
-                      <td>{index + 1}</td>
+                      <td>{rankNumber}</td>
                       <td>
                         <button
                           className="link-button"
@@ -1110,10 +1581,35 @@ export default function PotentialPage() {
                       <td>{formatRax(displayRaxValue(row.overlapRax))}</td>
                       <td>{formatRax(displayRaxValue(row.totalBaseRax))}</td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
+            {recommendationRows.length > RANKING_PAGE_SIZE ? (
+              <div className="table-pagination">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={rankResultsPage <= 1}
+                  onClick={() => setRankResultsPage((page) => page - 1)}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {rankResultsPage} of {rankResultsPageTotal} ·{' '}
+                  {recommendationRows.length} passes
+                </span>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={rankResultsPage >= rankResultsPageTotal}
+                  onClick={() => setRankResultsPage((page) => page + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>

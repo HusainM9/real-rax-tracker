@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { analyzePotentialCard } from './potentialAnalysis'
 import {
   analyzeCatalogCandidate,
+  applyRecommendationBaseline,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
   netClaimableDelta,
+  passSeasonIncluded,
   prefilterRecommendationProfiles,
   rankCatalogRecommendations,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForAllSports,
   recommendationCapsForSport,
   recommendationCapsForSports,
-  seasonLabelIncluded,
+  sportSeasonFilterKey,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
 } from './passRecommendation'
@@ -181,7 +183,7 @@ describe('passRecommendation', () => {
     expect(selected.fetchTrimmed).toBe(1)
   })
 
-  it('filters by excluded season labels', () => {
+  it('filters by excluded sport + season keys', () => {
     const profiles = [
       catalogProfile('a|2025|NBA', '2025 pass', [{ claimDay: '2026-03-01', baseRaxEarned: 10 }]),
       {
@@ -192,15 +194,15 @@ describe('passRecommendation', () => {
     ]
 
     const filtered = filterRecommendationProfiles(data, profiles, {
-      excludedSeasonLabels: ['2024-25'],
+      excludedSportSeasonKeys: [sportSeasonFilterKey('NBA', '2024-25')],
     })
     expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['a|2025|NBA'])
   })
 
-  it('seasonLabelIncluded respects excluded labels', () => {
-    expect(seasonLabelIncluded('2024-25', ['2023-24'])).toBe(true)
-    expect(seasonLabelIncluded('2024-25', ['2024-25'])).toBe(false)
-    expect(seasonLabelIncluded('2024-25')).toBe(true)
+  it('passSeasonIncluded respects excluded sport + season keys', () => {
+    expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2023-24'])).toBe(true)
+    expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2024-25'])).toBe(false)
+    expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
   })
 
   it('filters NFL seasons independently when labels share a catalog year', () => {
@@ -218,9 +220,29 @@ describe('passRecommendation', () => {
     }
 
     const filtered = filterRecommendationProfiles(data, [current, prior], {
-      excludedSeasonLabels: ['2024-25'],
+      excludedSportSeasonKeys: [sportSeasonFilterKey('NFL', '2024-25')],
     })
     expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['current|2025|NFL'])
+  })
+
+  it('excludes one sport+season without hiding the same label in another sport', () => {
+    const nflPrior = {
+      ...catalogProfile('nfl|2025|NFL', 'NFL prior', [{ claimDay: '2026-03-01', baseRaxEarned: 8 }]),
+      sport: 'NFL',
+      seasonYear: 2025,
+      seasonLabel: '2022-23',
+    }
+    const nbaSameLabel = {
+      ...catalogProfile('nba|2025|NBA', 'NBA same label', [{ claimDay: '2026-03-01', baseRaxEarned: 12 }]),
+      sport: 'NBA',
+      seasonYear: 2025,
+      seasonLabel: '2022-23',
+    }
+
+    const filtered = filterRecommendationProfiles(data, [nflPrior, nbaSameLabel], {
+      excludedSportSeasonKeys: [sportSeasonFilterKey('NFL', '2022-23')],
+    })
+    expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['nba|2025|NBA'])
   })
 
   it('filters FC passes by season label when multiple labels share a year', () => {
@@ -238,7 +260,7 @@ describe('passRecommendation', () => {
     }
 
     const filtered = filterRecommendationProfiles(data, [current, prior], {
-      excludedSeasonLabels: ['2024-25'],
+      excludedSportSeasonKeys: [sportSeasonFilterKey('FC', '2024-25')],
     })
     expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['current|2025|FC'])
   })
@@ -299,5 +321,93 @@ describe('passRecommendation', () => {
     expect(
       analyzeCatalogCandidate(data, catalogProfile('empty|2025|NBA', 'Empty', [])),
     ).toBeNull()
+  })
+
+  it('applyRecommendationBaseline upgrades an owned lower-tier pass to Iconic 1', () => {
+    const profile = catalogProfile('owned-leg|2025|NBA', 'Owned legendary', [
+      { claimDay: '2026-03-01', baseRaxEarned: 20 },
+    ])
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [...data.cards, card('owned-leg', 'Owned legendary', 'owned-leg|2025|NBA', 'Legendary 1')],
+      performances: [...data.performances, perf('p-owned', 'owned-leg', 20, '2026-03-01')],
+    }
+
+    const baseline = applyRecommendationBaseline(
+      ownedData,
+      new Map([[profile.externalKey, profile]]),
+      [
+        {
+          externalKey: profile.externalKey,
+          name: profile.name,
+          sport: 'NBA',
+          season: '2025-26',
+          mode: 'assume-iconic-1',
+        },
+      ],
+    )
+
+    const upgraded = baseline.cards.find((item) => item.externalKey === profile.externalKey)
+    expect(upgraded?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(upgraded?.id).toBe('owned-leg')
+    expect(
+      baseline.performances.find((item) => item.cardId === 'owned-leg')?.raxEarned,
+    ).toBeGreaterThan(20)
+  })
+
+  it('excludes adjusted passes from recommendation candidates', () => {
+    const profiles = [
+      catalogProfile('target|2025|NBA', 'Target', [{ claimDay: '2026-03-01', baseRaxEarned: 40 }]),
+      catalogProfile('skip|2025|NBA', 'Skip me', [{ claimDay: '2026-03-01', baseRaxEarned: 30 }]),
+    ]
+
+    const filtered = filterRecommendationProfiles(data, profiles, {
+      adjustments: [
+        {
+          externalKey: 'skip|2025|NBA',
+          name: 'Skip me',
+          sport: 'NBA',
+          season: '2025-26',
+          mode: 'exclude',
+        },
+      ],
+    })
+
+    expect(filtered.skippedAdjusted).toBe(1)
+    expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['target|2025|NBA'])
+  })
+
+  it('assumed Iconic 1 passes are skipped and change ranking baseline', () => {
+    const ownedProfile = catalogProfile('owned-leg|2025|NBA', 'Owned legendary', [
+      { claimDay: '2026-03-01', baseRaxEarned: 20 },
+    ])
+    const candidate = catalogProfile('new|2025|NBA', 'New pass', [
+      { claimDay: '2026-03-01', baseRaxEarned: 18 },
+    ])
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [...data.cards, card('owned-leg', 'Owned legendary', 'owned-leg|2025|NBA', 'Legendary 1')],
+      performances: [...data.performances, perf('p-owned', 'owned-leg', 20, '2026-03-01')],
+    }
+    const profilesByKey = new Map([
+      [ownedProfile.externalKey, ownedProfile],
+      [candidate.externalKey, candidate],
+    ])
+    const adjustments = [
+      {
+        externalKey: ownedProfile.externalKey,
+        name: ownedProfile.name,
+        sport: 'NBA' as const,
+        season: '2025-26',
+        mode: 'assume-iconic-1' as const,
+      },
+    ]
+
+    const baseline = applyRecommendationBaseline(ownedData, profilesByKey, adjustments)
+    const withoutBaseline = analyzeCatalogCandidate(ownedData, candidate)
+    const withBaseline = analyzeCatalogCandidate(baseline, candidate)
+
+    expect(shouldSkipRecommendationPass(ownedData, ownedProfile.externalKey, adjustments)).toBe(true)
+    expect(withoutBaseline?.netClaimableDelta).not.toBe(withBaseline?.netClaimableDelta)
   })
 })

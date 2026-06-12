@@ -95,6 +95,7 @@ export type PassRecommendationResult = {
   rows: PassRecommendationRow[]
   skippedOwnedIconic: number
   skippedNoRows: number
+  skippedAdjusted: number
   analyzedCount: number
   prefilterTrimmed: number
 }
@@ -120,10 +121,45 @@ export function isAtLeastIconic1Rarity(rarityLabel?: string): boolean {
   return normalizeRarityTier(rarityLabel ?? '') === 'Iconic'
 }
 
+export function getRecommendationAdjustmentSets(adjustments?: RecommendationPassAdjustment[]): {
+  assumeIconic1: Set<string>
+  excluded: Set<string>
+} {
+  const assumeIconic1 = new Set<string>()
+  const excluded = new Set<string>()
+  for (const adjustment of adjustments ?? []) {
+    if (adjustment.mode === 'assume-iconic-1') {
+      assumeIconic1.add(adjustment.externalKey)
+    } else {
+      excluded.add(adjustment.externalKey)
+    }
+  }
+  return { assumeIconic1, excluded }
+}
+
+export function applyRecommendationBaseline(
+  data: RaxTrackerData,
+  profilesByKey: Map<string, CatalogImportProfile>,
+  adjustments?: RecommendationPassAdjustment[],
+): RaxTrackerData {
+  const { assumeIconic1 } = getRecommendationAdjustmentSets(adjustments)
+  let workingData = data
+  for (const externalKey of assumeIconic1) {
+    const profile = profilesByKey.get(externalKey)
+    if (!profile || profile.rows.length === 0) continue
+    workingData = addProfileToData(workingData, profile)
+  }
+  return workingData
+}
+
 export function shouldSkipRecommendationPass(
   data: RaxTrackerData,
   externalKey: string,
+  adjustments?: RecommendationPassAdjustment[],
 ): boolean {
+  const { assumeIconic1, excluded } = getRecommendationAdjustmentSets(adjustments)
+  if (excluded.has(externalKey) || assumeIconic1.has(externalKey)) return true
+
   const owned = data.cards.find((card) => card.externalKey === externalKey)
   if (!owned) return false
   return isAtLeastIconic1Rarity(owned.rarityLabel)
@@ -157,8 +193,23 @@ export function profileAsIconic1(profile: CatalogImportProfile): CatalogImportPr
   return { ...profile, rarityLabel: RECOMMENDATION_SIMULATED_RARITY }
 }
 
+export type RecommendationPassAdjustmentMode = 'assume-iconic-1' | 'exclude'
+
+export type RecommendationPassAdjustment = {
+  externalKey: string
+  name: string
+  sport: Sport
+  season: string
+  mode: RecommendationPassAdjustmentMode
+}
+
 export type RecommendationSeasonFilter = {
-  excludedSeasonLabels?: string[]
+  /** Keys like `NFL|2022-23` — excludes that sport+season pair only. */
+  excludedSportSeasonKeys?: string[]
+}
+
+export type RecommendationFilterOptions = RecommendationSeasonFilter & {
+  adjustments?: RecommendationPassAdjustment[]
 }
 
 export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: number }): string {
@@ -166,29 +217,42 @@ export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: nu
   return label || String(item.seasonYear)
 }
 
-export function seasonLabelIncluded(
-  seasonLabel: string,
-  excludedSeasonLabels?: string[],
+export function sportSeasonFilterKey(sport: Sport, seasonLabel: string): string {
+  return `${sport}|${seasonLabel}`
+}
+
+export function passSeasonIncluded(
+  item: { sport: string; seasonLabel: string; seasonYear: number },
+  excludedSportSeasonKeys?: string[],
 ): boolean {
-  if (!excludedSeasonLabels?.length) return true
-  return !excludedSeasonLabels.includes(seasonLabel)
+  if (!excludedSportSeasonKeys?.length) return true
+  const sport = sportFromCatalog(item.sport)
+  const seasonLabel = seasonLabelForFilter(item)
+  return !excludedSportSeasonKeys.includes(sportSeasonFilterKey(sport, seasonLabel))
 }
 
 export function filterRecommendationProfiles(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
-  options?: RecommendationSeasonFilter,
+  options?: RecommendationFilterOptions,
 ): {
   candidates: CatalogImportProfile[]
   skippedOwnedIconic: number
   skippedNoRows: number
+  skippedAdjusted: number
 } {
   let skippedOwnedIconic = 0
   let skippedNoRows = 0
+  let skippedAdjusted = 0
   const candidates: CatalogImportProfile[] = []
+  const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
 
   for (const profile of profiles) {
-    if (shouldSkipRecommendationPass(data, profile.externalKey)) {
+    if (excluded.has(profile.externalKey) || assumeIconic1.has(profile.externalKey)) {
+      skippedAdjusted += 1
+      continue
+    }
+    if (shouldSkipRecommendationPass(data, profile.externalKey, options?.adjustments)) {
       skippedOwnedIconic += 1
       continue
     }
@@ -196,34 +260,41 @@ export function filterRecommendationProfiles(
       skippedNoRows += 1
       continue
     }
-    if (!seasonLabelIncluded(seasonLabelForFilter(profile), options?.excludedSeasonLabels)) {
+    if (!passSeasonIncluded(profile, options?.excludedSportSeasonKeys)) {
       continue
     }
     candidates.push(profile)
   }
 
-  return { candidates, skippedOwnedIconic, skippedNoRows }
+  return { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted }
 }
 
 export function selectSummariesForBulkFetch(
   data: RaxTrackerData,
   summaries: CatalogSearchResult[],
-  options?: RecommendationSeasonFilter & { cap?: number; sport?: Sport },
+  options?: RecommendationFilterOptions & { cap?: number; sport?: Sport },
 ): {
   keys: string[]
   skippedOwnedIconic: number
+  skippedAdjusted: number
   fetchTrimmed: number
 } {
   const cap =
     options?.cap ??
     (options?.sport ? recommendationCapsForSport(options.sport).bulkFetchCap : RECOMMENDATION_BULK_FETCH_CAP)
   let skippedOwnedIconic = 0
+  let skippedAdjusted = 0
   const eligible: CatalogSearchResult[] = []
 
   for (const summary of summaries) {
     if (summary.rowCount <= 0) continue
-    if (!seasonLabelIncluded(seasonLabelForFilter(summary), options?.excludedSeasonLabels)) continue
-    if (shouldSkipRecommendationPass(data, summary.externalKey)) {
+    if (!passSeasonIncluded(summary, options?.excludedSportSeasonKeys)) continue
+    const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
+    if (excluded.has(summary.externalKey) || assumeIconic1.has(summary.externalKey)) {
+      skippedAdjusted += 1
+      continue
+    }
+    if (shouldSkipRecommendationPass(data, summary.externalKey, options?.adjustments)) {
       skippedOwnedIconic += 1
       continue
     }
@@ -235,6 +306,7 @@ export function selectSummariesForBulkFetch(
   return {
     keys: selected.map((item) => item.externalKey),
     skippedOwnedIconic,
+    skippedAdjusted,
     fetchTrimmed: Math.max(0, eligible.length - selected.length),
   }
 }
@@ -374,9 +446,9 @@ async function rankCandidatesAsync(
 export function rankCatalogRecommendations(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
-  options?: RecommendationSeasonFilter & { analysisCap?: number },
+  options?: RecommendationFilterOptions & { analysisCap?: number },
 ): PassRecommendationResult {
-  const { candidates, skippedOwnedIconic, skippedNoRows } = filterRecommendationProfiles(
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
     data,
     profiles,
     options,
@@ -391,6 +463,7 @@ export function rankCatalogRecommendations(
     rows,
     skippedOwnedIconic,
     skippedNoRows,
+    skippedAdjusted,
     analyzedCount: rows.length,
     prefilterTrimmed: trimmed,
   }
@@ -399,17 +472,17 @@ export function rankCatalogRecommendations(
 export async function rankCatalogRecommendationsAsync(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
-  options?: RecommendationSeasonFilter & {
+  options?: RecommendationFilterOptions & {
     analysisCap?: number
     onProgress?: (progress: PassRecommendationProgress) => void
     signal?: AbortSignal
     batchSize?: number
   },
 ): Promise<PassRecommendationResult> {
-  const { candidates, skippedOwnedIconic, skippedNoRows } = filterRecommendationProfiles(
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
     data,
     profiles,
-    { excludedSeasonLabels: options?.excludedSeasonLabels },
+    options,
   )
   const { profiles: analysisPool, trimmed } = prefilterRecommendationProfiles(
     candidates,
@@ -421,6 +494,7 @@ export async function rankCatalogRecommendationsAsync(
     rows,
     skippedOwnedIconic,
     skippedNoRows,
+    skippedAdjusted,
     analyzedCount: rows.length,
     prefilterTrimmed: trimmed,
   }
@@ -430,7 +504,7 @@ export async function rankAndRecommendAsync(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
   bundleSize: number,
-  options?: RecommendationSeasonFilter & {
+  options?: RecommendationFilterOptions & {
     sport?: Sport
     caps?: RecommendationCaps
     onProgress?: (progress: PassRecommendationProgress) => void
@@ -443,10 +517,10 @@ export async function rankAndRecommendAsync(
   const analysisCap = caps?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP
   const greedyRerankCap = caps?.greedyRerankCap ?? RECOMMENDATION_GREEDY_RERANK_CAP
 
-  const { candidates, skippedOwnedIconic, skippedNoRows } = filterRecommendationProfiles(
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
     data,
     profiles,
-    { excludedSeasonLabels: options?.excludedSeasonLabels },
+    options,
   )
   const { profiles: analysisPool, trimmed } = prefilterRecommendationProfiles(
     candidates,
@@ -501,6 +575,7 @@ export async function rankAndRecommendAsync(
       rows: rankedRows,
       skippedOwnedIconic,
       skippedNoRows,
+      skippedAdjusted,
       analyzedCount: rankedRows.length,
       prefilterTrimmed: trimmed,
     },
@@ -515,7 +590,7 @@ export async function greedyPickBundleAsync(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
   count: number,
-  options?: RecommendationSeasonFilter & {
+  options?: RecommendationFilterOptions & {
     onProgress?: (progress: PassRecommendationProgress) => void
     signal?: AbortSignal
     batchSize?: number
@@ -529,7 +604,7 @@ export function greedyPickBundle(
   data: RaxTrackerData,
   profiles: CatalogImportProfile[],
   count: number,
-  options?: RecommendationSeasonFilter,
+  options?: RecommendationFilterOptions,
 ): PassRecommendationBundle {
   const pickCount = Math.max(0, Math.min(Math.floor(count), RECOMMENDATION_MAX_BUNDLE_SIZE))
   if (pickCount === 0) {

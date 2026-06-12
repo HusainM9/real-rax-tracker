@@ -646,6 +646,53 @@ label.button input.sr-only {
   padding: 1.15rem 1.2rem;
 }
 
+.panel.nested-panel {
+  margin-top: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.recommendation-adjustments .recommendation-adjustment-owned,
+.recommendation-exclusions {
+  margin-bottom: 0.75rem;
+}
+
+.recommendation-adjustment-owned-heading {
+  margin-bottom: 0.65rem;
+}
+
+.recommendation-adjustment-owned-heading h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+}
+
+.recommendation-adjustment-owned-search {
+  flex: 1 1 18rem;
+}
+
+.recommendation-adjustment-owned-list {
+  max-height: 14rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.button-row.wrap-row {
+  flex-wrap: wrap;
+}
+
+.adjustment-mode-select {
+  min-width: 11rem;
+}
+
+.recommendation-adjustment-search {
+  flex: 1 1 18rem;
+}
+
+.recommendation-adjustment-search-results,
+.recommendation-adjustment-list {
+  margin-top: 0.75rem;
+}
+
 .section-heading {
   display: flex;
   align-items: start;
