@@ -63,12 +63,8 @@ type SupabaseDailyRow = {
 
 const MAX_SEARCH_LIMIT = 50
 const MAX_CANDIDATES_PAGE = 200
-/** Supabase fetch chunk size — parallelized on the server. */
-export const BULK_PROFILE_KEYS_BATCH = 20
-/** Max passes per HTTP bulk request (server runs batches in parallel). */
+/** Max passes per HTTP bulk request — one pass query + one daily query per request. */
 export const BULK_PROFILE_KEYS_MAX_REQUEST = 80
-/** Parallel Supabase batch fetches within one API invocation. */
-export const BULK_PROFILE_FETCH_CONCURRENCY = 5
 const PASS_UPSERT_BATCH_SIZE = 250
 const DAILY_UPSERT_BATCH_SIZE = 200
 const UPSERT_BATCH_PAUSE_MS = 300
@@ -325,32 +321,50 @@ async function fetchDailyRowsPage(
 
 const DAILY_FETCH_PAGE_CONCURRENCY = 4
 
-async function fetchAllDailyRows(filter: URLSearchParams): Promise<SupabaseDailyRow[]> {
-  const firstPage = await fetchDailyRowsPage(filter, 0)
-  if (firstPage.length < DAILY_FETCH_PAGE_SIZE) {
-    return firstPage
-  }
+async function fetchExactRowCount(table: string, filter: URLSearchParams): Promise<number> {
+  const params = new URLSearchParams(filter)
+  params.set('select', 'external_key')
+  params.set('limit', '1')
 
-  const rows = [...firstPage]
-  let offset = DAILY_FETCH_PAGE_SIZE
+  const url = supabaseRestUrl(table, params)
+  let lastError = 'Supabase catalog count failed.'
 
-  while (true) {
-    const pages = await Promise.all(
-      Array.from({ length: DAILY_FETCH_PAGE_CONCURRENCY }, (_, index) =>
-        fetchDailyRowsPage(filter, offset + index * DAILY_FETCH_PAGE_SIZE),
-      ),
-    )
-
-    let reachedEnd = false
-    for (const page of pages) {
-      rows.push(...page)
-      if (page.length < DAILY_FETCH_PAGE_SIZE) {
-        reachedEnd = true
-      }
+  for (let attempt = 0; attempt <= SUPABASE_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(url, { headers: supabaseHeaders('count=exact') })
+    if (response.ok) {
+      const range = response.headers.get('content-range') ?? ''
+      const total = Number(range.split('/')[1])
+      return Number.isFinite(total) ? total : 0
     }
 
-    if (reachedEnd) break
-    offset += DAILY_FETCH_PAGE_CONCURRENCY * DAILY_FETCH_PAGE_SIZE
+    const detail = await response.text().catch(() => '')
+    lastError = formatSupabaseError(response.status, detail)
+    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status, detail)) {
+      throw new Error(lastError)
+    }
+
+    await sleep(SUPABASE_RETRY_BASE_MS * 2 ** attempt)
+  }
+
+  throw new Error(lastError)
+}
+
+async function fetchAllDailyRows(filter: URLSearchParams): Promise<SupabaseDailyRow[]> {
+  const total = await fetchExactRowCount('meowbot_daily_earnings', filter)
+  if (total === 0) return []
+
+  const pageCount = Math.ceil(total / DAILY_FETCH_PAGE_SIZE)
+  const rows: SupabaseDailyRow[] = []
+
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += DAILY_FETCH_PAGE_CONCURRENCY) {
+    const pages = await Promise.all(
+      Array.from({ length: Math.min(DAILY_FETCH_PAGE_CONCURRENCY, pageCount - pageIndex) }, (_, index) =>
+        fetchDailyRowsPage(filter, (pageIndex + index) * DAILY_FETCH_PAGE_SIZE),
+      ),
+    )
+    for (const page of pages) {
+      rows.push(...page)
+    }
   }
 
   return rows
@@ -392,12 +406,24 @@ export async function searchCatalogPasses(options: {
   }
 }
 
+function groupDailyRowsByKey(dailyRows: SupabaseDailyRow[]): Map<string, SupabaseDailyRow[]> {
+  const byKey = new Map<string, SupabaseDailyRow[]>()
+  for (const row of dailyRows) {
+    const bucket = byKey.get(row.external_key)
+    if (bucket) {
+      bucket.push(row)
+    } else {
+      byKey.set(row.external_key, [row])
+    }
+  }
+  return byKey
+}
+
 function buildImportProfileFromPass(
   pass: SupabasePassRow,
-  dailyRows: SupabaseDailyRow[],
+  dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const mappedRows = dailyRows
-    .filter((row) => row.external_key === pass.external_key)
+  const mappedRows = dailyRowsForPass
     .map((row) => ({
       claimDay: row.claim_day,
       baseRaxEarned: Number(row.base_rax_earned),
@@ -512,25 +538,28 @@ export async function listCatalogPassSummaries(options: {
   return { results, storageConfigured: true }
 }
 
-async function fetchCatalogImportProfilesBatch(batchKeys: string[]): Promise<CatalogImportProfile[]> {
-  if (batchKeys.length === 0) return []
+async function fetchCatalogImportProfilesChunk(
+  keys: string[],
+): Promise<CatalogImportProfile[]> {
+  if (keys.length === 0) return []
 
   const passParams = new URLSearchParams({
     select:
       'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at',
-    external_key: quotedIn(batchKeys),
+    external_key: quotedIn(keys),
   })
   const [passRows, dailyRows] = await Promise.all([
     supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params: passParams }),
-    fetchDailyRowsByExternalKeys(batchKeys),
+    fetchDailyRowsByExternalKeys(keys),
   ])
   const passByKey = new Map(passRows.map((row) => [row.external_key, row]))
+  const dailyByKey = groupDailyRowsByKey(dailyRows)
 
   const profiles: CatalogImportProfile[] = []
-  for (const key of batchKeys) {
+  for (const key of keys) {
     const pass = passByKey.get(key)
     if (!pass) continue
-    profiles.push(buildImportProfileFromPass(pass, dailyRows))
+    profiles.push(buildImportProfileFromPass(pass, dailyByKey.get(key) ?? []))
   }
   return profiles
 }
@@ -547,18 +576,10 @@ export async function fetchCatalogImportProfilesBulk(
     return { profiles: [], storageConfigured: true }
   }
 
-  const batches: string[][] = []
-  for (let index = 0; index < keys.length; index += BULK_PROFILE_KEYS_BATCH) {
-    batches.push(keys.slice(index, index + BULK_PROFILE_KEYS_BATCH))
-  }
-
   const profiles: CatalogImportProfile[] = []
-  for (let waveStart = 0; waveStart < batches.length; waveStart += BULK_PROFILE_FETCH_CONCURRENCY) {
-    const wave = batches.slice(waveStart, waveStart + BULK_PROFILE_FETCH_CONCURRENCY)
-    const waveProfiles = await Promise.all(wave.map((batchKeys) => fetchCatalogImportProfilesBatch(batchKeys)))
-    for (const batchProfiles of waveProfiles) {
-      profiles.push(...batchProfiles)
-    }
+  for (let index = 0; index < keys.length; index += BULK_PROFILE_KEYS_MAX_REQUEST) {
+    const chunkKeys = keys.slice(index, index + BULK_PROFILE_KEYS_MAX_REQUEST)
+    profiles.push(...(await fetchCatalogImportProfilesChunk(chunkKeys)))
   }
 
   return { profiles, storageConfigured: true }

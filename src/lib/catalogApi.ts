@@ -1,7 +1,4 @@
-import {
-  BULK_PROFILE_KEYS_BATCH,
-  BULK_PROFILE_KEYS_MAX_REQUEST,
-} from '../../lib/meowbotCatalogStore'
+import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
 import { readResponseJson } from './readResponseJson'
 
 export type CatalogPassKind = 'player' | 'team'
@@ -36,8 +33,8 @@ export type CatalogSeasonYearOption = {
   seasonLabel: string
 }
 
-/** Parallel bulk API requests — each carries many passes; server parallelizes DB fetches. */
-export const CATALOG_BULK_FETCH_CONCURRENCY = 6
+/** Parallel bulk API requests — each does 2 Supabase queries server-side. */
+export const CATALOG_BULK_FETCH_CONCURRENCY = 8
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -73,7 +70,7 @@ async function fetchCatalogImportProfilesBulkBatch(
   }
 }
 
-export { BULK_PROFILE_KEYS_BATCH, BULK_PROFILE_KEYS_MAX_REQUEST }
+export { BULK_PROFILE_KEYS_MAX_REQUEST }
 
 export async function searchCatalog(query: string, signal?: AbortSignal): Promise<{
   results: CatalogSearchResult[]

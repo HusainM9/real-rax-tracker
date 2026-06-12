@@ -1,4 +1,5 @@
 import {
+  authConfigured,
   getSessionCookieName,
   readCookie,
   verifySessionToken,
@@ -10,6 +11,7 @@ import {
 
 export async function hasAppSession(request: Request): Promise<boolean> {
   if (process.env.NODE_ENV === 'development') return true
+  if (!authConfigured()) return true
   const token = readCookie(request, getSessionCookieName())
   return verifySessionToken(token)
 }
