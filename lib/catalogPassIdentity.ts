@@ -55,7 +55,7 @@ export function normalizeSeasonForIdentity(
   if (trimmed && /^\d{4}$/.test(trimmed)) {
     return expectedSeasonLabelFromYear(Number(trimmed), sport)
   }
-  if (Number.isInteger(seasonYear) && seasonYear > 0) {
+  if (seasonYear !== undefined && Number.isInteger(seasonYear) && seasonYear > 0) {
     return expectedSeasonLabelFromYear(seasonYear, sport)
   }
   return trimmed || String(seasonYear ?? '')

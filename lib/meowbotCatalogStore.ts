@@ -3,7 +3,6 @@ import {
   canonicalCatalogPassMetadata,
   claimDayInPassSeason,
   filterDailyRowsToPassSeason,
-  isCatalogSeasonMetadataAligned,
   normalizeSportForSeasonWindow,
   resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'

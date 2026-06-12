@@ -127,22 +127,24 @@ export function isAtLeastIconic1Rarity(rarityLabel?: string): boolean {
   return normalizeRarityTier(rarityLabel ?? '') === 'Iconic'
 }
 
-type RecommendationPassLike =
-  | CatalogImportProfile
-  | CatalogSearchResult
-  | PassRecommendationRow
+export type RecommendationPassIdentityInput = {
+  externalKey: string
+  name: string
+  sport: string
+  passKind?: CatalogPassKind
+  seasonYear?: number
+  seasonLabel?: string
+  season?: string
+}
 
 function recommendationPassIdentityFields(
-  pass: RecommendationPassLike,
+  pass: RecommendationPassIdentityInput,
 ): Parameters<typeof catalogPassIdentityKey>[0] {
-  if ('seasonLabel' in pass) {
-    return pass
-  }
   return {
-    passKind: pass.passKind,
+    passKind: pass.passKind ?? 'player',
     sport: pass.sport,
-    seasonYear: pass.seasonYear,
-    seasonLabel: pass.season,
+    seasonYear: pass.seasonYear ?? parseSeasonYearFromExternalKey(pass.externalKey) ?? 0,
+    seasonLabel: pass.seasonLabel ?? pass.season,
     name: pass.name,
     externalKey: pass.externalKey,
   }
@@ -162,7 +164,7 @@ export function catalogPassIdentityKeyFromAdjustment(
 }
 
 export function passMatchesRecommendationAdjustment(
-  pass: RecommendationPassLike,
+  pass: RecommendationPassIdentityInput,
   adjustment: RecommendationPassAdjustment,
 ): boolean {
   if (pass.externalKey === adjustment.externalKey) return true
@@ -173,7 +175,7 @@ export function passMatchesRecommendationAdjustment(
 }
 
 export function isPassInRecommendationAdjustments(
-  pass: RecommendationPassLike,
+  pass: RecommendationPassIdentityInput,
   adjustments?: RecommendationPassAdjustment[],
   options?: { mode?: RecommendationPassAdjustmentMode },
 ): boolean {
