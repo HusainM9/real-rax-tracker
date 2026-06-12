@@ -137,6 +137,20 @@ export function getRecommendationAdjustmentSets(adjustments?: RecommendationPass
   return { assumeIconic1, excluded }
 }
 
+export function countAppliedBaselineAdjustments(
+  profilesByKey: Map<string, CatalogImportProfile>,
+  adjustments?: RecommendationPassAdjustment[],
+): number {
+  const { assumeIconic1 } = getRecommendationAdjustmentSets(adjustments)
+  let count = 0
+  for (const externalKey of assumeIconic1) {
+    if ((profilesByKey.get(externalKey)?.rows.length ?? 0) > 0) {
+      count += 1
+    }
+  }
+  return count
+}
+
 export function applyRecommendationBaseline(
   data: RaxTrackerData,
   profilesByKey: Map<string, CatalogImportProfile>,
@@ -515,7 +529,6 @@ export async function rankAndRecommendAsync(
   const caps =
     options?.caps ?? (options?.sport ? recommendationCapsForSport(options.sport) : null)
   const analysisCap = caps?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP
-  const greedyRerankCap = caps?.greedyRerankCap ?? RECOMMENDATION_GREEDY_RERANK_CAP
 
   const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
     data,
@@ -543,23 +556,19 @@ export async function rankAndRecommendAsync(
       throw new DOMException('Aborted', 'AbortError')
     }
 
-    let best: PassRecommendationRow | undefined
-    if (pickIndex === 0) {
-      best = rankedRows.find((row) => !pickedKeys.has(row.externalKey))
-    } else {
-      const remainingProfiles = candidates.filter(
-        (profile) => !pickedKeys.has(profile.externalKey),
-      )
-      const { profiles: rerankPool } = prefilterRecommendationProfiles(
-        remainingProfiles,
-        greedyRerankCap,
-      )
-      const reranked = await rankCandidatesAsync(workingData, rerankPool, {
-        ...options,
-        progressLabel: `Bundle pick ${pickIndex + 1}/${pickCount}`,
-      })
-      best = reranked[0]
-    }
+    const remainingProfiles = analysisPool.filter(
+      (profile) => !pickedKeys.has(profile.externalKey),
+    )
+    if (remainingProfiles.length === 0) break
+
+    const reranked = await rankCandidatesAsync(workingData, remainingProfiles, {
+      ...options,
+      progressLabel:
+        pickIndex === 0
+          ? 'Ranking'
+          : `Bundle pick ${pickIndex + 1}/${pickCount}`,
+    })
+    const best = reranked[0]
 
     if (!best || best.netClaimableDelta <= 0) break
 
@@ -620,16 +629,10 @@ export function greedyPickBundle(
   const pickedKeys = new Set<string>()
 
   for (let pickIndex = 0; pickIndex < pickCount; pickIndex += 1) {
-    const remainingProfiles = candidates.filter((profile) => !pickedKeys.has(profile.externalKey))
+    const remainingProfiles = analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
     if (remainingProfiles.length === 0) break
 
-    const pool =
-      pickIndex === 0
-        ? analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
-        : prefilterRecommendationProfiles(remainingProfiles, RECOMMENDATION_GREEDY_RERANK_CAP)
-            .profiles
-
-    const ranked = rankCandidatesSync(workingData, pool)
+    const ranked = rankCandidatesSync(workingData, remainingProfiles)
     const best = ranked[0]
     if (!best || best.netClaimableDelta <= 0) break
 
