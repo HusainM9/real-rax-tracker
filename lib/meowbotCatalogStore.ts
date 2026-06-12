@@ -63,8 +63,8 @@ type SupabaseDailyRow = {
 
 const MAX_SEARCH_LIMIT = 50
 const MAX_CANDIDATES_PAGE = 200
-/** Keep server bulk work small — each batch is one pass query + daily rows fetch. */
-export const BULK_PROFILE_KEYS_BATCH = 25
+/** Match server batch size — one API request should stay under Edge timeout limits. */
+export const BULK_PROFILE_KEYS_BATCH = 15
 const PASS_UPSERT_BATCH_SIZE = 250
 const DAILY_UPSERT_BATCH_SIZE = 200
 const UPSERT_BATCH_PAUSE_MS = 300

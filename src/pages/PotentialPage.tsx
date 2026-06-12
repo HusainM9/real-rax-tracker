@@ -890,7 +890,7 @@ export default function PotentialPage() {
         }
 
         const sportCaps = recommendationCapsForSport(sport)
-        const summaryLimit = sportCaps.bulkFetchCap + 400
+        const summaryLimit = Math.min(sportCaps.bulkFetchCap + 250, 1500)
 
         setRankStatus(
           rankAllSports

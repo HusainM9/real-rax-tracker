@@ -32,8 +32,8 @@ export type CatalogSeasonYearOption = {
   seasonLabel: string
 }
 
-/** Match server batch size — one API request should stay under Vercel timeout limits. */
-export const CATALOG_BULK_KEYS_PER_REQUEST = 25
+/** Match server batch size — one API request should stay under Edge timeout limits. */
+export const CATALOG_BULK_KEYS_PER_REQUEST = 15
 
 export async function searchCatalog(query: string, signal?: AbortSignal): Promise<{
   results: CatalogSearchResult[]

@@ -1,11 +1,4 @@
 {
-  "functions": {
-    "api/catalog/candidates.ts": { "maxDuration": 60 },
-    "api/catalog/candidates-bulk.ts": { "maxDuration": 60 },
-    "api/catalog/import.ts": { "maxDuration": 30 },
-    "api/catalog/search.ts": { "maxDuration": 15 },
-    "api/catalog/season-years.ts": { "maxDuration": 15 }
-  },
   "rewrites": [{ "source": "/((?!assets/|api/).*)", "destination": "/index.html" }],
   "headers": [
     {
