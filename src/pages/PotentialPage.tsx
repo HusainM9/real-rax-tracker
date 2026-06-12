@@ -46,6 +46,49 @@ const ALL_SPORTS_RANK = 'ALL' as const
 
 type RankSportChoice = Sport | typeof ALL_SPORTS_RANK
 
+const SPORT_SUMMARY_FETCH_CONCURRENCY = 4
+
+async function loadSportCatalogSummaries(
+  sports: Sport[],
+  summaryLimitForSport: (sport: Sport) => number,
+  signal: AbortSignal,
+  onSportStart?: (sport: Sport, index: number, total: number) => void,
+): Promise<{
+  bySport: Map<Sport, Awaited<ReturnType<typeof fetchCatalogPassSummaries>>['results']>
+  storageConfigured: boolean
+}> {
+  const bySport = new Map<Sport, Awaited<ReturnType<typeof fetchCatalogPassSummaries>>['results']>()
+  let storageConfigured = true
+
+  for (let waveStart = 0; waveStart < sports.length; waveStart += SPORT_SUMMARY_FETCH_CONCURRENCY) {
+    if (signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
+    const wave = sports.slice(waveStart, waveStart + SPORT_SUMMARY_FETCH_CONCURRENCY)
+    const waveResults = await Promise.all(
+      wave.map(async (sport, offset) => {
+        const sportIndex = waveStart + offset
+        onSportStart?.(sport, sportIndex, sports.length)
+        const result = await fetchCatalogPassSummaries(
+          { sport, passKind: 'player', limit: summaryLimitForSport(sport) },
+          signal,
+        )
+        return { sport, result }
+      }),
+    )
+
+    for (const { sport, result } of waveResults) {
+      if (!result.storageConfigured) {
+        storageConfigured = false
+      }
+      bySport.set(sport, result.results)
+    }
+  }
+
+  return { bySport, storageConfigured }
+}
+
 function paginate<T>(items: T[], page: number, pageSize: number): T[] {
   const start = (page - 1) * pageSize
   return items.slice(start, start + pageSize)
@@ -883,28 +926,28 @@ export default function PotentialPage() {
         ? recommendationCapsForSports(rankSports)
         : recommendationCapsForSport(rankSport)
 
-      for (let sportIndex = 0; sportIndex < rankSports.length; sportIndex += 1) {
-        const sport = rankSports[sportIndex]!
-        if (controller.signal.aborted) {
-          throw new DOMException('Aborted', 'AbortError')
-        }
+      const { bySport, storageConfigured: summariesConfigured } = await loadSportCatalogSummaries(
+        rankSports,
+        (sport) => {
+          const sportCaps = recommendationCapsForSport(sport)
+          return Math.min(sportCaps.bulkFetchCap + 250, 1500)
+        },
+        controller.signal,
+        (sport, sportIndex, total) => {
+          setRankStatus(
+            rankAllSports
+              ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${total})`
+              : `Loading ${sport} catalog passes…`,
+          )
+        },
+      )
+      if (!summariesConfigured) {
+        setRankStatus('Shared catalog is not configured yet.')
+        return
+      }
 
-        const sportCaps = recommendationCapsForSport(sport)
-        const summaryLimit = Math.min(sportCaps.bulkFetchCap + 250, 1500)
-
-        setRankStatus(
-          rankAllSports
-            ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${rankSports.length})`
-            : `Loading ${sport} catalog passes…`,
-        )
-        const { results, storageConfigured } = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player', limit: summaryLimit },
-          controller.signal,
-        )
-        if (!storageConfigured) {
-          setRankStatus('Shared catalog is not configured yet.')
-          return
-        }
+      for (const sport of rankSports) {
+        const results = bySport.get(sport) ?? []
         catalogCount += results.length
 
         const selected = selectSummariesForBulkFetch(data, results, { ...seasonFilter, sport })
@@ -932,12 +975,17 @@ export default function PotentialPage() {
         return
       }
 
+      const assumeIconicKeys = rankAdjustments
+        .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
+        .map((adjustment) => adjustment.externalKey)
+      const allProfileKeys = [...new Set([...candidateKeys, ...assumeIconicKeys])]
+
       setRankStatus(
         rankAllSports
-          ? `Fetching earnings for ${candidateKeys.length} passes across ${rankSports.length} sport${
+          ? `Fetching earnings for ${allProfileKeys.length} passes across ${rankSports.length} sport${
               rankSports.length === 1 ? '' : 's'
             } (cap ${caps.bulkFetchCap} total)…`
-          : `Fetching earnings for ${candidateKeys.length} passes${
+          : `Fetching earnings for ${allProfileKeys.length} passes${
               fetchTrimmed > 0
                 ? ` (top ${candidateKeys.length} by base RAX · cap ${caps.bulkFetchCap})`
                 : ''
@@ -947,7 +995,7 @@ export default function PotentialPage() {
         setRankStatus(`Fetching earnings ${loaded}/${total} passes…`)
       }
       const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
-        candidateKeys,
+        allProfileKeys,
         controller.signal,
         { onBatch: reportBulkProgress },
       )
@@ -957,27 +1005,6 @@ export default function PotentialPage() {
       }
 
       const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
-
-      const assumeIconicKeys = rankAdjustments
-        .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
-        .map((adjustment) => adjustment.externalKey)
-        .filter((key) => !profileMap.has(key))
-      if (assumeIconicKeys.length > 0) {
-        setRankStatus(`Loading ${assumeIconicKeys.length} baseline adjustment pass${assumeIconicKeys.length === 1 ? '' : 'es'}…`)
-        const { profiles: assumeProfiles, storageConfigured: assumeConfigured } =
-          await fetchCatalogImportProfilesBulk(assumeIconicKeys, controller.signal, {
-            onBatch: (loaded, total) => {
-              setRankStatus(`Loading baseline adjustments ${loaded}/${total}…`)
-            },
-          })
-        if (!assumeConfigured) {
-          setRankStatus('Shared catalog is not configured yet.')
-          return
-        }
-        for (const profile of assumeProfiles) {
-          profileMap.set(profile.externalKey, profile)
-        }
-      }
 
       setProfileByKey(profileMap)
 

@@ -1,4 +1,7 @@
-import { BULK_PROFILE_KEYS_BATCH } from '../../lib/meowbotCatalogStore'
+import {
+  BULK_PROFILE_KEYS_BATCH,
+  BULK_PROFILE_KEYS_MAX_REQUEST,
+} from '../../lib/meowbotCatalogStore'
 import { readResponseJson } from './readResponseJson'
 
 export type CatalogPassKind = 'player' | 'team'
@@ -33,7 +36,44 @@ export type CatalogSeasonYearOption = {
   seasonLabel: string
 }
 
-export { BULK_PROFILE_KEYS_BATCH }
+/** Parallel bulk API requests — each carries many passes; server parallelizes DB fetches. */
+export const CATALOG_BULK_FETCH_CONCURRENCY = 6
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+async function fetchCatalogImportProfilesBulkBatch(
+  batchKeys: string[],
+  signal?: AbortSignal,
+): Promise<{ profiles: CatalogImportProfile[]; storageConfigured: boolean }> {
+  const response = await fetch('/api/catalog/candidates-bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externalKeys: batchKeys }),
+    signal,
+  })
+  const data = await readResponseJson<{
+    profiles?: CatalogImportProfile[]
+    storageConfigured?: boolean
+    error?: string
+  }>(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || `Catalog bulk import failed (${response.status}).`)
+  }
+
+  return {
+    profiles: Array.isArray(data.profiles) ? data.profiles : [],
+    storageConfigured: data.storageConfigured !== false,
+  }
+}
+
+export { BULK_PROFILE_KEYS_BATCH, BULK_PROFILE_KEYS_MAX_REQUEST }
 
 export async function searchCatalog(query: string, signal?: AbortSignal): Promise<{
   results: CatalogSearchResult[]
@@ -137,35 +177,30 @@ export async function fetchCatalogImportProfilesBulk(
     return { profiles: [], storageConfigured: true }
   }
 
-  const BULK_KEYS_PER_REQUEST = BULK_PROFILE_KEYS_BATCH
+  const batches = chunkArray(keys, BULK_PROFILE_KEYS_MAX_REQUEST)
   const profiles: CatalogImportProfile[] = []
   let storageConfigured = true
+  let keysLoaded = 0
 
-  for (let index = 0; index < keys.length; index += BULK_KEYS_PER_REQUEST) {
-    const batchKeys = keys.slice(index, index + BULK_KEYS_PER_REQUEST)
-    options?.onBatch?.(Math.min(index + batchKeys.length, keys.length), keys.length)
-    const response = await fetch('/api/catalog/candidates-bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ externalKeys: batchKeys }),
-      signal,
-    })
-    const data = await readResponseJson<{
-      profiles?: CatalogImportProfile[]
-      storageConfigured?: boolean
-      error?: string
-    }>(response)
-
-    if (!response.ok) {
-      throw new Error(data.error || `Catalog bulk import failed (${response.status}).`)
+  for (let waveStart = 0; waveStart < batches.length; waveStart += CATALOG_BULK_FETCH_CONCURRENCY) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
     }
 
-    if (data.storageConfigured === false) {
-      storageConfigured = false
+    const wave = batches.slice(waveStart, waveStart + CATALOG_BULK_FETCH_CONCURRENCY)
+    const results = await Promise.all(
+      wave.map((batchKeys) => fetchCatalogImportProfilesBulkBatch(batchKeys, signal)),
+    )
+
+    for (const result of results) {
+      if (result.storageConfigured === false) {
+        storageConfigured = false
+      }
+      profiles.push(...result.profiles)
     }
-    if (Array.isArray(data.profiles)) {
-      profiles.push(...data.profiles)
-    }
+
+    keysLoaded += wave.reduce((sum, batch) => sum + batch.length, 0)
+    options?.onBatch?.(Math.min(keysLoaded, keys.length), keys.length)
   }
 
   return { profiles, storageConfigured }
