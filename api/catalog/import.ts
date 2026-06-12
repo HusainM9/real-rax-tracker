@@ -2,7 +2,7 @@ import { requireAppSession } from '../admin/_helpers'
 import { getCatalogImportProfile } from '../../lib/meowbotCatalogStore'
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 30,
 }
 
 export default async function handler(request: Request): Promise<Response> {

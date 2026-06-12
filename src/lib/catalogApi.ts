@@ -32,6 +32,9 @@ export type CatalogSeasonYearOption = {
   seasonLabel: string
 }
 
+/** Match server batch size — one API request should stay under Vercel timeout limits. */
+export const CATALOG_BULK_KEYS_PER_REQUEST = 25
+
 export async function searchCatalog(query: string, signal?: AbortSignal): Promise<{
   results: CatalogSearchResult[]
   storageConfigured: boolean
@@ -84,6 +87,7 @@ export async function fetchCatalogPassSummaries(
     sport: string
     passKind?: CatalogPassKind
     seasonYear?: number
+    limit?: number
   },
   signal?: AbortSignal,
 ): Promise<{
@@ -96,6 +100,9 @@ export async function fetchCatalogPassSummaries(
   })
   if (options.seasonYear !== undefined) {
     params.set('seasonYear', String(options.seasonYear))
+  }
+  if (options.limit !== undefined) {
+    params.set('limit', String(options.limit))
   }
 
   const response = await fetch(`/api/catalog/candidates?${params}`, { signal })
@@ -118,6 +125,9 @@ export async function fetchCatalogPassSummaries(
 export async function fetchCatalogImportProfilesBulk(
   externalKeys: string[],
   signal?: AbortSignal,
+  options?: {
+    onBatch?: (loaded: number, total: number) => void
+  },
 ): Promise<{
   profiles: CatalogImportProfile[]
   storageConfigured: boolean
@@ -127,12 +137,13 @@ export async function fetchCatalogImportProfilesBulk(
     return { profiles: [], storageConfigured: true }
   }
 
-  const BULK_KEYS_PER_REQUEST = 200
+  const BULK_KEYS_PER_REQUEST = CATALOG_BULK_KEYS_PER_REQUEST
   const profiles: CatalogImportProfile[] = []
   let storageConfigured = true
 
   for (let index = 0; index < keys.length; index += BULK_KEYS_PER_REQUEST) {
     const batchKeys = keys.slice(index, index + BULK_KEYS_PER_REQUEST)
+    options?.onBatch?.(Math.min(index + batchKeys.length, keys.length), keys.length)
     const response = await fetch('/api/catalog/candidates-bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

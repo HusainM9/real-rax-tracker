@@ -2,7 +2,7 @@ import { requireAppSession } from '../admin/_helpers'
 import { listCatalogPassSummaries, type CatalogPassKind } from '../../lib/meowbotCatalogStore'
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 60,
 }
 
 export default async function handler(request: Request): Promise<Response> {
@@ -24,6 +24,11 @@ export default async function handler(request: Request): Promise<Response> {
   const seasonYearRaw = url.searchParams.get('seasonYear')?.trim()
   const seasonYear =
     seasonYearRaw && Number.isFinite(Number(seasonYearRaw)) ? Number(seasonYearRaw) : undefined
+  const limitRaw = url.searchParams.get('limit')?.trim()
+  const limit =
+    limitRaw && Number.isFinite(Number(limitRaw))
+      ? Math.max(1, Math.floor(Number(limitRaw)))
+      : undefined
 
   try {
     const result = await listCatalogPassSummaries({
@@ -31,6 +36,7 @@ export default async function handler(request: Request): Promise<Response> {
       passKind,
       seasonYear,
       hasEarnings: true,
+      limit,
     })
 
     return Response.json(result)

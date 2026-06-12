@@ -2,7 +2,7 @@ import { requireAppSession } from '../admin/_helpers'
 import { fetchCatalogImportProfilesBulk } from '../../lib/meowbotCatalogStore'
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 60,
 }
 
 export default async function handler(request: Request): Promise<Response> {
@@ -28,8 +28,8 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'externalKeys array is required' }, { status: 400 })
   }
 
-  if (externalKeys.length > 2000) {
-    return Response.json({ error: 'externalKeys exceeds maximum of 2000' }, { status: 400 })
+  if (externalKeys.length > 50) {
+    return Response.json({ error: 'externalKeys exceeds maximum of 50 per request' }, { status: 400 })
   }
 
   try {

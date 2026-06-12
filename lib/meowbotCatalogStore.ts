@@ -63,7 +63,8 @@ type SupabaseDailyRow = {
 
 const MAX_SEARCH_LIMIT = 50
 const MAX_CANDIDATES_PAGE = 200
-const BULK_PROFILE_KEYS_BATCH = 40
+/** Keep server bulk work small — each batch is one pass query + daily rows fetch. */
+export const BULK_PROFILE_KEYS_BATCH = 25
 const PASS_UPSERT_BATCH_SIZE = 250
 const DAILY_UPSERT_BATCH_SIZE = 200
 const UPSERT_BATCH_PAUSE_MS = 300
@@ -434,6 +435,8 @@ export async function listCatalogPassSummaries(options: {
   passKind?: CatalogPassKind
   seasonYear?: number
   hasEarnings?: boolean
+  /** Stop after this many passes (ordered by total_base_rax desc). */
+  limit?: number
 }): Promise<{ results: CatalogSearchResult[]; storageConfigured: boolean }> {
   if (!meowbotCatalogConfigured()) {
     return { results: [], storageConfigured: false }
@@ -446,9 +449,20 @@ export async function listCatalogPassSummaries(options: {
 
   const passKind = options.passKind ?? 'player'
   const hasEarnings = options.hasEarnings !== false
+  const maxResults =
+    options.limit !== undefined
+      ? Math.max(1, Math.min(Math.floor(options.limit), 10_000))
+      : undefined
   const results: CatalogSearchResult[] = []
 
   for (let offset = 0; ; offset += MAX_CANDIDATES_PAGE) {
+    if (maxResults !== undefined && results.length >= maxResults) break
+
+    const pageLimit =
+      maxResults !== undefined
+        ? Math.min(MAX_CANDIDATES_PAGE, maxResults - results.length)
+        : MAX_CANDIDATES_PAGE
+
     const params = new URLSearchParams({
       select:
         'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
@@ -456,7 +470,7 @@ export async function listCatalogPassSummaries(options: {
       pass_kind: `eq.${passKind}`,
       has_earnings: `eq.${hasEarnings}`,
       order: 'total_base_rax.desc,name.asc',
-      limit: String(MAX_CANDIDATES_PAGE),
+      limit: String(pageLimit),
       offset: String(offset),
     })
     if (options.seasonYear !== undefined && Number.isFinite(options.seasonYear)) {
@@ -465,7 +479,7 @@ export async function listCatalogPassSummaries(options: {
 
     const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
     results.push(...passRows.map(fromPassRow))
-    if (passRows.length < MAX_CANDIDATES_PAGE) break
+    if (passRows.length < pageLimit) break
   }
 
   return { results, storageConfigured: true }

@@ -879,11 +879,18 @@ export default function PotentialPage() {
       const candidateKeys: string[] = []
       const seenCandidateKeys = new Set<string>()
 
+      const caps = rankAllSports
+        ? recommendationCapsForSports(rankSports)
+        : recommendationCapsForSport(rankSport)
+
       for (let sportIndex = 0; sportIndex < rankSports.length; sportIndex += 1) {
         const sport = rankSports[sportIndex]!
         if (controller.signal.aborted) {
           throw new DOMException('Aborted', 'AbortError')
         }
+
+        const sportCaps = recommendationCapsForSport(sport)
+        const summaryLimit = sportCaps.bulkFetchCap + 400
 
         setRankStatus(
           rankAllSports
@@ -891,7 +898,7 @@ export default function PotentialPage() {
             : `Loading ${sport} catalog passes…`,
         )
         const { results, storageConfigured } = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player' },
+          { sport, passKind: 'player', limit: summaryLimit },
           controller.signal,
         )
         if (!storageConfigured) {
@@ -925,9 +932,6 @@ export default function PotentialPage() {
         return
       }
 
-      const caps = rankAllSports
-        ? recommendationCapsForSports(rankSports)
-        : recommendationCapsForSport(rankSport)
       setRankStatus(
         rankAllSports
           ? `Fetching earnings for ${candidateKeys.length} passes across ${rankSports.length} sport${
@@ -939,9 +943,13 @@ export default function PotentialPage() {
                 : ''
             }…`,
       )
+      const reportBulkProgress = (loaded: number, total: number) => {
+        setRankStatus(`Fetching earnings ${loaded}/${total} passes…`)
+      }
       const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
         candidateKeys,
         controller.signal,
+        { onBatch: reportBulkProgress },
       )
       if (!bulkConfigured) {
         setRankStatus('Shared catalog is not configured yet.')
@@ -957,7 +965,11 @@ export default function PotentialPage() {
       if (assumeIconicKeys.length > 0) {
         setRankStatus(`Loading ${assumeIconicKeys.length} baseline adjustment pass${assumeIconicKeys.length === 1 ? '' : 'es'}…`)
         const { profiles: assumeProfiles, storageConfigured: assumeConfigured } =
-          await fetchCatalogImportProfilesBulk(assumeIconicKeys, controller.signal)
+          await fetchCatalogImportProfilesBulk(assumeIconicKeys, controller.signal, {
+            onBatch: (loaded, total) => {
+              setRankStatus(`Loading baseline adjustments ${loaded}/${total}…`)
+            },
+          })
         if (!assumeConfigured) {
           setRankStatus('Shared catalog is not configured yet.')
           return

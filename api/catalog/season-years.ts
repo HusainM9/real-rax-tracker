@@ -2,7 +2,7 @@ import { requireAppSession } from '../admin/_helpers'
 import { listCatalogSeasonYears, type CatalogPassKind } from '../../lib/meowbotCatalogStore'
 
 export const config = {
-  runtime: 'edge',
+  maxDuration: 15,
 }
 
 export default async function handler(request: Request): Promise<Response> {
