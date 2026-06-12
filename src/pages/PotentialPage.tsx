@@ -21,6 +21,7 @@ import {
   countAppliedBaselineAdjustments,
   greedyPickBundleAsync,
   isAtLeastIconic1Rarity,
+  isRecommendationPassOwnedAtIconic,
   rankAndRecommendAsync,
   RECOMMENDATION_GREEDY_RERANK_CAP,
   RECOMMENDATION_MAX_BUNDLE_SIZE,
@@ -169,9 +170,11 @@ function CollapsibleAnalysisSection({
 function PotentialAnalysisResults({
   analysis,
   previewAs,
+  baselineAdjustmentCount = 0,
 }: {
   analysis: PotentialAnalysisResult
   previewAs: string
+  baselineAdjustmentCount?: number
 }) {
   const netCollectionDelta = analysis.claimableRax - analysis.displacedRax
   const displacedCardCount = analysis.displacedByCard.length
@@ -188,6 +191,13 @@ function PotentialAnalysisResults({
               <>
                 {' '}
                 OTD preview: <strong>{previewAs}</strong>.
+              </>
+            ) : null}
+            {baselineAdjustmentCount > 0 ? (
+              <>
+                {' '}
+                Baseline includes {baselineAdjustmentCount} assumed pass
+                {baselineAdjustmentCount === 1 ? '' : 'es'} at {RECOMMENDATION_SIMULATED_RARITY}.
               </>
             ) : null}
           </p>
@@ -516,6 +526,9 @@ export default function PotentialPage() {
   const [adjustmentSearchResults, setAdjustmentSearchResults] = useState<CatalogSearchResult[]>([])
   const [adjustmentSearchBusy, setAdjustmentSearchBusy] = useState(false)
   const [adjustmentSearchStatus, setAdjustmentSearchStatus] = useState('')
+  const [adjustmentProfilesByKey, setAdjustmentProfilesByKey] = useState<
+    Map<string, CatalogImportProfile>
+  >(new Map())
   const rankAbortRef = useRef<AbortController | null>(null)
   const sportOpportunityAbortRef = useRef<AbortController | null>(null)
   const [sportOpportunityInProgress, setSportOpportunityInProgress] = useState(false)
@@ -533,10 +546,70 @@ export default function PotentialPage() {
 
   const catalogAnalysisBusy = rankingInProgress || sportOpportunityInProgress || bundleClaimInProgress
 
+  useEffect(() => {
+    const assumeKeys = [
+      ...new Set(
+        rankAdjustments
+          .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
+          .map((adjustment) => adjustment.externalKey),
+      ),
+    ]
+    const missingKeys = assumeKeys.filter((key) => !profileByKey.has(key))
+    if (missingKeys.length === 0) {
+      setAdjustmentProfilesByKey((current) => {
+        if (current.size === 0) return current
+        const next = new Map(current)
+        for (const key of current.keys()) {
+          if (!assumeKeys.includes(key)) next.delete(key)
+        }
+        return next.size === current.size ? current : next
+      })
+      return
+    }
+
+    const controller = new AbortController()
+    void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
+      .then(({ profiles }) => {
+        setAdjustmentProfilesByKey((current) => {
+          const next = new Map(current)
+          for (const profile of profiles) {
+            next.set(profile.externalKey, profile)
+          }
+          for (const key of next.keys()) {
+            if (!assumeKeys.includes(key) && !profileByKey.has(key)) {
+              next.delete(key)
+            }
+          }
+          return next
+        })
+      })
+      .catch(() => {})
+
+    return () => controller.abort()
+  }, [profileByKey, rankAdjustments])
+
+  const baselineProfilesByKey = useMemo(() => {
+    const merged = new Map(adjustmentProfilesByKey)
+    for (const [key, profile] of profileByKey) {
+      merged.set(key, profile)
+    }
+    return merged
+  }, [adjustmentProfilesByKey, profileByKey])
+
+  const potentialBaselineData = useMemo(
+    () => applyRecommendationBaseline(data, baselineProfilesByKey, rankAdjustments),
+    [baselineProfilesByKey, data, rankAdjustments],
+  )
+
+  const potentialBaselineAdjustmentCount = useMemo(
+    () => countAppliedBaselineAdjustments(baselineProfilesByKey, rankAdjustments),
+    [baselineProfilesByKey, rankAdjustments],
+  )
+
   const potentialAnalysis = useMemo(
     () =>
       analyzePotentialCard(
-        data,
+        potentialBaselineData,
         {
           name: form.name,
           sport: form.sport,
@@ -545,7 +618,14 @@ export default function PotentialPage() {
         },
         potentialRows,
       ),
-    [data, form.name, form.previewAs, form.season, form.sport, potentialRows],
+    [
+      form.name,
+      form.previewAs,
+      form.season,
+      form.sport,
+      potentialBaselineData,
+      potentialRows,
+    ],
   )
 
   const resetForm = () => {
@@ -673,6 +753,10 @@ export default function PotentialPage() {
   }
 
   const isRecommendationOwnedAtIconic = (externalKey: string, trackerData: RaxTrackerData = data) => {
+    const profile = profileByKey.get(externalKey)
+    if (profile) {
+      return isRecommendationPassOwnedAtIconic(trackerData, profile)
+    }
     const owned = trackerData.cards.find((card) => card.externalKey === externalKey)
     return Boolean(owned && isAtLeastIconic1Rarity(owned.rarityLabel))
   }
@@ -1445,9 +1529,9 @@ export default function PotentialPage() {
           Candidates come from the shared Meowbot catalog only. Passes already in your collection
           at {RECOMMENDATION_SIMULATED_RARITY} or higher are skipped; lower-rarity owned passes stay
           eligible. Only the top catalog passes by base RAX are fetched and analyzed (default 1000,
-          higher for MLB and other large sports). The catalog may be incomplete or outdated. The recommended bundle uses a{' '}
-          <strong>greedy</strong> pick: best pass first, then re-rank a shortlist with it virtually
-          added.
+          higher for MLB and other large sports). The catalog may be incomplete or outdated. The
+          recommended bundle uses a <strong>greedy</strong> pick: best pass first, then re-rank
+          remaining candidates with each prior pick virtually added.
           {rankSport === ALL_SPORTS_RANK ? (
             <>
               {' '}
@@ -1462,8 +1546,8 @@ export default function PotentialPage() {
             <div>
               <h3>Ranking baseline adjustments</h3>
               <p>
-                Temporarily change how your collection is treated for this ranking only. Does not
-                modify your saved cards.
+                Temporarily change how your collection is treated for catalog ranking and the
+                potential card analyzer below. Does not modify your saved cards.
               </p>
             </div>
             {rankAdjustments.length > 0 ? (
@@ -2457,7 +2541,11 @@ export default function PotentialPage() {
       </form>
 
       {potentialAnalysis ? (
-        <PotentialAnalysisResults analysis={potentialAnalysis} previewAs={form.previewAs} />
+        <PotentialAnalysisResults
+          analysis={potentialAnalysis}
+          previewAs={form.previewAs}
+          baselineAdjustmentCount={potentialBaselineAdjustmentCount}
+        />
       ) : null}
     </div>
   )

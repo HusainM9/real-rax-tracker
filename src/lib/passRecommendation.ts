@@ -1,3 +1,8 @@
+import {
+  catalogPassIdentityKey,
+  catalogPassIdentityKeyFromOwnedCard,
+  dedupeCatalogPassSummaries,
+} from '../../lib/catalogPassIdentity'
 import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson } from './catalogProfileJson'
@@ -21,7 +26,7 @@ export const RECOMMENDATION_ANALYSIS_CAP = 400
 /** Max candidates re-analyzed per greedy bundle pick after the first. */
 export const RECOMMENDATION_GREEDY_RERANK_CAP = 80
 
-/** Max passes in a greedy recommended bundle. */
+/** Max passes in a recommended bundle. */
 export const RECOMMENDATION_MAX_BUNDLE_SIZE = 20
 
 export type RecommendationCaps = {
@@ -168,15 +173,31 @@ export function applyRecommendationBaseline(
 
 export function shouldSkipRecommendationPass(
   data: RaxTrackerData,
-  externalKey: string,
+  pass: CatalogImportProfile | CatalogSearchResult,
   adjustments?: RecommendationPassAdjustment[],
 ): boolean {
   const { assumeIconic1, excluded } = getRecommendationAdjustmentSets(adjustments)
-  if (excluded.has(externalKey) || assumeIconic1.has(externalKey)) return true
+  if (excluded.has(pass.externalKey) || assumeIconic1.has(pass.externalKey)) return true
 
-  const owned = data.cards.find((card) => card.externalKey === externalKey)
-  if (!owned) return false
-  return isAtLeastIconic1Rarity(owned.rarityLabel)
+  const identity = catalogPassIdentityKey(pass)
+  for (const card of data.cards) {
+    if (catalogPassIdentityKeyFromOwnedCard(card) !== identity) continue
+    if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
+  }
+
+  return false
+}
+
+export function isRecommendationPassOwnedAtIconic(
+  data: RaxTrackerData,
+  pass: CatalogImportProfile | CatalogSearchResult,
+): boolean {
+  const identity = catalogPassIdentityKey(pass)
+  for (const card of data.cards) {
+    if (catalogPassIdentityKeyFromOwnedCard(card) !== identity) continue
+    if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
+  }
+  return false
 }
 
 export function netClaimableDelta(result: PotentialAnalysisResult): number {
@@ -259,14 +280,15 @@ export function filterRecommendationProfiles(
   let skippedNoRows = 0
   let skippedAdjusted = 0
   const candidates: CatalogImportProfile[] = []
+  const { items: dedupedProfiles } = dedupeCatalogPassSummaries(profiles)
   const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
 
-  for (const profile of profiles) {
+  for (const profile of dedupedProfiles) {
     if (excluded.has(profile.externalKey) || assumeIconic1.has(profile.externalKey)) {
       skippedAdjusted += 1
       continue
     }
-    if (shouldSkipRecommendationPass(data, profile.externalKey, options?.adjustments)) {
+    if (shouldSkipRecommendationPass(data, profile, options?.adjustments)) {
       skippedOwnedIconic += 1
       continue
     }
@@ -299,8 +321,9 @@ export function selectSummariesForBulkFetch(
   let skippedOwnedIconic = 0
   let skippedAdjusted = 0
   const eligible: CatalogSearchResult[] = []
+  const { items: dedupedSummaries } = dedupeCatalogPassSummaries(summaries)
 
-  for (const summary of summaries) {
+  for (const summary of dedupedSummaries) {
     if (summary.rowCount <= 0) continue
     if (!passSeasonIncluded(summary, options?.excludedSportSeasonKeys)) continue
     const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
@@ -308,7 +331,7 @@ export function selectSummariesForBulkFetch(
       skippedAdjusted += 1
       continue
     }
-    if (shouldSkipRecommendationPass(data, summary.externalKey, options?.adjustments)) {
+    if (shouldSkipRecommendationPass(data, summary, options?.adjustments)) {
       skippedOwnedIconic += 1
       continue
     }
@@ -385,12 +408,13 @@ export function analyzeCatalogCandidate(
 }
 
 function sortRecommendationRows(rows: PassRecommendationRow[]): PassRecommendationRow[] {
-  return [...rows].sort(
+  const sorted = [...rows].sort(
     (a, b) =>
       b.netClaimableDelta - a.netClaimableDelta ||
       b.newClaimableRax - a.newClaimableRax ||
       a.name.localeCompare(b.name),
   )
+  return dedupeCatalogPassSummaries(sorted).items
 }
 
 function yieldToMain(): Promise<void> {
@@ -455,6 +479,83 @@ async function rankCandidatesAsync(
   }
 
   return sortRecommendationRows(rows)
+}
+
+function pickGreedyBundle(
+  data: RaxTrackerData,
+  analysisPool: CatalogImportProfile[],
+  candidateByKey: Map<string, CatalogImportProfile>,
+  pickCount: number,
+): PassRecommendationBundle {
+  let workingData = data
+  const picks: PassRecommendationRow[] = []
+  const pickedKeys = new Set<string>()
+
+  for (let pickIndex = 0; pickIndex < pickCount; pickIndex += 1) {
+    const remainingProfiles = analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
+    if (remainingProfiles.length === 0) break
+
+    const ranked = rankCandidatesSync(workingData, remainingProfiles)
+    const best = ranked[0]
+    if (!best || best.netClaimableDelta <= 0) break
+
+    picks.push(best)
+    pickedKeys.add(best.externalKey)
+    const profile = candidateByKey.get(best.externalKey)
+    if (!profile) break
+    workingData = addProfileToData(workingData, profile)
+  }
+
+  return {
+    picks,
+    combinedNetDelta: picks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
+  }
+}
+
+async function pickGreedyBundleAsync(
+  data: RaxTrackerData,
+  analysisPool: CatalogImportProfile[],
+  candidateByKey: Map<string, CatalogImportProfile>,
+  pickCount: number,
+  options?: {
+    onProgress?: (progress: PassRecommendationProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+  },
+): Promise<PassRecommendationBundle> {
+  let workingData = data
+  const picks: PassRecommendationRow[] = []
+  const pickedKeys = new Set<string>()
+
+  for (let pickIndex = 0; pickIndex < pickCount; pickIndex += 1) {
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
+    const remainingProfiles = analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
+    if (remainingProfiles.length === 0) break
+
+    const reranked = await rankCandidatesAsync(workingData, remainingProfiles, {
+      ...options,
+      progressLabel:
+        pickIndex === 0
+          ? 'Ranking'
+          : `Bundle pick ${pickIndex + 1}/${pickCount}`,
+    })
+    const best = reranked[0]
+    if (!best || best.netClaimableDelta <= 0) break
+
+    picks.push(best)
+    pickedKeys.add(best.externalKey)
+    const profile = candidateByKey.get(best.externalKey)
+    if (!profile) break
+    workingData = addProfileToData(workingData, profile)
+  }
+
+  return {
+    picks,
+    combinedNetDelta: picks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
+  }
 }
 
 export function rankCatalogRecommendations(
@@ -547,37 +648,18 @@ export async function rankAndRecommendAsync(
   })
 
   const pickCount = Math.max(0, Math.min(Math.floor(bundleSize), RECOMMENDATION_MAX_BUNDLE_SIZE))
-  const picks: PassRecommendationRow[] = []
-  let workingData = data
-  const pickedKeys = new Set<string>()
 
-  for (let pickIndex = 0; pickIndex < pickCount; pickIndex += 1) {
-    if (options?.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError')
-    }
-
-    const remainingProfiles = analysisPool.filter(
-      (profile) => !pickedKeys.has(profile.externalKey),
-    )
-    if (remainingProfiles.length === 0) break
-
-    const reranked = await rankCandidatesAsync(workingData, remainingProfiles, {
-      ...options,
-      progressLabel:
-        pickIndex === 0
-          ? 'Ranking'
-          : `Bundle pick ${pickIndex + 1}/${pickCount}`,
-    })
-    const best = reranked[0]
-
-    if (!best || best.netClaimableDelta <= 0) break
-
-    picks.push(best)
-    pickedKeys.add(best.externalKey)
-    const profile = candidateByKey.get(best.externalKey)
-    if (!profile) break
-    workingData = addProfileToData(workingData, profile)
-  }
+  const bundle = await pickGreedyBundleAsync(
+    data,
+    analysisPool,
+    candidateByKey,
+    pickCount,
+    {
+      onProgress: options?.onProgress,
+      signal: options?.signal,
+      batchSize: options?.batchSize,
+    },
+  )
 
   return {
     ranked: {
@@ -588,10 +670,7 @@ export async function rankAndRecommendAsync(
       analyzedCount: rankedRows.length,
       prefilterTrimmed: trimmed,
     },
-    bundle: {
-      picks,
-      combinedNetDelta: picks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
-    },
+    bundle,
   }
 }
 
@@ -624,27 +703,5 @@ export function greedyPickBundle(
   const { profiles: analysisPool } = prefilterRecommendationProfiles(candidates)
   const candidateByKey = new Map(candidates.map((profile) => [profile.externalKey, profile]))
 
-  let workingData = data
-  const picks: PassRecommendationRow[] = []
-  const pickedKeys = new Set<string>()
-
-  for (let pickIndex = 0; pickIndex < pickCount; pickIndex += 1) {
-    const remainingProfiles = analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
-    if (remainingProfiles.length === 0) break
-
-    const ranked = rankCandidatesSync(workingData, remainingProfiles)
-    const best = ranked[0]
-    if (!best || best.netClaimableDelta <= 0) break
-
-    picks.push(best)
-    pickedKeys.add(best.externalKey)
-    const profile = candidateByKey.get(best.externalKey)
-    if (!profile) break
-    workingData = addProfileToData(workingData, profile)
-  }
-
-  return {
-    picks,
-    combinedNetDelta: picks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
-  }
+  return pickGreedyBundle(data, analysisPool, candidateByKey, pickCount)
 }

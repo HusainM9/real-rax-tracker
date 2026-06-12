@@ -154,8 +154,18 @@ describe('passRecommendation', () => {
       ],
     }
 
-    expect(shouldSkipRecommendationPass(ownedData, 'owned-iconic|2025|NBA')).toBe(true)
-    expect(shouldSkipRecommendationPass(ownedData, 'owned-leg|2025|NBA')).toBe(false)
+    expect(
+      shouldSkipRecommendationPass(
+        ownedData,
+        catalogProfile('owned-iconic|2025|NBA', 'Owned iconic', [{ claimDay: '2026-03-01', baseRaxEarned: 20 }]),
+      ),
+    ).toBe(true)
+    expect(
+      shouldSkipRecommendationPass(
+        ownedData,
+        catalogProfile('owned-leg|2025|NBA', 'Owned legendary', [{ claimDay: '2026-03-01', baseRaxEarned: 20 }]),
+      ),
+    ).toBe(false)
 
     const filtered = filterRecommendationProfiles(ownedData, profiles)
     expect(filtered.skippedOwnedIconic).toBe(1)
@@ -317,6 +327,41 @@ describe('passRecommendation', () => {
     )
   })
 
+  it('dedupes duplicate catalog identities and skips owned iconic players once', () => {
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [
+        ...data.cards,
+        {
+          ...card('cbb-owned', 'Maxime Raynaud', '999|2025|CBB', 'Iconic 1'),
+          sport: 'CBB',
+          season: '2024-25',
+        },
+      ],
+    }
+
+    const duplicateProfiles = [
+      {
+        ...catalogProfile('111|2025|CBB', 'Maxime Raynaud', [{ claimDay: '2026-03-01', baseRaxEarned: 40 }]),
+        sport: 'CBB',
+        seasonLabel: '2024-25',
+        totalBaseRax: 300,
+      },
+      {
+        ...catalogProfile('222|2025|CBB', 'Maxime Raynaud', [{ claimDay: '2026-03-01', baseRaxEarned: 40 }]),
+        sport: 'CBB',
+        seasonLabel: '2024-25',
+        totalBaseRax: 343,
+      },
+      catalogProfile('other|2025|CBB', 'Other player', [{ claimDay: '2026-03-01', baseRaxEarned: 20 }]),
+    ].map((profile) => ({ ...profile, sport: 'CBB' }))
+
+    const filtered = filterRecommendationProfiles(ownedData, duplicateProfiles)
+    expect(filtered.candidates).toHaveLength(1)
+    expect(filtered.candidates[0]?.name).toBe('Other player')
+    expect(filtered.skippedOwnedIconic).toBe(1)
+  })
+
   it('analyzeCatalogCandidate returns null for profiles without rows', () => {
     expect(
       analyzeCatalogCandidate(data, catalogProfile('empty|2025|NBA', 'Empty', [])),
@@ -407,7 +452,7 @@ describe('passRecommendation', () => {
     const withoutBaseline = analyzeCatalogCandidate(ownedData, candidate)
     const withBaseline = analyzeCatalogCandidate(baseline, candidate)
 
-    expect(shouldSkipRecommendationPass(ownedData, ownedProfile.externalKey, adjustments)).toBe(true)
+    expect(shouldSkipRecommendationPass(ownedData, ownedProfile, adjustments)).toBe(true)
     expect(withoutBaseline?.netClaimableDelta).not.toBe(withBaseline?.netClaimableDelta)
   })
 })

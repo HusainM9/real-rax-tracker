@@ -1,3 +1,5 @@
+import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
+
 export type CatalogPassKind = 'player' | 'team'
 
 export type CatalogPassInput = {
@@ -400,8 +402,9 @@ export async function searchCatalogPasses(options: {
   })
 
   const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
+  const { items } = dedupeCatalogPassSummaries(passRows.map(fromPassRow))
   return {
-    results: passRows.map(fromPassRow),
+    results: items,
     storageConfigured: true,
   }
 }
@@ -535,7 +538,8 @@ export async function listCatalogPassSummaries(options: {
     if (passRows.length < pageLimit) break
   }
 
-  return { results, storageConfigured: true }
+  const { items } = dedupeCatalogPassSummaries(results)
+  return { results: items, storageConfigured: true }
 }
 
 async function fetchCatalogImportProfilesChunk(
