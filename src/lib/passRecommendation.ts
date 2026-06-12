@@ -7,7 +7,7 @@ import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppTool
 import { computeOtdRax } from './otdRax'
 import { normalizeRarityTier } from './rarityFilter'
 import type { CatalogPassKind } from './catalogApi'
-import type { RaxTrackerData, Sport } from '../types/rax'
+import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 /** All recommendation what-if runs assume buying at this OTD tier. */
 export const RECOMMENDATION_SIMULATED_RARITY = 'Iconic 1'
@@ -20,6 +20,9 @@ export const RECOMMENDATION_ANALYSIS_CAP = 400
 
 /** Max candidates re-analyzed per greedy bundle pick after the first. */
 export const RECOMMENDATION_GREEDY_RERANK_CAP = 80
+
+/** Max passes in a greedy recommended bundle. */
+export const RECOMMENDATION_MAX_BUNDLE_SIZE = 20
 
 export type RecommendationCaps = {
   bulkFetchCap: number
@@ -43,6 +46,26 @@ export function recommendationCapsForSport(sport: Sport): RecommendationCaps {
         greedyRerankCap: RECOMMENDATION_GREEDY_RERANK_CAP,
       }
   }
+}
+
+/** Combined caps when ranking multiple sports in one run (sum of per-sport limits). */
+export function recommendationCapsForSports(sports: readonly Sport[]): RecommendationCaps {
+  return sports.reduce(
+    (acc, sport) => {
+      const caps = recommendationCapsForSport(sport)
+      return {
+        bulkFetchCap: acc.bulkFetchCap + caps.bulkFetchCap,
+        analysisCap: acc.analysisCap + caps.analysisCap,
+        greedyRerankCap: acc.greedyRerankCap + caps.greedyRerankCap,
+      }
+    },
+    { bulkFetchCap: 0, analysisCap: 0, greedyRerankCap: 0 },
+  )
+}
+
+/** Combined caps when ranking every sport in one run (sum of per-sport limits). */
+export function recommendationCapsForAllSports(): RecommendationCaps {
+  return recommendationCapsForSports(SPORTS)
 }
 
 export type PassRecommendationRow = {
@@ -409,12 +432,14 @@ export async function rankAndRecommendAsync(
   bundleSize: number,
   options?: RecommendationSeasonFilter & {
     sport?: Sport
+    caps?: RecommendationCaps
     onProgress?: (progress: PassRecommendationProgress) => void
     signal?: AbortSignal
     batchSize?: number
   },
 ): Promise<RankAndRecommendResult> {
-  const caps = options?.sport ? recommendationCapsForSport(options.sport) : null
+  const caps =
+    options?.caps ?? (options?.sport ? recommendationCapsForSport(options.sport) : null)
   const analysisCap = caps?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP
   const greedyRerankCap = caps?.greedyRerankCap ?? RECOMMENDATION_GREEDY_RERANK_CAP
 
@@ -434,7 +459,7 @@ export async function rankAndRecommendAsync(
     progressLabel: 'Ranking',
   })
 
-  const pickCount = Math.max(0, Math.min(Math.floor(bundleSize), 5))
+  const pickCount = Math.max(0, Math.min(Math.floor(bundleSize), RECOMMENDATION_MAX_BUNDLE_SIZE))
   const picks: PassRecommendationRow[] = []
   let workingData = data
   const pickedKeys = new Set<string>()
@@ -506,7 +531,7 @@ export function greedyPickBundle(
   count: number,
   options?: RecommendationSeasonFilter,
 ): PassRecommendationBundle {
-  const pickCount = Math.max(0, Math.min(Math.floor(count), 5))
+  const pickCount = Math.max(0, Math.min(Math.floor(count), RECOMMENDATION_MAX_BUNDLE_SIZE))
   if (pickCount === 0) {
     return { picks: [], combinedNetDelta: 0 }
   }

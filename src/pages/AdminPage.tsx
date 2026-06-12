@@ -9,6 +9,7 @@ import {
   type CatalogSearchResult,
 } from '../lib/catalogApi'
 import { catalogProfileToJson } from '../lib/catalogProfileJson'
+import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
 
 type EventsResponse = {
   events: AdminEvent[]
@@ -74,6 +75,17 @@ type UsernameOwnershipResponse = {
   error?: string
 }
 
+type TrackerProfileLookupResponse = {
+  profile: {
+    username: string
+    updatedAt: string
+    cardCount: number
+    performanceCount: number
+  } | null
+  storageConfigured: boolean
+  error?: string
+}
+
 const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
   pass_no_earnings: 'No earnings',
@@ -92,6 +104,13 @@ export default function AdminPage() {
   const [usernameFilter, setUsernameFilter] = useState('')
   const [ownershipLookupUsername, setOwnershipLookupUsername] = useState('')
   const [ownershipLookupStatus, setOwnershipLookupStatus] = useState('')
+  const [cloudProfileUsername, setCloudProfileUsername] = useState('')
+  const [cloudProfileNewPin, setCloudProfileNewPin] = useState('')
+  const [cloudProfileStatus, setCloudProfileStatus] = useState('')
+  const [cloudProfileBusy, setCloudProfileBusy] = useState(false)
+  const [cloudProfileSummary, setCloudProfileSummary] = useState<
+    TrackerProfileLookupResponse['profile']
+  >(null)
   const [catalogUsernames, setCatalogUsernames] = useState('')
   const [ownershipSaveUsernames, setOwnershipSaveUsernames] = useState('')
   const [ownershipSaveStatus, setOwnershipSaveStatus] = useState('')
@@ -210,6 +229,120 @@ export default function AdminPage() {
       setOwnershipLookupStatus(
         error instanceof Error ? error.message : 'Could not check ownership snapshot.',
       )
+    }
+  }
+
+  const lookupCloudProfile = async () => {
+    const username = cloudProfileUsername.replace(/^@/, '').trim().toLowerCase()
+    if (!username) {
+      setCloudProfileStatus('Enter a username to check.')
+      setCloudProfileSummary(null)
+      return
+    }
+    setCloudProfileBusy(true)
+    setCloudProfileStatus('Checking cloud profile…')
+    try {
+      const response = await fetch(
+        `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
+        { credentials: 'include' },
+      )
+      const body = (await response.json()) as TrackerProfileLookupResponse
+      if (!response.ok) {
+        throw new Error(body.error || `Cloud profile lookup failed (${response.status}).`)
+      }
+      if (!body.profile) {
+        setCloudProfileSummary(null)
+        setCloudProfileStatus(`No cloud profile found for @${username}.`)
+        return
+      }
+      setCloudProfileSummary(body.profile)
+      setCloudProfileStatus(
+        `Cloud profile for @${body.profile.username}: ${body.profile.cardCount} card${body.profile.cardCount === 1 ? '' : 's'}, ${body.profile.performanceCount} earnings row${body.profile.performanceCount === 1 ? '' : 's'}, last saved ${new Date(body.profile.updatedAt).toLocaleString()}.`,
+      )
+    } catch (error) {
+      setCloudProfileSummary(null)
+      setCloudProfileStatus(
+        error instanceof Error ? error.message : 'Could not check cloud profile.',
+      )
+    } finally {
+      setCloudProfileBusy(false)
+    }
+  }
+
+  const resetCloudProfilePin = async () => {
+    const username = cloudProfileUsername.replace(/^@/, '').trim().toLowerCase()
+    if (!username) {
+      setCloudProfileStatus('Enter a username first.')
+      return
+    }
+    const pinResult = validateSyncPin(cloudProfileNewPin)
+    if (!pinResult.ok) {
+      setCloudProfileStatus(pinResult.error)
+      return
+    }
+    if (
+      !window.confirm(
+        `Reset the cloud sync PIN for @${username}? Their saved cloud data stays intact. Share the new PIN with them privately.`,
+      )
+    ) {
+      return
+    }
+
+    setCloudProfileBusy(true)
+    setCloudProfileStatus('Resetting sync PIN…')
+    try {
+      const response = await fetch('/api/admin/tracker-profile', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, newPin: pinResult.pin }),
+      })
+      const body = (await response.json()) as TrackerProfileLookupResponse & { ok?: boolean; error?: string }
+      if (!response.ok) {
+        throw new Error(body.error || `PIN reset failed (${response.status}).`)
+      }
+      setCloudProfileSummary(body.profile ?? null)
+      setCloudProfileStatus(
+        `Sync PIN reset for @${username}. Share the new PIN with the user privately — they can change it themselves on Dashboard after loading or saving.`,
+      )
+    } catch (error) {
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not reset sync PIN.')
+    } finally {
+      setCloudProfileBusy(false)
+    }
+  }
+
+  const deleteCloudProfile = async () => {
+    const username = cloudProfileUsername.replace(/^@/, '').trim().toLowerCase()
+    if (!username) {
+      setCloudProfileStatus('Enter a username first.')
+      return
+    }
+    if (
+      !window.confirm(
+        `Delete the cloud profile for @${username}? This removes their cloud backup only. Local browser data is untouched.`,
+      )
+    ) {
+      return
+    }
+
+    setCloudProfileBusy(true)
+    setCloudProfileStatus('Deleting cloud profile…')
+    try {
+      const response = await fetch(
+        `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
+        { method: 'DELETE', credentials: 'include' },
+      )
+      const body = (await response.json()) as { ok?: boolean; error?: string }
+      if (!response.ok) {
+        throw new Error(body.error || `Delete failed (${response.status}).`)
+      }
+      setCloudProfileSummary(null)
+      setCloudProfileStatus(`Deleted cloud profile for @${username}. They can save again with a new PIN.`)
+    } catch (error) {
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete cloud profile.')
+    } finally {
+      setCloudProfileBusy(false)
     }
   }
 
@@ -897,6 +1030,82 @@ export default function AdminPage() {
           {manualUpsertStatus ? <p className="import-status">{manualUpsertStatus}</p> : null}
         </div>
         {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
+        title="Cloud profile sync"
+        description="Reset a forgotten sync PIN or delete a user's cloud backup"
+        defaultOpen
+      >
+        <p className="import-hint">
+          Cloud profiles are keyed by Real @username. PINs are stored as hashes — admins cannot read
+          the old PIN. Reset keeps their cloud data and sets a new PIN you share privately. Delete
+          removes the cloud copy so they can save fresh with a new PIN.
+        </p>
+        <div className="button-row">
+          <label className="field inline-field rank-search-field">
+            <span>Username</span>
+            <input
+              type="search"
+              value={cloudProfileUsername}
+              disabled={cloudProfileBusy}
+              placeholder="@username"
+              onChange={(event) => setCloudProfileUsername(event.target.value.replace(/^@/, ''))}
+            />
+          </label>
+          <button
+            className="button"
+            type="button"
+            disabled={cloudProfileBusy}
+            onClick={() => void lookupCloudProfile()}
+          >
+            Look up
+          </button>
+        </div>
+        {cloudProfileSummary ? (
+          <p className="import-hint">
+            @{cloudProfileSummary.username} · {cloudProfileSummary.cardCount} cards ·{' '}
+            {cloudProfileSummary.performanceCount} earnings rows · updated{' '}
+            {new Date(cloudProfileSummary.updatedAt).toLocaleString()}
+          </p>
+        ) : null}
+        <div className="sort-controls">
+          <label className="field">
+            <span>New sync PIN</span>
+            <input
+              type="password"
+              value={cloudProfileNewPin}
+              disabled={cloudProfileBusy}
+              placeholder="Temporary PIN for the user"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={SYNC_PIN_MAX_LENGTH}
+              onChange={(event) =>
+                setCloudProfileNewPin(stripSpacesFromSyncPinInput(event.target.value))
+              }
+            />
+            <small className="field-hint">{SYNC_PIN_HELP}</small>
+          </label>
+        </div>
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={cloudProfileBusy}
+            onClick={() => void resetCloudProfilePin()}
+          >
+            Reset sync PIN
+          </button>
+          <button
+            className="button danger"
+            type="button"
+            disabled={cloudProfileBusy}
+            onClick={() => void deleteCloudProfile()}
+          >
+            Delete cloud profile
+          </button>
+        </div>
+        {cloudProfileStatus ? <p className="import-status">{cloudProfileStatus}</p> : null}
       </CollapsiblePanel>
 
       <CollapsiblePanel

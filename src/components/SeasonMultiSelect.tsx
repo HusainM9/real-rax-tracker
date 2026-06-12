@@ -11,15 +11,25 @@ export type SeasonMultiSelectProps = {
   onExcludedValuesChange: (excludedValues: string[]) => void
   disabled?: boolean
   label?: string
+  menuTitle?: string
+  allOptionLabel?: string
+  emptyTriggerLabel?: string
+  countUnit?: string
 }
 
-function seasonTriggerLabel(options: SeasonOption[], excludedValues: string[]): string {
-  if (options.length === 0) return 'Seasons'
+function seasonTriggerLabel(
+  options: SeasonOption[],
+  excludedValues: string[],
+  emptyTriggerLabel: string,
+  allOptionLabel: string,
+  countUnit: string,
+): string {
+  if (options.length === 0) return allOptionLabel.replace(/^All /, '')
   const included = options.filter((option) => !excludedValues.includes(option.value))
-  if (included.length === 0) return 'No seasons'
-  if (included.length === options.length) return 'All seasons'
+  if (included.length === 0) return emptyTriggerLabel
+  if (included.length === options.length) return allOptionLabel
   if (included.length <= 3) return included.map((option) => option.label).join(', ')
-  return `${included.length} seasons`
+  return `${included.length} ${countUnit}`
 }
 
 export function SeasonMultiSelect({
@@ -28,13 +38,24 @@ export function SeasonMultiSelect({
   onExcludedValuesChange,
   disabled = false,
   label = 'Seasons',
+  menuTitle = 'Season labels',
+  allOptionLabel = 'All seasons',
+  emptyTriggerLabel = 'No seasons',
+  countUnit = 'seasons',
 }: SeasonMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const listboxId = useId()
   const triggerLabel = useMemo(
-    () => seasonTriggerLabel(options, excludedValues),
-    [options, excludedValues],
+    () =>
+      seasonTriggerLabel(
+        options,
+        excludedValues,
+        emptyTriggerLabel,
+        allOptionLabel,
+        countUnit,
+      ),
+    [allOptionLabel, countUnit, emptyTriggerLabel, options, excludedValues],
   )
   const allIncluded = options.length > 0 && excludedValues.length === 0
 
@@ -90,7 +111,7 @@ export function SeasonMultiSelect({
       </button>
       {open ? (
         <div className="season-multi-select-menu" id={listboxId} role="listbox" aria-label={label}>
-          <div className="season-multi-select-menu-title">Season labels</div>
+          <div className="season-multi-select-menu-title">{menuTitle}</div>
           <button
             type="button"
             className={`season-multi-select-option${allIncluded ? ' is-selected' : ''}`}
@@ -101,7 +122,7 @@ export function SeasonMultiSelect({
             <span className="season-multi-select-check" aria-hidden="true">
               {allIncluded ? '✓' : ''}
             </span>
-            <span>All seasons</span>
+            <span>{allOptionLabel}</span>
           </button>
           {options.map((option) => {
             const included = !excludedValues.includes(option.value)

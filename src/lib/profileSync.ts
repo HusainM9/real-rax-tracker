@@ -1,0 +1,152 @@
+import { importTrackerData } from './storage'
+import type { RaxTrackerData } from '../types/rax'
+
+export type CloudProfileMeta = {
+  updatedAt: string
+  cardCount: number
+  performanceCount: number
+}
+
+export type CloudProfileLoadResult = {
+  data: RaxTrackerData
+  meta: CloudProfileMeta
+  storageConfigured: boolean
+}
+
+export type CloudProfileSaveResult = {
+  meta: CloudProfileMeta
+  storageConfigured: boolean
+}
+
+async function parseError(response: Response): Promise<string> {
+  const data = (await response.json().catch(() => null)) as { error?: string } | null
+  return data?.error ?? `Cloud sync failed (${response.status}).`
+}
+
+export async function loadCloudProfile(
+  username: string,
+  passphrase: string,
+): Promise<CloudProfileLoadResult> {
+  const params = new URLSearchParams({
+    username: username.trim(),
+    passphrase,
+  })
+  const response = await fetch(`/api/profile/sync?${params}`, {
+    credentials: 'include',
+  })
+
+  if (response.status === 503) {
+    throw new Error('Cloud profile sync is not configured on this server.')
+  }
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+
+  const payload = (await response.json()) as {
+    data?: unknown
+    updatedAt?: string
+    cardCount?: number
+    performanceCount?: number
+    storageConfigured?: boolean
+  }
+
+  return {
+    data: importTrackerData(JSON.stringify(payload.data ?? {})),
+    meta: {
+      updatedAt: payload.updatedAt ?? new Date().toISOString(),
+      cardCount: Number(payload.cardCount) || 0,
+      performanceCount: Number(payload.performanceCount) || 0,
+    },
+    storageConfigured: payload.storageConfigured !== false,
+  }
+}
+
+export async function saveCloudProfile(
+  username: string,
+  passphrase: string,
+  data: RaxTrackerData,
+  options?: { ifUnmodifiedSince?: string },
+): Promise<CloudProfileSaveResult> {
+  const response = await fetch('/api/profile/sync', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: username.trim(),
+      passphrase,
+      data,
+      ifUnmodifiedSince: options?.ifUnmodifiedSince,
+    }),
+  })
+
+  if (response.status === 503) {
+    throw new Error('Cloud profile sync is not configured on this server.')
+  }
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+
+  const payload = (await response.json()) as {
+    updatedAt?: string
+    cardCount?: number
+    performanceCount?: number
+    storageConfigured?: boolean
+  }
+
+  return {
+    meta: {
+      updatedAt: payload.updatedAt ?? new Date().toISOString(),
+      cardCount: Number(payload.cardCount) || 0,
+      performanceCount: Number(payload.performanceCount) || 0,
+    },
+    storageConfigured: payload.storageConfigured !== false,
+  }
+}
+
+export async function changeCloudProfilePin(
+  username: string,
+  currentPin: string,
+  newPin: string,
+): Promise<{ meta: CloudProfileMeta; storageConfigured: boolean }> {
+  const response = await fetch('/api/profile/change-pin', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: username.trim(),
+      currentPin,
+      newPin,
+    }),
+  })
+
+  if (response.status === 503) {
+    throw new Error('Cloud profile sync is not configured on this server.')
+  }
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+
+  const payload = (await response.json()) as {
+    updatedAt?: string
+    cardCount?: number
+    performanceCount?: number
+    storageConfigured?: boolean
+  }
+
+  return {
+    meta: {
+      updatedAt: payload.updatedAt ?? new Date().toISOString(),
+      cardCount: Number(payload.cardCount) || 0,
+      performanceCount: Number(payload.performanceCount) || 0,
+    },
+    storageConfigured: payload.storageConfigured !== false,
+  }
+}
+
+export function formatCloudProfileMeta(meta: CloudProfileMeta): string {
+  const updated = new Date(meta.updatedAt)
+  const timestamp = Number.isNaN(updated.getTime())
+    ? meta.updatedAt
+    : updated.toLocaleString()
+  return `${meta.cardCount} card${meta.cardCount === 1 ? '' : 's'} · ${meta.performanceCount} earnings row${meta.performanceCount === 1 ? '' : 's'} · updated ${timestamp}`
+}

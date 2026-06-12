@@ -897,6 +897,16 @@ label.button input.sr-only {
   gap: 0.4rem;
 }
 
+.field-hint {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.inline-field .field-hint {
+  grid-column: 1 / -1;
+}
+
 .inline-field {
   align-items: center;
   grid-template-columns: auto minmax(7rem, 1fr);
@@ -969,6 +979,10 @@ label.button input.sr-only {
 
 .season-multi-select-field {
   position: relative;
+}
+
+.cloud-sync-remember {
+  margin-top: 0.75rem;
 }
 
 .season-filter-summary {

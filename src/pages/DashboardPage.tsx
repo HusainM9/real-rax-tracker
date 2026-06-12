@@ -1,9 +1,20 @@
-import { useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
+import {
+  loadCloudSyncCredentials,
+  saveCloudSyncCredentials,
+} from '../lib/cloudSyncCredentials'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { dismissOnboarding, isOnboardingDismissed } from '../lib/onboarding'
+import {
+  changeCloudProfilePin,
+  formatCloudProfileMeta,
+  loadCloudProfile,
+  saveCloudProfile,
+} from '../lib/profileSync'
+import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
 import { useRaxData } from '../context/RaxDataContext'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -21,6 +32,12 @@ export default function DashboardPage() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => data.cards.length === 0 && !isOnboardingDismissed(),
   )
+  const [cloudUsername, setCloudUsername] = useState(data.settings.savedUsername)
+  const [cloudPassphrase, setCloudPassphrase] = useState('')
+  const [cloudNewPassphrase, setCloudNewPassphrase] = useState('')
+  const [rememberCloudSync, setRememberCloudSync] = useState(false)
+  const [cloudStatus, setCloudStatus] = useState('')
+  const [cloudBusy, setCloudBusy] = useState(false)
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
   const rollup = useMemo(() => computeYearRollup(data, claimResults), [data, claimResults])
   const previewCards = useMemo(
@@ -72,6 +89,134 @@ export default function DashboardPage() {
     ) {
       resetAll()
       setShowOnboarding(true)
+    }
+  }
+
+  useEffect(() => {
+    setCloudUsername(data.settings.savedUsername)
+  }, [data.settings.savedUsername])
+
+  useEffect(() => {
+    const remembered = loadCloudSyncCredentials()
+    if (!remembered) return
+    setCloudUsername(remembered.username)
+    setCloudPassphrase(remembered.passphrase)
+    setRememberCloudSync(true)
+  }, [])
+
+  const persistRememberedCredentials = () => {
+    if (!rememberCloudSync) {
+      saveCloudSyncCredentials(null)
+      return
+    }
+    const pin = cloudNewPassphrase ? cloudNewPassphrase : cloudPassphrase
+    if (!cloudUsername.trim() || !pin) return
+    saveCloudSyncCredentials({
+      username: cloudUsername.trim(),
+      passphrase: pin,
+    })
+  }
+
+  const onSaveCloudProfile = async () => {
+    const username = cloudUsername.trim()
+    if (!username) {
+      setCloudStatus('Enter your Real username before saving to the cloud.')
+      return
+    }
+    const pinResult = validateSyncPin(cloudPassphrase)
+    if (!pinResult.ok) {
+      setCloudStatus(pinResult.error)
+      return
+    }
+
+    setCloudBusy(true)
+    setCloudStatus('')
+    try {
+      const result = await saveCloudProfile(username, pinResult.pin, data)
+      setSettings({
+        savedUsername: username,
+        lastCloudSyncAt: result.meta.updatedAt,
+      })
+      persistRememberedCredentials()
+      setCloudStatus(`Saved cloud profile · ${formatCloudProfileMeta(result.meta)}`)
+    } catch (error) {
+      setCloudStatus(error instanceof Error ? error.message : 'Could not save cloud profile.')
+    } finally {
+      setCloudBusy(false)
+    }
+  }
+
+  const onLoadCloudProfile = async () => {
+    const username = cloudUsername.trim()
+    if (!username) {
+      setCloudStatus('Enter your Real username before loading from the cloud.')
+      return
+    }
+    const pinResult = validateSyncPin(cloudPassphrase)
+    if (!pinResult.ok) {
+      setCloudStatus(pinResult.error)
+      return
+    }
+
+    setCloudBusy(true)
+    setCloudStatus('')
+    try {
+      const result = await loadCloudProfile(username, pinResult.pin)
+      const replace = window.confirm(
+        `Load cloud profile for @${username}? This replaces local cards, earnings, saved profiles, and settings on this device.\n\n${formatCloudProfileMeta(result.meta)}`,
+      )
+      if (!replace) {
+        setCloudStatus('Cloud load cancelled.')
+        return
+      }
+      importJson(JSON.stringify(result.data))
+      setSettings({
+        savedUsername: username,
+        lastCloudSyncAt: result.meta.updatedAt,
+      })
+      persistRememberedCredentials()
+      setCloudStatus(`Loaded cloud profile · ${formatCloudProfileMeta(result.meta)}`)
+    } catch (error) {
+      setCloudStatus(error instanceof Error ? error.message : 'Could not load cloud profile.')
+    } finally {
+      setCloudBusy(false)
+    }
+  }
+
+  const onChangeCloudPin = async () => {
+    const username = cloudUsername.trim()
+    if (!username) {
+      setCloudStatus('Enter your Real username first.')
+      return
+    }
+    const currentResult = validateSyncPin(cloudPassphrase)
+    if (!currentResult.ok) {
+      setCloudStatus(`Current PIN: ${currentResult.error}`)
+      return
+    }
+    const newResult = validateSyncPin(cloudNewPassphrase)
+    if (!newResult.ok) {
+      setCloudStatus(`New PIN: ${newResult.error}`)
+      return
+    }
+
+    setCloudBusy(true)
+    setCloudStatus('')
+    try {
+      await changeCloudProfilePin(username, currentResult.pin, newResult.pin)
+      setCloudPassphrase(newResult.pin)
+      setCloudNewPassphrase('')
+      if (rememberCloudSync) {
+        saveCloudSyncCredentials({
+          username: cloudUsername.trim(),
+          passphrase: newResult.pin,
+        })
+      }
+      setCloudStatus('Sync PIN updated. Use the new PIN on your other devices.')
+    } catch (error) {
+      setCloudStatus(error instanceof Error ? error.message : 'Could not change sync PIN.')
+    } finally {
+      setCloudBusy(false)
     }
   }
 
@@ -168,6 +313,116 @@ export default function DashboardPage() {
           <Link to="/cards">Cards</Link> or <Link to="/entry">Entry</Link>.
         </section>
       ) : null}
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h2>Cloud profile</h2>
+            <p>
+              Save your full tracker state to the server and load it on another device. Uses your
+              Real @username plus a private sync PIN you choose.
+            </p>
+          </div>
+        </div>
+        <p className="import-hint">
+          Cloud sync stores cards, earnings, saved profiles, potential cards, sell rankings, and
+          settings. Your sync PIN is required to load or save. After an admin reset, sign in with
+          the PIN they gave you, then use <strong>Change sync PIN</strong> below to pick your own.
+          Forgot your PIN? Ask an admin to reset it.
+        </p>
+        <div className="sort-controls">
+          <label className="field inline-field">
+            <span>Real username</span>
+            <input
+              type="text"
+              value={cloudUsername}
+              disabled={cloudBusy}
+              placeholder="username"
+              onChange={(event) => setCloudUsername(event.target.value.replace(/^@/, ''))}
+            />
+          </label>
+          <label className="field inline-field">
+            <span>Sync PIN</span>
+            <input
+              type="password"
+              value={cloudPassphrase}
+              disabled={cloudBusy}
+              placeholder="Current PIN"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={SYNC_PIN_MAX_LENGTH}
+              onChange={(event) =>
+                setCloudPassphrase(stripSpacesFromSyncPinInput(event.target.value))
+              }
+            />
+            <small className="field-hint">{SYNC_PIN_HELP}</small>
+          </label>
+        </div>
+        <div className="sort-controls">
+          <label className="field inline-field">
+            <span>New sync PIN</span>
+            <input
+              type="password"
+              value={cloudNewPassphrase}
+              disabled={cloudBusy}
+              placeholder="Only for changing PIN"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={SYNC_PIN_MAX_LENGTH}
+              onChange={(event) =>
+                setCloudNewPassphrase(stripSpacesFromSyncPinInput(event.target.value))
+              }
+            />
+            <small className="field-hint">Leave blank unless changing PIN. {SYNC_PIN_HELP}</small>
+          </label>
+        </div>
+        <label className="toggle cloud-sync-remember">
+          <input
+            type="checkbox"
+            checked={rememberCloudSync}
+            disabled={cloudBusy}
+            onChange={(event) => {
+              const checked = event.target.checked
+              setRememberCloudSync(checked)
+              if (!checked) saveCloudSyncCredentials(null)
+            }}
+          />
+          Remember sync PIN on this device
+        </label>
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={cloudBusy}
+            onClick={() => void onSaveCloudProfile()}
+          >
+            {cloudBusy ? 'Saving…' : 'Save to cloud'}
+          </button>
+          <button
+            className="button"
+            type="button"
+            disabled={cloudBusy}
+            onClick={() => void onLoadCloudProfile()}
+          >
+            Load from cloud
+          </button>
+          <button
+            className="button"
+            type="button"
+            disabled={cloudBusy || !cloudNewPassphrase}
+            onClick={() => void onChangeCloudPin()}
+          >
+            Change sync PIN
+          </button>
+        </div>
+        {data.settings.lastCloudSyncAt ? (
+          <p className="import-hint">
+            Last cloud sync on this device:{' '}
+            {new Date(data.settings.lastCloudSyncAt).toLocaleString()}
+          </p>
+        ) : null}
+        {cloudStatus ? <p className="import-status">{cloudStatus}</p> : null}
+      </section>
 
       <section className="stats-grid">
         <StatCard

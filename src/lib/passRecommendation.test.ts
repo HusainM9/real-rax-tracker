@@ -9,7 +9,9 @@ import {
   prefilterRecommendationProfiles,
   rankCatalogRecommendations,
   RECOMMENDATION_SIMULATED_RARITY,
+  recommendationCapsForAllSports,
   recommendationCapsForSport,
+  recommendationCapsForSports,
   seasonLabelIncluded,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
@@ -117,6 +119,16 @@ describe('passRecommendation', () => {
     expect(recommendationCapsForSport('MLB').bulkFetchCap).toBe(2000)
     expect(recommendationCapsForSport('MLB').analysisCap).toBeGreaterThan(
       recommendationCapsForSport('NBA').analysisCap,
+    )
+  })
+
+  it('recommendationCapsForAllSports sums per-sport limits', () => {
+    const all = recommendationCapsForAllSports()
+    const subset = recommendationCapsForSports(['NBA', 'MLB'])
+    expect(all.bulkFetchCap).toBeGreaterThan(recommendationCapsForSport('MLB').bulkFetchCap)
+    expect(all.analysisCap).toBeGreaterThan(recommendationCapsForSport('MLB').analysisCap)
+    expect(subset.bulkFetchCap).toBe(
+      recommendationCapsForSport('NBA').bulkFetchCap + recommendationCapsForSport('MLB').bulkFetchCap,
     )
   })
 

@@ -18,8 +18,10 @@ import { formatClaimDay, formatRax } from '../lib/format'
 import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
 import {
   rankAndRecommendAsync,
+  RECOMMENDATION_MAX_BUNDLE_SIZE,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForSport,
+  recommendationCapsForSports,
   selectSummariesForBulkFetch,
   type PassRecommendationBundle,
   seasonLabelForFilter,
@@ -35,6 +37,9 @@ import { SPORTS, type Sport } from '../types/rax'
 
 const TOP_RECOMMENDATIONS = 20
 const DEFAULT_BUNDLE_SIZE = 3
+const ALL_SPORTS_RANK = 'ALL' as const
+
+type RankSportChoice = Sport | typeof ALL_SPORTS_RANK
 
 const EMPTY_FORM = {
   name: '',
@@ -388,7 +393,8 @@ export default function PotentialPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showTutorial, setShowTutorial] = useState(true)
   const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
-  const [rankSport, setRankSport] = useState<Sport>('FC')
+  const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
+  const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
   const [excludedRankSeasonLabels, setExcludedRankSeasonLabels] = useState<string[]>([])
   const [bundleSize, setBundleSize] = useState(DEFAULT_BUNDLE_SIZE)
   const [rankingInProgress, setRankingInProgress] = useState(false)
@@ -557,6 +563,23 @@ export default function PotentialPage() {
     setRankStatus('Ranking cancelled.')
   }
 
+  const rankAllSports = rankSport === ALL_SPORTS_RANK
+
+  const rankSportOptions = useMemo(
+    () => SPORTS.map((sport) => ({ value: sport, label: sport })),
+    [],
+  )
+
+  const includedRankSports = useMemo(
+    () => SPORTS.filter((sport) => !excludedRankSports.includes(sport)),
+    [excludedRankSports],
+  )
+
+  const excludedRankSportOptions = useMemo(
+    () => rankSportOptions.filter((option) => excludedRankSports.includes(option.value as Sport)),
+    [excludedRankSports, rankSportOptions],
+  )
+
   const runCatalogRanking = async () => {
     rankAbortRef.current?.abort()
     const controller = new AbortController()
@@ -569,7 +592,14 @@ export default function PotentialPage() {
     setRecommendationMeta(null)
     setProfileByKey(new Map())
 
+    const rankSports: Sport[] = rankAllSports ? includedRankSports : [rankSport]
+
     try {
+      if (rankAllSports && rankSports.length === 0) {
+        setRankStatus('Select at least one sport to rank.')
+        return
+      }
+
       if (
         availableSeasonOptions.length > 0 &&
         availableSeasonOptions.every((option) => excludedRankSeasonLabels.includes(option.value))
@@ -582,43 +612,71 @@ export default function PotentialPage() {
         .filter((option) => !excludedRankSeasonLabels.includes(option.value))
         .map((option) => option.label)
 
-      setRankStatus(`Loading ${rankSport} catalog passes…`)
-      const { results, storageConfigured } = await fetchCatalogPassSummaries(
-        { sport: rankSport, passKind: 'player' },
-        controller.signal,
-      )
-      if (!storageConfigured) {
-        setRankStatus('Shared catalog is not configured yet.')
-        return
-      }
-      if (results.length === 0) {
-        setRankStatus(`No player passes with earnings found for ${rankSport}.`)
-        return
-      }
-
-      const caps = recommendationCapsForSport(rankSport)
       const seasonFilter = { excludedSeasonLabels: excludedRankSeasonLabels }
-      const { keys: candidateKeys, skippedOwnedIconic, fetchTrimmed } = selectSummariesForBulkFetch(
-        data,
-        results,
-        { ...seasonFilter, sport: rankSport },
-      )
+      let catalogCount = 0
+      let skippedOwnedIconic = 0
+      let fetchTrimmed = 0
+      const candidateKeys: string[] = []
+      const seenCandidateKeys = new Set<string>()
+
+      for (let sportIndex = 0; sportIndex < rankSports.length; sportIndex += 1) {
+        const sport = rankSports[sportIndex]!
+        if (controller.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError')
+        }
+
+        setRankStatus(
+          rankAllSports
+            ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${rankSports.length})`
+            : `Loading ${sport} catalog passes…`,
+        )
+        const { results, storageConfigured } = await fetchCatalogPassSummaries(
+          { sport, passKind: 'player' },
+          controller.signal,
+        )
+        if (!storageConfigured) {
+          setRankStatus('Shared catalog is not configured yet.')
+          return
+        }
+        catalogCount += results.length
+
+        const selected = selectSummariesForBulkFetch(data, results, { ...seasonFilter, sport })
+        skippedOwnedIconic += selected.skippedOwnedIconic
+        fetchTrimmed += selected.fetchTrimmed
+        for (const key of selected.keys) {
+          if (!seenCandidateKeys.has(key)) {
+            seenCandidateKeys.add(key)
+            candidateKeys.push(key)
+          }
+        }
+      }
 
       if (candidateKeys.length === 0) {
         setRankStatus(
           skippedOwnedIconic > 0
-            ? `All eligible ${rankSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
-            : `No player passes with earnings found for ${rankSport}.`,
+            ? rankAllSports
+              ? `All eligible catalog passes across every sport are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+              : `All eligible ${rankSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+            : rankAllSports
+              ? 'No player passes with earnings found across any sport.'
+              : `No player passes with earnings found for ${rankSport}.`,
         )
         return
       }
 
+      const caps = rankAllSports
+        ? recommendationCapsForSports(rankSports)
+        : recommendationCapsForSport(rankSport)
       setRankStatus(
-        `Fetching earnings for ${candidateKeys.length} passes${
-          fetchTrimmed > 0
-            ? ` (top ${candidateKeys.length} by base RAX of ${results.length - skippedOwnedIconic} eligible · cap ${caps.bulkFetchCap})`
-            : ''
-        }…`,
+        rankAllSports
+          ? `Fetching earnings for ${candidateKeys.length} passes across ${rankSports.length} sport${
+              rankSports.length === 1 ? '' : 's'
+            } (cap ${caps.bulkFetchCap} total)…`
+          : `Fetching earnings for ${candidateKeys.length} passes${
+              fetchTrimmed > 0
+                ? ` (top ${candidateKeys.length} by base RAX · cap ${caps.bulkFetchCap})`
+                : ''
+            }…`,
       )
       const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
         candidateKeys,
@@ -635,7 +693,7 @@ export default function PotentialPage() {
       setRankStatus(`Analyzing top candidates at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`)
       const { ranked, bundle } = await rankAndRecommendAsync(data, profiles, bundleSize, {
         ...seasonFilter,
-        sport: rankSport,
+        ...(rankAllSports ? { caps } : { sport: rankSport }),
         signal: controller.signal,
         batchSize: 24,
         onProgress: setRankProgress,
@@ -647,12 +705,17 @@ export default function PotentialPage() {
         calculatedAt: new Date().toISOString(),
         skippedOwnedIconic: ranked.skippedOwnedIconic + skippedOwnedIconic,
         skippedNoRows: ranked.skippedNoRows,
-        catalogCount: results.length,
+        catalogCount,
         fetchTrimmed,
         prefilterTrimmed: ranked.prefilterTrimmed,
       })
+      const sportLabel = rankAllSports
+        ? rankSports.length === SPORTS.length
+          ? 'all sports'
+          : rankSports.join(', ')
+        : rankSport
       setRankStatus(
-        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} · showing top ${Math.min(TOP_RECOMMENDATIONS, ranked.rows.length)}${
+        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · showing top ${Math.min(TOP_RECOMMENDATIONS, ranked.rows.length)}${
           includedSeasonLabels.length > 0 && includedSeasonLabels.length < availableSeasonOptions.length
             ? ` · seasons ${includedSeasonLabels.join(', ')}`
             : ''
@@ -706,18 +769,59 @@ export default function PotentialPage() {
 
   useEffect(() => {
     let cancelled = false
-    void fetchCatalogSeasonYears({ sport: rankSport, passKind: 'player' })
-      .then(({ seasonYears, storageConfigured }) => {
-        if (cancelled || !storageConfigured) return
-        setCatalogSeasonOptions(seasonYears)
+
+    const loadSeasonOptions = async () => {
+      const seasonSports =
+        rankSport === ALL_SPORTS_RANK
+          ? SPORTS.filter((sport) => !excludedRankSports.includes(sport))
+          : [rankSport]
+
+      if (rankSport === ALL_SPORTS_RANK) {
+        const byLabel = new Map<string, CatalogSeasonYearOption>()
+        for (const sport of seasonSports) {
+          const { seasonYears, storageConfigured } = await fetchCatalogSeasonYears({
+            sport,
+            passKind: 'player',
+          })
+          if (cancelled) return
+          if (!storageConfigured) {
+            setCatalogSeasonOptions([])
+            return
+          }
+          for (const option of seasonYears) {
+            const value = option.seasonLabel.trim() || String(option.seasonYear)
+            const existing = byLabel.get(value)
+            if (!existing || option.seasonYear > existing.seasonYear) {
+              byLabel.set(value, option)
+            }
+          }
+        }
+        if (!cancelled) {
+          setCatalogSeasonOptions(
+            [...byLabel.values()].sort(
+              (a, b) => b.seasonYear - a.seasonYear || a.seasonLabel.localeCompare(b.seasonLabel),
+            ),
+          )
+        }
+        return
+      }
+
+      const { seasonYears, storageConfigured } = await fetchCatalogSeasonYears({
+        sport: rankSport,
+        passKind: 'player',
       })
-      .catch(() => {
-        if (!cancelled) setCatalogSeasonOptions([])
-      })
+      if (cancelled || !storageConfigured) return
+      setCatalogSeasonOptions(seasonYears)
+    }
+
+    void loadSeasonOptions().catch(() => {
+      if (!cancelled) setCatalogSeasonOptions([])
+    })
+
     return () => {
       cancelled = true
     }
-  }, [rankSport])
+  }, [excludedRankSports, rankSport])
 
   return (
     <div className="page-stack">
@@ -755,6 +859,13 @@ export default function PotentialPage() {
           higher for MLB and other large sports). The catalog may be incomplete or outdated. The recommended bundle uses a{' '}
           <strong>greedy</strong> pick: best pass first, then re-rank a shortlist with it virtually
           added.
+          {rankSport === ALL_SPORTS_RANK ? (
+            <>
+              {' '}
+              <strong>All sports</strong> loads every sport&apos;s catalog, fetches each sport&apos;s
+              top passes by base RAX, then ranks across the combined pool — expect long runtimes.
+            </>
+          ) : null}
         </p>
         <div className="sort-controls">
           <label className="field inline-field">
@@ -763,10 +874,15 @@ export default function PotentialPage() {
               value={rankSport}
               disabled={rankingInProgress}
               onChange={(event) => {
-                setRankSport(event.target.value as Sport)
+                const next = event.target.value
+                setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
                 setExcludedRankSeasonLabels([])
+                if (next !== ALL_SPORTS_RANK) {
+                  setExcludedRankSports([])
+                }
               }}
             >
+              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
               {SPORTS.map((sport) => (
                 <option key={sport} value={sport}>
                   {sport}
@@ -774,6 +890,35 @@ export default function PotentialPage() {
               ))}
             </select>
           </label>
+          {rankAllSports ? (
+            <div className="field inline-field season-multi-select-field">
+              <SeasonMultiSelect
+                options={rankSportOptions}
+                excludedValues={excludedRankSports}
+                onExcludedValuesChange={(values) => setExcludedRankSports(values as Sport[])}
+                disabled={rankingInProgress}
+                label="Sports"
+                menuTitle="Sports"
+                allOptionLabel="All sports"
+                emptyTriggerLabel="No sports"
+                countUnit="sports"
+              />
+              {excludedRankSportOptions.length > 0 ? (
+                <p className="season-filter-summary">
+                  <span>
+                    Including:{' '}
+                    {includedRankSports.length > 0 ? includedRankSports.join(', ') : 'none'}
+                  </span>
+                  {' · '}
+                  <span>
+                    Excluding: {excludedRankSportOptions.map((option) => option.label).join(', ')}
+                  </span>
+                </p>
+              ) : (
+                <p className="season-filter-summary">Including all sports</p>
+              )}
+            </div>
+          ) : null}
           <div className="field inline-field season-multi-select-field">
             <SeasonMultiSelect
               options={availableSeasonOptions}
@@ -810,13 +955,15 @@ export default function PotentialPage() {
             <input
               type="number"
               min={1}
-              max={5}
+              max={RECOMMENDATION_MAX_BUNDLE_SIZE}
               value={bundleSize}
               disabled={rankingInProgress}
               onChange={(event) => {
                 const next = Number(event.target.value)
                 if (Number.isFinite(next)) {
-                  setBundleSize(Math.max(1, Math.min(5, Math.floor(next))))
+                  setBundleSize(
+                    Math.max(1, Math.min(RECOMMENDATION_MAX_BUNDLE_SIZE, Math.floor(next))),
+                  )
                 }
               }}
             />
@@ -826,7 +973,11 @@ export default function PotentialPage() {
           <button
             className="button primary"
             type="button"
-            disabled={rankingInProgress || (availableSeasonOptions.length > 0 && includedSeasonOptions.length === 0)}
+            disabled={
+              rankingInProgress ||
+              (rankAllSports && includedRankSports.length === 0) ||
+              (availableSeasonOptions.length > 0 && includedSeasonOptions.length === 0)
+            }
             onClick={() => void runCatalogRanking()}
           >
             {rankingInProgress ? 'Ranking…' : 'Rank catalog passes'}
@@ -872,7 +1023,7 @@ export default function PotentialPage() {
                       {index + 1}. {row.name}
                     </strong>
                     <small>
-                      {row.season}
+                      {row.sport} · {row.season}
                       {row.rarityLabel ? ` · ${row.rarityLabel}` : ''} ·{' '}
                       {formatSignedRax(displayRaxValue(row.netClaimableDelta))} net
                     </small>
@@ -933,7 +1084,7 @@ export default function PotentialPage() {
                         </button>
                         <br />
                         <small className="table-sub">
-                          {row.season}
+                          {row.sport} · {row.season}
                           {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
                         </small>
                       </td>

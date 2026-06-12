@@ -246,6 +246,14 @@ export function normalizeData(value: unknown): RaxTrackerData {
           : fallback.settings.proBonusEnabled,
       savedUsername:
         typeof settingsRecord.savedUsername === 'string' ? settingsRecord.savedUsername : '',
+      lastCloudSyncAt:
+        typeof settingsRecord.lastCloudSyncAt === 'string'
+          ? settingsRecord.lastCloudSyncAt
+          : undefined,
+      cloudSyncAuto:
+        typeof settingsRecord.cloudSyncAuto === 'boolean'
+          ? settingsRecord.cloudSyncAuto
+          : undefined,
     },
     cards: Array.isArray(value.cards)
       ? value.cards.map(hydrateCard).filter((card): card is PlayerCard => card !== null)

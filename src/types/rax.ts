@@ -126,6 +126,8 @@ export type SavedSellRankings = {
 export type AppSettings = {
   proBonusEnabled: boolean
   savedUsername: string
+  lastCloudSyncAt?: string
+  cloudSyncAuto?: boolean
 }
 
 export type RaxTrackerData = {
