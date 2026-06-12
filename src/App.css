@@ -622,6 +622,86 @@ label.button input.sr-only {
   gap: 1rem;
 }
 
+.potential-claim-days {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.potential-claim-days > .overlap-section {
+  margin-top: 0;
+}
+
+.potential-claim-days .compact-day-panel {
+  margin: 0;
+  padding: 0.75rem 0.85rem 0.85rem;
+}
+
+.potential-claim-days .compact-day-panel .section-heading {
+  margin-bottom: 0.65rem;
+}
+
+.potential-claim-days .compact-day-panel .section-heading h3 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.potential-claim-days .compact-day-panel .section-heading p {
+  font-size: 0.82rem;
+  margin: 0.2rem 0 0;
+}
+
+.potential-claim-days .sport-grid {
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+.potential-claim-days .sport-card {
+  padding: 0.65rem;
+}
+
+.potential-claim-days .sport-card h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+}
+
+.potential-claim-days .sport-card .sport-net-chip {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.potential-claim-days .mini-heading {
+  margin: 0.35rem 0;
+  font-size: 0.76rem;
+}
+
+.potential-claim-days .claim-row {
+  padding: 0.55rem 0.65rem;
+  gap: 0.65rem;
+}
+
+.potential-claim-days .claim-row b {
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.potential-claim-days .claim-row.is-potential {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.potential-claim-days .overlap-toggle {
+  font-size: 0.82rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.potential-claim-days .overlap-section {
+  margin-top: 0.55rem;
+}
+
+.potential-probonus-note {
+  margin: 0 0 0.55rem;
+}
+
 .potential-summary-grid {
   margin-bottom: 1rem;
 }

@@ -3,9 +3,11 @@ import { analyzePotentialCard } from './potentialAnalysis'
 import {
   analyzeCatalogCandidate,
   applyRecommendationBaseline,
+  catalogProfileToParsedRows,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
+  isPassInRecommendationAdjustments,
   netClaimableDelta,
   passSeasonIncluded,
   prefilterRecommendationProfiles,
@@ -14,6 +16,7 @@ import {
   recommendationCapsForAllSports,
   recommendationCapsForSport,
   recommendationCapsForSports,
+  resolveProfileForRecommendationAdjustment,
   sportSeasonFilterKey,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
@@ -100,6 +103,20 @@ describe('passRecommendation', () => {
     savedCardProfiles: [],
   }
 
+  it('drops out-of-season NFL rows before ranking catalog passes', () => {
+    const profile: CatalogImportProfile = {
+      ...catalogProfile('300|2025|NFL', 'Derrick Henry', [
+        { claimDay: '2024-09-08', baseRaxEarned: 12 },
+        { claimDay: '2023-09-10', baseRaxEarned: 21 },
+      ]),
+      sport: 'NFL',
+      seasonYear: 2024,
+      seasonLabel: '2024-25',
+    }
+    const rows = catalogProfileToParsedRows(profile)
+    expect(rows.map((row) => row.claimDay)).toEqual(['2024-09-08'])
+  })
+
   it('netClaimableDelta matches analyzePotentialCard output', () => {
     const analysis = analyzePotentialCard(
       data,
@@ -174,6 +191,28 @@ describe('passRecommendation', () => {
       'new|2025|NBA',
       'owned-leg|2025|NBA',
     ])
+  })
+
+  it('skips iconic-owned NFL passes when the owned card season is stored as end year', () => {
+    const catalog = {
+      ...catalogProfile('12345|2024|NFL', 'Ceedee Lamb', [{ claimDay: '2024-01-01', baseRaxEarned: 10 }]),
+      sport: 'NFL',
+      seasonYear: 2024,
+      seasonLabel: '2023-24',
+    }
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [
+        ...data.cards,
+        {
+          ...card('lamb', 'Ceedee Lamb', '12345|2024|NFL', 'Iconic 1'),
+          sport: 'NFL',
+          season: '2024',
+        },
+      ],
+    }
+    expect(shouldSkipRecommendationPass(ownedData, catalog)).toBe(true)
+    expect(filterRecommendationProfiles(ownedData, [catalog]).candidates).toHaveLength(0)
   })
 
   it('selectSummariesForBulkFetch caps and skips iconic-owned passes', () => {
@@ -454,5 +493,43 @@ describe('passRecommendation', () => {
 
     expect(shouldSkipRecommendationPass(ownedData, ownedProfile, adjustments)).toBe(true)
     expect(withoutBaseline?.netClaimableDelta).not.toBe(withBaseline?.netClaimableDelta)
+  })
+
+  it('matches rank adjustments to duplicate catalog passes by player identity', () => {
+    const duplicateA = catalogProfile('846|2024|NFL', 'CeeDee Lamb', [
+      { claimDay: '2024-01-07', baseRaxEarned: 100 },
+    ])
+    const duplicateB = catalogProfile('999|2024|NFL', 'CeeDee Lamb', [
+      { claimDay: '2024-01-07', baseRaxEarned: 120 },
+    ])
+    for (const profile of [duplicateA, duplicateB]) {
+      profile.sport = 'NFL'
+      profile.seasonYear = 2024
+      profile.seasonLabel = '2023-24'
+    }
+
+    const adjustments = [
+      {
+        externalKey: duplicateA.externalKey,
+        name: duplicateA.name,
+        sport: 'NFL' as const,
+        season: '2023-24',
+        mode: 'assume-iconic-1' as const,
+      },
+    ]
+
+    expect(isPassInRecommendationAdjustments(duplicateB, adjustments)).toBe(true)
+    expect(shouldSkipRecommendationPass(data, duplicateB, adjustments)).toBe(true)
+
+    const profilesByKey = new Map([
+      [duplicateA.externalKey, duplicateA],
+      [duplicateB.externalKey, duplicateB],
+    ])
+    const resolved = resolveProfileForRecommendationAdjustment(adjustments[0]!, profilesByKey)
+    expect(resolved?.externalKey).toBe(duplicateA.externalKey)
+
+    const filtered = filterRecommendationProfiles(data, [duplicateA, duplicateB], { adjustments })
+    expect(filtered.skippedAdjusted).toBe(1)
+    expect(filtered.candidates).toHaveLength(0)
   })
 })

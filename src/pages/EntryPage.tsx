@@ -8,7 +8,7 @@ import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
-import { catalogProfileToJson } from '../lib/catalogProfileJson'
+import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import {
   getFailedPlayerPasses,
   type FailedPlayerPassImport,
@@ -90,7 +90,7 @@ function cardEntryFromCatalogProfile(
     passKind: profile.passKind,
     notes: profile.rows.length > 0 ? 'Imported from Meowbot catalog' : '',
     earningsInput: 'paste',
-    rawJson: profile.rows.length > 0 ? catalogProfileToJson(profile) : '',
+    rawJson: profile.rows.length > 0 ? catalogProfileToFilteredJson(profile) : '',
   }
 }
 
@@ -196,7 +196,7 @@ export default function EntryPage() {
       setCardEntryStatus('')
 
       if (profile.rows.length > 0) {
-        saveCardProfile(imported.cardId, catalogProfileToJson(profile))
+        saveCardProfile(imported.cardId, catalogProfileToFilteredJson(profile))
       }
 
       if (profile.rows.length === 0) {

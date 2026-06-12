@@ -2,6 +2,7 @@ import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
 } from './meowbotCatalogStore'
+import { filterDailyRowsToPassSeason } from './seasonClaimWindow'
 
 type CachedProfileInput = {
   entityId?: unknown
@@ -69,7 +70,13 @@ function parseProfile(input: CachedProfileInput): CatalogPassInput | null {
   }
 }
 
-function parseRows(externalKey: string, rows: unknown): CatalogDailyEarningInput[] {
+function parseRows(
+  externalKey: string,
+  rows: unknown,
+  seasonYear: number,
+  sport: string,
+  seasonLabel?: string,
+): CatalogDailyEarningInput[] {
   if (!Array.isArray(rows)) return []
 
   const parsed: CatalogDailyEarningInput[] = []
@@ -81,7 +88,7 @@ function parseRows(externalKey: string, rows: unknown): CatalogDailyEarningInput
     if (!claimDay || !baseRaxEarned || baseRaxEarned <= 0) continue
     parsed.push({ externalKey, claimDay, baseRaxEarned })
   }
-  return parsed
+  return filterDailyRowsToPassSeason(parsed, seasonYear, sport, seasonLabel)
 }
 
 export function cachedProfilesToCatalogPayload(input: unknown): CatalogProfilePayload {
@@ -103,7 +110,7 @@ export function cachedProfilesToCatalogPayload(input: unknown): CatalogProfilePa
       continue
     }
 
-    const rows = parseRows(pass.externalKey, profile.rows)
+    const rows = parseRows(pass.externalKey, profile.rows, pass.seasonYear, pass.sport, pass.seasonLabel)
     if (rows.length === 0) {
       skipped += 1
       continue

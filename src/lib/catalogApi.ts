@@ -21,6 +21,8 @@ export type CatalogSearchResult = {
 }
 
 export type CatalogImportProfile = CatalogSearchResult & {
+  /** Daily rows in Supabase before season-window filtering. */
+  storedRowCount?: number
   rows: {
     claimDay: string
     baseRaxEarned: number

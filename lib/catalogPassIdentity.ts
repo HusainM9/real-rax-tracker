@@ -1,4 +1,5 @@
 import type { CatalogPassKind } from './meowbotCatalogStore'
+import { expectedSeasonLabelFromYear } from './seasonClaimWindow'
 
 export type CatalogPassIdentityFields = {
   passKind: CatalogPassKind
@@ -31,10 +32,39 @@ export function parseEntityIdFromExternalKey(externalKey?: string): number | nul
   return Number.isFinite(entityId) ? entityId : null
 }
 
+export function parseSeasonYearFromExternalKey(externalKey?: string): number | null {
+  if (!externalKey) return null
+  const seasonYear = Number(externalKey.split('|')[1])
+  return Number.isFinite(seasonYear) ? seasonYear : null
+}
+
+function normalizeSeasonLabelText(seasonLabel?: string): string {
+  return seasonLabel?.replace(/\u2013|\u2014/g, '-').trim() ?? ''
+}
+
+/** Normalize `2024` vs `2023-24` so owned cards match catalog passes after end-year repair. */
+export function normalizeSeasonForIdentity(
+  sport: string,
+  seasonLabel?: string,
+  seasonYear?: number,
+): string {
+  const trimmed = normalizeSeasonLabelText(seasonLabel)
+  if (trimmed && /^\d{4}-\d{2}$/.test(trimmed)) {
+    return trimmed
+  }
+  if (trimmed && /^\d{4}$/.test(trimmed)) {
+    return expectedSeasonLabelFromYear(Number(trimmed), sport)
+  }
+  if (Number.isInteger(seasonYear) && seasonYear > 0) {
+    return expectedSeasonLabelFromYear(seasonYear, sport)
+  }
+  return trimmed || String(seasonYear ?? '')
+}
+
 /** Stable identity for one logical catalog pass (ignores duplicate external keys). */
 export function catalogPassIdentityKey(item: CatalogPassIdentityFields): string {
   const sport = item.sport.trim()
-  const season = seasonLabelForIdentity(item)
+  const season = normalizeSeasonForIdentity(sport, item.seasonLabel, item.seasonYear)
   if (item.passKind === 'team') {
     const entityId = item.entityId ?? parseEntityIdFromExternalKey(item.externalKey)
     return `team|${sport}|${season}|${entityId ?? normalizePassName(item.name)}`
@@ -96,7 +126,7 @@ export function catalogPassIdentityKeyFromOwnedCard(card: {
   return catalogPassIdentityKey({
     passKind: card.passKind ?? 'player',
     sport: card.sport,
-    seasonYear: 0,
+    seasonYear: parseSeasonYearFromExternalKey(card.externalKey) ?? 0,
     seasonLabel: card.season,
     name: card.name,
     entityId: parseEntityIdFromExternalKey(card.externalKey) ?? undefined,

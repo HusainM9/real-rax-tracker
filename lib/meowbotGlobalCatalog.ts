@@ -3,6 +3,7 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
+import { claimDayInPassSeason } from './seasonClaimWindow'
 
 export type NormalizedMeowbotCatalog = {
   passes: CatalogPassInput[]
@@ -144,15 +145,31 @@ export function normalizeGlobalMeowbotCatalog(payload: unknown): NormalizedMeowb
     passesByKey.set(pass.externalKey, pass)
     for (const row of rowsFrom(record(item) ?? {})) {
       const daily = parseDailyRow(row, pass.externalKey)
-      if (daily) dailyEarnings.push(daily)
-      else skipped += 1
+      if (!daily) {
+        skipped += 1
+        continue
+      }
+      if (!claimDayInPassSeason(daily.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)) {
+        skipped += 1
+        continue
+      }
+      dailyEarnings.push(daily)
     }
   }
 
   const topLevelRows = arrayFromPayload(payload, ['dailyEarnings', 'daily_earnings', 'rows', 'earnings'])
   for (const row of topLevelRows) {
     const daily = parseDailyRow(row)
-    if (daily) dailyEarnings.push(daily)
+    if (!daily) {
+      skipped += 1
+      continue
+    }
+    const pass = passesByKey.get(daily.externalKey)
+    if (pass && !claimDayInPassSeason(daily.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)) {
+      skipped += 1
+      continue
+    }
+    dailyEarnings.push(daily)
   }
 
   return {

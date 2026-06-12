@@ -78,4 +78,43 @@ describe('catalogPassIdentity', () => {
     })
     expect(ownedKey).toBe(catalogKey)
   })
+
+  it('matches NFL owned cards when season is stored as end year instead of label', () => {
+    const ownedKey = catalogPassIdentityKeyFromOwnedCard({
+      passKind: 'player',
+      sport: 'NFL',
+      season: '2024',
+      name: 'Ceedee Lamb',
+      externalKey: '12345|2024|NFL',
+    })
+    const catalogKey = catalogPassIdentityKey({
+      passKind: 'player',
+      sport: 'NFL',
+      seasonYear: 2024,
+      seasonLabel: '2023-24',
+      name: 'Ceedee Lamb',
+      entityId: 12345,
+      externalKey: '12345|2024|NFL',
+    })
+    expect(ownedKey).toBe(catalogKey)
+  })
+
+  it('normalizes en-dash season labels for identity matching', () => {
+    const hyphenKey = catalogPassIdentityKey({
+      passKind: 'player',
+      sport: 'NFL',
+      seasonYear: 2024,
+      seasonLabel: '2023-24',
+      name: 'CeeDee Lamb',
+      externalKey: '846|2024|NFL',
+    })
+    const enDashKey = catalogPassIdentityKeyFromOwnedCard({
+      passKind: 'player',
+      sport: 'NFL',
+      season: '2023–24',
+      name: 'CeeDee Lamb',
+      externalKey: '846|2024|NFL',
+    })
+    expect(hyphenKey).toBe(enDashKey)
+  })
 })

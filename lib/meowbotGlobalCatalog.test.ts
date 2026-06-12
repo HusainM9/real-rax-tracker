@@ -66,5 +66,39 @@ describe('normalizeGlobalMeowbotCatalog', () => {
     ])
     expect(normalized.skipped).toBe(0)
   })
+
+  it('drops NFL earnings outside the pass season window', () => {
+    const normalized = normalizeGlobalMeowbotCatalog({
+      players: [
+        {
+          entityId: 300,
+          season: 2025,
+          sport: 'nfl',
+          playerName: 'Derrick Henry',
+          rows: [
+            { day: '2024-09-08', earnings: 12 },
+            { day: '2023-11-26', earnings: 99 },
+            { day: '2025-01-19', earnings: 18 },
+          ],
+        },
+      ],
+    })
+
+    expect(normalized.dailyEarnings).toEqual([
+      {
+        externalKey: '300|2025|NFL',
+        claimDay: '2024-09-08',
+        baseRaxEarned: 12,
+        playerBoxScoreId: null,
+      },
+      {
+        externalKey: '300|2025|NFL',
+        claimDay: '2025-01-19',
+        baseRaxEarned: 18,
+        playerBoxScoreId: null,
+      },
+    ])
+    expect(normalized.skipped).toBe(1)
+  })
 })
 

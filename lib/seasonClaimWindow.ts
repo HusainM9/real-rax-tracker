@@ -1,0 +1,195 @@
+export type SeasonYearKind = 'end' | 'start' | 'calendar'
+
+const RAW_SPORT_MAP: Record<string, string> = {
+  nba: 'NBA',
+  wnba: 'WNBA',
+  nfl: 'NFL',
+  ncaaf: 'CFB',
+  cfb: 'CFB',
+  mlb: 'MLB',
+  nhl: 'NHL',
+  ncaam: 'CBB',
+  cbb: 'CBB',
+  golf: 'Golf',
+  fc: 'FC',
+  soccer: 'FC',
+  ufc: 'UFC',
+}
+
+export function normalizeSportForSeasonWindow(sport: string): string {
+  const trimmed = sport.trim()
+  if (!trimmed) return 'Other'
+  return RAW_SPORT_MAP[trimmed.toLowerCase()] ?? trimmed.toUpperCase()
+}
+
+/** How Real encodes `season_year` on a pass for each sport. */
+export function seasonYearKindForSport(sport: string): SeasonYearKind {
+  const normalized = normalizeSportForSeasonWindow(sport)
+  if (normalized === 'MLB' || normalized === 'WNBA' || normalized === 'GOLF' || normalized === 'UFC') {
+    return 'calendar'
+  }
+  if (normalized === 'CBB' || normalized === 'CFB') {
+    return 'start'
+  }
+  return 'end'
+}
+
+export type PassSeasonDateWindow = {
+  start: string
+  end: string
+}
+
+export type SplitSeasonLabel = {
+  startYear: number
+  endYear: number
+}
+
+/** Parse labels like `2024-25` into calendar start/end years. */
+export function parseSplitSeasonLabel(seasonLabel: string): SplitSeasonLabel | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(seasonLabel.trim())
+  if (!match) return null
+  const startYear = Number(match[1])
+  const endSuffix = Number(match[2])
+  if (!Number.isInteger(startYear) || startYear < 1000) return null
+  let endYear = Math.floor(startYear / 100) * 100 + endSuffix
+  if (endYear <= startYear) endYear += 100
+  return { startYear, endYear }
+}
+
+export function passSeasonDateWindowFromLabel(
+  seasonLabel: string,
+  sport: string,
+): PassSeasonDateWindow | null {
+  const split = parseSplitSeasonLabel(seasonLabel)
+  if (!split) return null
+
+  const normalized = normalizeSportForSeasonWindow(sport)
+  if (normalized === 'CBB' || normalized === 'CFB') {
+    return { start: `${split.startYear}-08-01`, end: `${split.endYear}-06-30` }
+  }
+  if (normalized === 'NFL') {
+    return { start: `${split.startYear}-08-01`, end: `${split.endYear}-04-30` }
+  }
+  if (normalized === 'NHL') {
+    return { start: `${split.startYear}-08-01`, end: `${split.endYear}-06-30` }
+  }
+  return { start: `${split.startYear}-08-01`, end: `${split.endYear}-07-31` }
+}
+
+/** Inclusive YYYY-MM-DD window for claim days that belong on this pass. */
+export function passSeasonDateWindow(seasonYear: number, sport: string): PassSeasonDateWindow | null {
+  if (!Number.isInteger(seasonYear) || seasonYear < 1000) return null
+
+  switch (seasonYearKindForSport(sport)) {
+    case 'calendar':
+      return { start: `${seasonYear}-01-01`, end: `${seasonYear}-12-31` }
+    case 'start':
+      return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-06-30` }
+    case 'end': {
+      const normalized = normalizeSportForSeasonWindow(sport)
+      if (normalized === 'NFL') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-04-30` }
+      if (normalized === 'NHL') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-06-30` }
+      return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-07-31` }
+    }
+  }
+}
+
+/** Prefer a parsed season label (`2024-25`) over season_year when both are present. */
+export function resolvePassSeasonDateWindow(
+  seasonYear: number,
+  sport: string,
+  seasonLabel?: string,
+): PassSeasonDateWindow | null {
+  if (seasonLabel?.trim()) {
+    const fromLabel = passSeasonDateWindowFromLabel(seasonLabel, sport)
+    if (fromLabel) return fromLabel
+  }
+  return passSeasonDateWindow(seasonYear, sport)
+}
+
+/** Canonical season_year for a pass — corrects common catalog mismatches like label `2024-25` with year `2024`. */
+export function resolveCatalogPassSeasonYear(
+  seasonYear: number,
+  seasonLabel: string,
+  sport: string,
+): number {
+  const split = parseSplitSeasonLabel(seasonLabel)
+  if (!split) return seasonYear
+  const canonical = seasonYearKindForSport(sport) === 'start' ? split.startYear : split.endYear
+  return canonical
+}
+
+/** Expected display label for a stored season_year (Real / Meowbot conventions). */
+export function expectedSeasonLabelFromYear(seasonYear: number, sport: string): string {
+  if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
+  const normalized = normalizeSportForSeasonWindow(sport)
+  if (normalized === 'MLB' || normalized === 'WNBA' || normalized === 'GOLF' || normalized === 'UFC') {
+    return String(seasonYear)
+  }
+  if (normalized === 'CBB' || normalized === 'CFB') {
+    return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
+  }
+  return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
+}
+
+export function buildCatalogExternalKey(
+  entityId: number,
+  seasonYear: number,
+  sport: string,
+): string {
+  return `${entityId}|${seasonYear}|${normalizeSportForSeasonWindow(sport)}`
+}
+
+export function canonicalCatalogPassMetadata(input: {
+  entityId: number
+  sport: string
+  seasonYear: number
+  seasonLabel: string
+}): {
+  seasonYear: number
+  seasonLabel: string
+  externalKey: string
+  aligned: boolean
+} {
+  const sport = normalizeSportForSeasonWindow(input.sport)
+  const seasonYear = resolveCatalogPassSeasonYear(input.seasonYear, input.seasonLabel, input.sport)
+  const seasonLabel = expectedSeasonLabelFromYear(seasonYear, input.sport)
+  const externalKey = buildCatalogExternalKey(input.entityId, seasonYear, sport)
+  const aligned =
+    input.seasonYear === seasonYear &&
+    input.seasonLabel.trim() === seasonLabel &&
+    buildCatalogExternalKey(input.entityId, input.seasonYear, sport) === externalKey
+  return { seasonYear, seasonLabel, externalKey, aligned }
+}
+
+export function isCatalogSeasonMetadataAligned(
+  seasonYear: number,
+  seasonLabel: string,
+  sport: string,
+): boolean {
+  return canonicalCatalogPassMetadata({ entityId: 0, sport, seasonYear, seasonLabel }).aligned &&
+    seasonYear === resolveCatalogPassSeasonYear(seasonYear, seasonLabel, sport)
+}
+
+export function claimDayDateValue(claimDay: string): string | null {
+  return /^(\d{4}-\d{2}-\d{2})/.exec(claimDay.trim())?.[1] ?? null
+}
+
+export function claimDayInPassSeason(
+  claimDay: string,
+  seasonYear: number,
+  sport: string,
+  seasonLabel?: string,
+): boolean {
+  const window = resolvePassSeasonDateWindow(seasonYear, sport, seasonLabel)
+  if (!window) return true
+  const date = claimDayDateValue(claimDay)
+  if (!date) return true
+  return date >= window.start && date <= window.end
+}
+
+export function filterDailyRowsToPassSeason<
+  T extends { claimDay: string },
+>(rows: T[], seasonYear: number, sport: string, seasonLabel?: string): T[] {
+  return rows.filter((row) => claimDayInPassSeason(row.claimDay, seasonYear, sport, seasonLabel))
+}

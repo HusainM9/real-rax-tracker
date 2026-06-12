@@ -3,6 +3,7 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
+import { expectedSeasonLabelFromYear, filterDailyRowsToPassSeason, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_Al7QsFGnNTlknoI8KVxjag_JUwrytZy'
@@ -159,6 +160,20 @@ function rawSportFromDisplay(sport: string): string {
 
 function externalKey(entityId: number, seasonYear: number, sport: string): string {
   return `${entityId}|${seasonYear}|${sport}`
+}
+
+/** Real end-year/start-year encoding for catalog import. season_year from discovery/admin is authoritative. */
+export function canonicalizeImportPass(pass: ImportPass): ImportPass {
+  const sport = normalizeSportForSeasonWindow(pass.sport)
+  const seasonYear = pass.seasonYear
+  const seasonLabel = expectedSeasonLabelFromYear(seasonYear, pass.sport)
+  return {
+    ...pass,
+    sport,
+    seasonYear,
+    seasonLabel,
+    externalKey: buildCatalogExternalKey(pass.entityId, seasonYear, sport),
+  }
 }
 
 function parsePair(pair: string, passKind: CatalogPassKind): ImportPass | null {
@@ -352,27 +367,26 @@ async function enrichPassMetadata(passes: ImportPass[]): Promise<ImportPass[]> {
 
   return passes.map((pass) => {
     const metadata = names.get(metadataKey(pass.entityId, pass.seasonYear, pass.sportRaw))
-    return metadata
-      ? { ...pass, name: metadata.name || pass.name, seasonLabel: metadata.seasonLabel || pass.seasonLabel }
-      : pass
+    return metadata ? { ...pass, name: metadata.name || pass.name } : pass
   })
 }
 
 async function fetchDailyRows(pass: ImportPass): Promise<CatalogDailyEarningInput[]> {
+  const canonicalPass = canonicalizeImportPass(pass)
   const data = (await invokeMeowbot(
     'market-data',
-    pass.passKind === 'team' ? 'get_team_daily_earnings' : 'get_daily_earnings',
+    canonicalPass.passKind === 'team' ? 'get_team_daily_earnings' : 'get_daily_earnings',
     {
-      entityId: pass.entityId,
-      season: pass.seasonYear,
-      sport: normalizeSport(pass.sportRaw),
-      seasonLabel: pass.seasonLabel,
+      entityId: canonicalPass.entityId,
+      season: canonicalPass.seasonYear,
+      sport: normalizeSport(canonicalPass.sportRaw),
+      seasonLabel: canonicalPass.seasonLabel,
     },
   )) as { rows?: Array<{ day?: string; earnings?: number; player_box_score_id?: number | null }> }
 
-  return (data.rows ?? [])
+  const rows = (data.rows ?? [])
     .map((row) => ({
-      externalKey: pass.externalKey,
+      externalKey: canonicalPass.externalKey,
       claimDay: /^(\d{4}-\d{2}-\d{2})/.exec(row.day ?? '')?.[1] ?? '',
       baseRaxEarned: Number(row.earnings),
       playerBoxScoreId: row.player_box_score_id ?? null,
@@ -383,6 +397,13 @@ async function fetchDailyRows(pass: ImportPass): Promise<CatalogDailyEarningInpu
         Number.isFinite(row.baseRaxEarned) &&
         row.baseRaxEarned > 0,
     )
+
+  return filterDailyRowsToPassSeason(
+    rows,
+    canonicalPass.seasonYear,
+    canonicalPass.sport,
+    canonicalPass.seasonLabel,
+  )
 }
 
 function passToCatalogInput(
@@ -425,7 +446,7 @@ export async function importSpecificMeowbotPassToCatalog(input: {
 }): Promise<MeowbotCatalogImportSummary> {
   const sportRaw = rawSportFromDisplay(input.sport)
   const sport = displaySport(sportRaw)
-  const pass: ImportPass = {
+  const pass: ImportPass = canonicalizeImportPass({
     entityId: input.entityId,
     seasonYear: input.seasonYear,
     sportRaw,
@@ -435,9 +456,9 @@ export async function importSpecificMeowbotPassToCatalog(input: {
     rarityLabel: input.rarityLabel?.trim() || undefined,
     passKind: input.passKind,
     externalKey: externalKey(input.entityId, input.seasonYear, sport),
-  }
+  })
   const [enriched] = await enrichPassMetadata([pass])
-  return importPassesToCatalogPayload([enriched ?? pass])
+  return importPassesToCatalogPayload([canonicalizeImportPass(enriched ?? pass)])
 }
 
 export async function importOtdTablePassesToCatalog(
@@ -455,14 +476,15 @@ async function importPassesToCatalogPayload(passes: ImportPass[]): Promise<Meowb
 
   await runWithConcurrency(passes, async (pass) => {
     try {
+      const canonicalPass = canonicalizeImportPass(pass)
       const rows = await fetchDailyRows(pass)
       if (rows.length === 0) {
         passesWithNoEarnings += 1
-        catalogPasses.set(pass.externalKey, passToCatalogInput(pass, false, 0))
+        catalogPasses.set(canonicalPass.externalKey, passToCatalogInput(canonicalPass, false, 0))
         return
       }
       const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
-      catalogPasses.set(pass.externalKey, passToCatalogInput(pass, true, totalBaseRax))
+      catalogPasses.set(canonicalPass.externalKey, passToCatalogInput(canonicalPass, true, totalBaseRax))
       dailyEarnings.push(...rows)
     } catch (error) {
       failures.push(`${pass.name}: ${error instanceof Error ? error.message : 'unknown error'}`)

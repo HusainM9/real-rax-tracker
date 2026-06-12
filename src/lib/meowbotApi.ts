@@ -1,4 +1,5 @@
 import type { Sport } from '../types/rax'
+import { claimDayInPassSeason } from '../../lib/seasonClaimWindow'
 import { seasonLabelFromPass } from './seasonLabel'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
@@ -351,12 +352,14 @@ export async function fetchDailyEarnings(
   )) as { rows?: MeowbotDailyRow[] }
 
   if (!Array.isArray(data.rows)) return []
-  return data.rows.filter(
-    (row) =>
-      typeof row.day === 'string' &&
-      Number.isFinite(Number(row.earnings)) &&
-      Number(row.earnings) > 0,
-  )
+  return data.rows.filter((row) => {
+    if (typeof row.day !== 'string' || !Number.isFinite(Number(row.earnings)) || Number(row.earnings) <= 0) {
+      return false
+    }
+    const claimDay = /^(\d{4}-\d{2}-\d{2})/.exec(row.day)?.[1]
+    if (!claimDay) return false
+    return claimDayInPassSeason(claimDay, params.season, params.sport, params.seasonLabel)
+  })
 }
 
 export async function runWithConcurrency<T, R>(

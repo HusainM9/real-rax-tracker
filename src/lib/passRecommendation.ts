@@ -2,10 +2,11 @@ import {
   catalogPassIdentityKey,
   catalogPassIdentityKeyFromOwnedCard,
   dedupeCatalogPassSummaries,
+  parseSeasonYearFromExternalKey,
 } from '../../lib/catalogPassIdentity'
 import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
-import { catalogProfileToJson } from './catalogProfileJson'
+import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
 import { analyzePotentialCard, type PotentialAnalysisResult } from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
@@ -126,6 +127,80 @@ export function isAtLeastIconic1Rarity(rarityLabel?: string): boolean {
   return normalizeRarityTier(rarityLabel ?? '') === 'Iconic'
 }
 
+type RecommendationPassLike =
+  | CatalogImportProfile
+  | CatalogSearchResult
+  | PassRecommendationRow
+
+function recommendationPassIdentityFields(
+  pass: RecommendationPassLike,
+): Parameters<typeof catalogPassIdentityKey>[0] {
+  if ('seasonLabel' in pass) {
+    return pass
+  }
+  return {
+    passKind: pass.passKind,
+    sport: pass.sport,
+    seasonYear: pass.seasonYear,
+    seasonLabel: pass.season,
+    name: pass.name,
+    externalKey: pass.externalKey,
+  }
+}
+
+export function catalogPassIdentityKeyFromAdjustment(
+  adjustment: RecommendationPassAdjustment,
+): string {
+  return catalogPassIdentityKey({
+    passKind: 'player',
+    sport: adjustment.sport,
+    seasonYear: parseSeasonYearFromExternalKey(adjustment.externalKey) ?? 0,
+    seasonLabel: adjustment.season,
+    name: adjustment.name,
+    externalKey: adjustment.externalKey,
+  })
+}
+
+export function passMatchesRecommendationAdjustment(
+  pass: RecommendationPassLike,
+  adjustment: RecommendationPassAdjustment,
+): boolean {
+  if (pass.externalKey === adjustment.externalKey) return true
+  return (
+    catalogPassIdentityKey(recommendationPassIdentityFields(pass)) ===
+    catalogPassIdentityKeyFromAdjustment(adjustment)
+  )
+}
+
+export function isPassInRecommendationAdjustments(
+  pass: RecommendationPassLike,
+  adjustments?: RecommendationPassAdjustment[],
+  options?: { mode?: RecommendationPassAdjustmentMode },
+): boolean {
+  if (!adjustments?.length) return false
+  for (const adjustment of adjustments) {
+    if (options?.mode && adjustment.mode !== options.mode) continue
+    if (passMatchesRecommendationAdjustment(pass, adjustment)) return true
+  }
+  return false
+}
+
+export function resolveProfileForRecommendationAdjustment(
+  adjustment: RecommendationPassAdjustment,
+  profilesByKey: Map<string, CatalogImportProfile>,
+): CatalogImportProfile | undefined {
+  const direct = profilesByKey.get(adjustment.externalKey)
+  if (direct?.rows.length) return direct
+
+  for (const profile of profilesByKey.values()) {
+    if (passMatchesRecommendationAdjustment(profile, adjustment) && profile.rows.length > 0) {
+      return profile
+    }
+  }
+
+  return direct
+}
+
 export function getRecommendationAdjustmentSets(adjustments?: RecommendationPassAdjustment[]): {
   assumeIconic1: Set<string>
   excluded: Set<string>
@@ -146,12 +221,16 @@ export function countAppliedBaselineAdjustments(
   profilesByKey: Map<string, CatalogImportProfile>,
   adjustments?: RecommendationPassAdjustment[],
 ): number {
-  const { assumeIconic1 } = getRecommendationAdjustmentSets(adjustments)
+  const appliedIdentities = new Set<string>()
   let count = 0
-  for (const externalKey of assumeIconic1) {
-    if ((profilesByKey.get(externalKey)?.rows.length ?? 0) > 0) {
-      count += 1
-    }
+  for (const adjustment of adjustments ?? []) {
+    if (adjustment.mode !== 'assume-iconic-1') continue
+    const profile = resolveProfileForRecommendationAdjustment(adjustment, profilesByKey)
+    if (!profile || profile.rows.length === 0) continue
+    const identity = catalogPassIdentityKey(profile)
+    if (appliedIdentities.has(identity)) continue
+    appliedIdentities.add(identity)
+    count += 1
   }
   return count
 }
@@ -161,11 +240,15 @@ export function applyRecommendationBaseline(
   profilesByKey: Map<string, CatalogImportProfile>,
   adjustments?: RecommendationPassAdjustment[],
 ): RaxTrackerData {
-  const { assumeIconic1 } = getRecommendationAdjustmentSets(adjustments)
+  const appliedIdentities = new Set<string>()
   let workingData = data
-  for (const externalKey of assumeIconic1) {
-    const profile = profilesByKey.get(externalKey)
+  for (const adjustment of adjustments ?? []) {
+    if (adjustment.mode !== 'assume-iconic-1') continue
+    const profile = resolveProfileForRecommendationAdjustment(adjustment, profilesByKey)
     if (!profile || profile.rows.length === 0) continue
+    const identity = catalogPassIdentityKey(profile)
+    if (appliedIdentities.has(identity)) continue
+    appliedIdentities.add(identity)
     workingData = addProfileToData(workingData, profile)
   }
   return workingData
@@ -176,11 +259,13 @@ export function shouldSkipRecommendationPass(
   pass: CatalogImportProfile | CatalogSearchResult,
   adjustments?: RecommendationPassAdjustment[],
 ): boolean {
-  const { assumeIconic1, excluded } = getRecommendationAdjustmentSets(adjustments)
-  if (excluded.has(pass.externalKey) || assumeIconic1.has(pass.externalKey)) return true
+  if (isPassInRecommendationAdjustments(pass, adjustments)) return true
 
   const identity = catalogPassIdentityKey(pass)
   for (const card of data.cards) {
+    if (pass.externalKey && card.externalKey === pass.externalKey) {
+      if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
+    }
     if (catalogPassIdentityKeyFromOwnedCard(card) !== identity) continue
     if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
   }
@@ -194,6 +279,9 @@ export function isRecommendationPassOwnedAtIconic(
 ): boolean {
   const identity = catalogPassIdentityKey(pass)
   for (const card of data.cards) {
+    if (pass.externalKey && card.externalKey === pass.externalKey) {
+      if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
+    }
     if (catalogPassIdentityKeyFromOwnedCard(card) !== identity) continue
     if (isAtLeastIconic1Rarity(card.rarityLabel)) return true
   }
@@ -215,7 +303,8 @@ export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
 
 export function catalogProfileToParsedRows(profile: CatalogImportProfile): ParsedRealAppToolsRow[] {
   const sport = sportFromCatalog(profile.sport)
-  const rawJson = catalogProfileToJson(profile)
+  const filteredRows = filteredCatalogProfileRows(profile)
+  const rawJson = catalogProfileToJson({ rows: filteredRows })
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
     passKind: profile.passKind,
@@ -281,10 +370,9 @@ export function filterRecommendationProfiles(
   let skippedAdjusted = 0
   const candidates: CatalogImportProfile[] = []
   const { items: dedupedProfiles } = dedupeCatalogPassSummaries(profiles)
-  const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
 
   for (const profile of dedupedProfiles) {
-    if (excluded.has(profile.externalKey) || assumeIconic1.has(profile.externalKey)) {
+    if (isPassInRecommendationAdjustments(profile, options?.adjustments)) {
       skippedAdjusted += 1
       continue
     }
@@ -326,8 +414,7 @@ export function selectSummariesForBulkFetch(
   for (const summary of dedupedSummaries) {
     if (summary.rowCount <= 0) continue
     if (!passSeasonIncluded(summary, options?.excludedSportSeasonKeys)) continue
-    const { excluded, assumeIconic1 } = getRecommendationAdjustmentSets(options?.adjustments)
-    if (excluded.has(summary.externalKey) || assumeIconic1.has(summary.externalKey)) {
+    if (isPassInRecommendationAdjustments(summary, options?.adjustments)) {
       skippedAdjusted += 1
       continue
     }

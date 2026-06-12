@@ -82,7 +82,7 @@ const otdPassRows = {
 const dailyRowsByEntity: Record<number, { rows: Array<{ day: string; earnings: number }> }> = {
   100: { rows: [{ day: '2025-08-22', earnings: 26 }] },
   200: { rows: [{ day: '2025-09-13', earnings: 14 }] },
-  300: { rows: [{ day: '2017-07-19', earnings: 101 }] },
+  300: { rows: [{ day: '2023-07-19', earnings: 101 }] },
   400: { rows: [{ day: '2025-10-12', earnings: 25 }] },
 }
 

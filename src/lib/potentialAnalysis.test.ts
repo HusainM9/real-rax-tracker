@@ -117,6 +117,30 @@ describe('analyzePotentialCard', () => {
     expect(totalNet).toBe((result?.claimableRax ?? 0) - (result?.displacedRax ?? 0))
   })
 
+  it('builds claim day breakdown that matches calendar ranks and net total', () => {
+    const result = analyzePotentialCard(
+      data,
+      { name: 'Prospect', sport: 'NBA', season: '2025-26' },
+      [{ claimDay: '2026-03-01', raxEarned: 28, note: '' }],
+    )
+
+    expect(result?.claimDayBreakdowns).toHaveLength(1)
+    const day = result!.claimDayBreakdowns[0]!
+    expect(day.claimDay).toBe('03-01')
+    expect(day.sports[0]?.sport).toBe('NBA')
+    expect(day.sports[0]?.ladder.map((entry) => entry.rankInSport)).toEqual([1, 2, 3, 4])
+
+    const potential = day.sports[0]?.ladder.find((entry) => entry.isPotential)
+    expect(potential?.statusAfter).toBe('guaranteed')
+    expect(potential?.rankInSport).toBe(2)
+
+    const displaced = day.sports[0]?.ladder.find((entry) => entry.raxDelta < 0)
+    expect(displaced?.statusAfter).toBe('overlap')
+
+    const totalFromDays = result!.claimDayBreakdowns.reduce((sum, row) => sum + row.dayNetDelta, 0)
+    expect(totalFromDays).toBe((result?.claimableRax ?? 0) - (result?.displacedRax ?? 0))
+  })
+
   it('buildPotentialMonthlyNet returns sorted months', () => {
     const monthly = buildPotentialMonthlyNet(
       [

@@ -1,4 +1,5 @@
 import { normalizeRealAppToolsPaste, parseRealAppToolsBaseRows } from './realAppToolsPaste'
+import { filterDailyRowsToPassSeason } from './seasonClaimWindow'
 import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
@@ -94,12 +95,21 @@ export function manualCatalogUpsertPayload(
   }
 
   const boxScores = boxScoresByClaimDay(input.rawJson)
-  const dailyEarnings: CatalogDailyEarningInput[] = parsed.rows.map((row) => ({
-    externalKey,
-    claimDay: row.claimDay,
-    baseRaxEarned: row.baseRaxEarned,
-    playerBoxScoreId: boxScores.get(row.claimDay) ?? null,
-  }))
+  const dailyEarnings = filterDailyRowsToPassSeason(
+    parsed.rows.map((row) => ({
+      externalKey,
+      claimDay: row.claimDay,
+      baseRaxEarned: row.baseRaxEarned,
+      playerBoxScoreId: boxScores.get(row.claimDay) ?? null,
+    })),
+    input.seasonYear,
+    sport,
+    input.seasonLabel,
+  )
+
+  if (dailyEarnings.length === 0) {
+    throw new Error('No daily earnings rows fall within this pass season window.')
+  }
 
   const totalBaseRax = dailyEarnings.reduce((sum, row) => sum + row.baseRaxEarned, 0)
   const pass: CatalogPassInput = {

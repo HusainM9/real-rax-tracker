@@ -1,4 +1,12 @@
 import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
+import {
+  canonicalCatalogPassMetadata,
+  claimDayInPassSeason,
+  filterDailyRowsToPassSeason,
+  isCatalogSeasonMetadataAligned,
+  normalizeSportForSeasonWindow,
+  resolveCatalogPassSeasonYear,
+} from './seasonClaimWindow'
 
 export type CatalogPassKind = 'player' | 'team'
 
@@ -32,6 +40,8 @@ export type CatalogSearchResult = CatalogPassInput & {
 }
 
 export type CatalogImportProfile = CatalogSearchResult & {
+  /** Daily rows in Supabase before season-window filtering. */
+  storedRowCount?: number
   rows: {
     claimDay: string
     baseRaxEarned: number
@@ -231,19 +241,58 @@ async function supabaseFetch<T>(
   throw new Error(lastError)
 }
 
-function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> {
+function normalizeCatalogPassInput(pass: CatalogPassInput): CatalogPassInput {
+  const canonical = canonicalCatalogPassMetadata({
+    entityId: pass.entityId,
+    sport: pass.sport,
+    seasonYear: pass.seasonYear,
+    seasonLabel: pass.seasonLabel,
+  })
   return {
-    external_key: input.externalKey,
-    entity_id: input.entityId,
-    pass_kind: input.passKind,
-    sport: input.sport,
-    season_year: input.seasonYear,
-    season_label: input.seasonLabel,
-    name: input.name,
-    rarity_label: input.rarityLabel ?? null,
-    has_earnings: input.hasEarnings !== false,
-    total_base_rax: Math.max(0, Number(input.totalBaseRax) || 0),
-    source_updated_at: input.sourceUpdatedAt ?? null,
+    ...pass,
+    sport: normalizeSportForSeasonWindow(pass.sport),
+    seasonYear: canonical.seasonYear,
+    seasonLabel: canonical.seasonLabel,
+    externalKey: canonical.externalKey,
+  }
+}
+
+function filterDailyEarningsForPasses(
+  passes: CatalogPassInput[],
+  rows: CatalogDailyEarningInput[],
+): CatalogDailyEarningInput[] {
+  const passByKey = new Map(passes.map((pass) => [pass.externalKey, pass]))
+  return rows.filter((row) => {
+    const pass = passByKey.get(row.externalKey)
+    if (!pass) return false
+    return claimDayInPassSeason(row.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)
+  })
+}
+
+/** Only replace stored earnings for passes that receive new daily rows in this import. */
+export function catalogDailyEarningsReplaceKeys(
+  passes: CatalogPassInput[],
+  dailyEarnings: CatalogDailyEarningInput[],
+): string[] {
+  const normalizedPasses = passes.map(normalizeCatalogPassInput)
+  const filteredEarnings = filterDailyEarningsForPasses(normalizedPasses, dailyEarnings)
+  return [...new Set(filteredEarnings.map((row) => row.externalKey))]
+}
+
+function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> {
+  const pass = normalizeCatalogPassInput(input)
+  return {
+    external_key: pass.externalKey,
+    entity_id: pass.entityId,
+    pass_kind: pass.passKind,
+    sport: pass.sport,
+    season_year: pass.seasonYear,
+    season_label: pass.seasonLabel,
+    name: pass.name,
+    rarity_label: pass.rarityLabel ?? null,
+    has_earnings: pass.hasEarnings !== false,
+    total_base_rax: Math.max(0, Number(pass.totalBaseRax) || 0),
+    source_updated_at: pass.sourceUpdatedAt ?? null,
   }
 }
 
@@ -263,12 +312,13 @@ function dailyRowCount(row: SupabasePassRow): number {
 
 function fromPassRow(row: SupabasePassRow): CatalogSearchResult {
   const rowCount = dailyRowCount(row)
+  const seasonYear = resolveCatalogPassSeasonYear(row.season_year, row.season_label, row.sport)
   return {
     externalKey: row.external_key,
     entityId: row.entity_id,
     passKind: row.pass_kind,
     sport: row.sport,
-    seasonYear: row.season_year,
+    seasonYear,
     seasonLabel: row.season_label,
     name: row.name,
     rarityLabel: row.rarity_label ?? undefined,
@@ -305,6 +355,20 @@ function normalizeSearchQuery(query: string): string {
 
 function quotedIn(values: string[]): string {
   return `in.(${values.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(',')})`
+}
+
+function uniqueExternalKeys(keys: string[]): string[] {
+  return [...new Set(keys.map((key) => key.trim()).filter(Boolean))]
+}
+
+/** PostgREST filters live in the URL; large in.(...) lists hit HTTP 414. */
+function forExternalKeyFilterBatches(keys: string[]): string[][] {
+  const uniqueKeys = uniqueExternalKeys(keys)
+  const batches: string[][] = []
+  for (let index = 0; index < uniqueKeys.length; index += BULK_PROFILE_KEYS_MAX_REQUEST) {
+    batches.push(uniqueKeys.slice(index, index + BULK_PROFILE_KEYS_MAX_REQUEST))
+  }
+  return batches
 }
 
 const DAILY_FETCH_PAGE_SIZE = 1000
@@ -373,9 +437,15 @@ async function fetchAllDailyRows(filter: URLSearchParams): Promise<SupabaseDaily
 }
 
 async function fetchDailyRowsByExternalKeys(keys: string[]): Promise<SupabaseDailyRow[]> {
-  if (keys.length === 0) return []
-  const filter = new URLSearchParams({ external_key: quotedIn(keys) })
-  return fetchAllDailyRows(filter)
+  const batches = forExternalKeyFilterBatches(keys)
+  if (batches.length === 0) return []
+
+  const rows: SupabaseDailyRow[] = []
+  for (const batch of batches) {
+    const filter = new URLSearchParams({ external_key: quotedIn(batch) })
+    rows.push(...(await fetchAllDailyRows(filter)))
+  }
+  return rows
 }
 
 export async function searchCatalogPasses(options: {
@@ -426,22 +496,30 @@ function buildImportProfileFromPass(
   pass: SupabasePassRow,
   dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const mappedRows = dailyRowsForPass
-    .map((row) => ({
-      claimDay: row.claim_day,
-      baseRaxEarned: Number(row.base_rax_earned),
-      playerBoxScoreId: row.player_box_score_id ?? undefined,
-    }))
-    .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
-  const { rows, totalBaseRax } = reconcileDailyRowsToPassTotal(
-    Number(pass.total_base_rax) || 0,
-    mappedRows,
-  )
+  const allMappedRows = dailyRowsForPass.map((row) => ({
+    claimDay: row.claim_day,
+    baseRaxEarned: Number(row.base_rax_earned),
+    playerBoxScoreId: row.player_box_score_id ?? undefined,
+  }))
+  const mappedRows = filterDailyRowsToPassSeason(
+    allMappedRows,
+    pass.season_year,
+    pass.sport,
+    pass.season_label,
+  ).sort((a, b) => a.claimDay.localeCompare(b.claimDay))
+  const filteredOutOfSeason = mappedRows.length < allMappedRows.length
+  const { rows, totalBaseRax } = filteredOutOfSeason
+    ? {
+        rows: mappedRows,
+        totalBaseRax: mappedRows.reduce((sum, row) => sum + row.baseRaxEarned, 0),
+      }
+    : reconcileDailyRowsToPassTotal(Number(pass.total_base_rax) || 0, mappedRows)
   const base = fromPassRow(pass)
   const latestClaimDay = rows.length > 0 ? rows[rows.length - 1]?.claimDay : undefined
   return {
     ...base,
     rowCount: rows.length,
+    storedRowCount: allMappedRows.length,
     totalBaseRax,
     latestClaimDay,
     rows,
@@ -664,6 +742,16 @@ export async function getCatalogImportProfile(
   }
 }
 
+async function deleteDailyEarningsByExternalKeys(keys: string[]): Promise<void> {
+  for (const batch of forExternalKeyFilterBatches(keys)) {
+    await supabaseFetch<void>('meowbot_daily_earnings', {
+      method: 'DELETE',
+      params: new URLSearchParams({ external_key: quotedIn(batch) }),
+      headers: supabaseHeaders('return=minimal'),
+    })
+  }
+}
+
 async function upsertCatalogPassBatch(passes: CatalogPassInput[]): Promise<number> {
   if (passes.length === 0) return 0
   await supabaseFetch<void>('meowbot_passes', {
@@ -691,13 +779,22 @@ export async function upsertCatalogSnapshot(
   dailyEarnings: CatalogDailyEarningInput[],
 ): Promise<{ passesUpserted: number; rowsUpserted: number }> {
   return withCatalogWriteLock(async () => {
+    const normalizedPasses = sortCatalogPasses(passes.map(normalizeCatalogPassInput))
+    const filteredEarnings = sortCatalogDailyEarnings(
+      filterDailyEarningsForPasses(normalizedPasses, dailyEarnings),
+    )
+    const replaceKeys = catalogDailyEarningsReplaceKeys(normalizedPasses, dailyEarnings)
+
     const passesUpserted = await upsertInBatches(
-      sortCatalogPasses(passes),
+      normalizedPasses,
       PASS_UPSERT_BATCH_SIZE,
       upsertCatalogPassBatch,
     )
+    if (replaceKeys.length > 0) {
+      await deleteDailyEarningsByExternalKeys(replaceKeys)
+    }
     const rowsUpserted = await upsertInBatches(
-      sortCatalogDailyEarnings(dailyEarnings),
+      filteredEarnings,
       DAILY_UPSERT_BATCH_SIZE,
       upsertCatalogDailyEarningBatch,
     )

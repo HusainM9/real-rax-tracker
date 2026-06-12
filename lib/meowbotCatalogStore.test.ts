@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest'
-import { reconcileDailyRowsToPassTotal } from './meowbotCatalogStore'
+import {
+  catalogDailyEarningsReplaceKeys,
+  reconcileDailyRowsToPassTotal,
+  type CatalogDailyEarningInput,
+  type CatalogPassInput,
+} from './meowbotCatalogStore'
+import { resolveCatalogPassSeasonYear } from './seasonClaimWindow'
+
+describe('resolveCatalogPassSeasonYear', () => {
+  it('maps NFL split-season labels to Real end-year season_year values', () => {
+    expect(resolveCatalogPassSeasonYear(2024, '2023-24', 'NFL')).toBe(2024)
+    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'NFL')).toBe(2025)
+  })
+})
+
+describe('catalogDailyEarningsReplaceKeys', () => {
+  const staffordPass: CatalogPassInput = {
+    externalKey: '100|2024|NFL',
+    entityId: 100,
+    passKind: 'player',
+    sport: 'NFL',
+    seasonYear: 2024,
+    seasonLabel: '2023-24',
+    name: 'Matthew Stafford',
+  }
+
+  it('does not mark passes for replacement when the import batch has no daily rows for them', () => {
+    const keys = catalogDailyEarningsReplaceKeys([staffordPass], [])
+    expect(keys).toEqual([])
+  })
+
+  it('marks only passes that receive filtered daily rows', () => {
+    const rows: CatalogDailyEarningInput[] = [
+      { externalKey: '100|2024|NFL', claimDay: '2023-09-10', baseRaxEarned: 21 },
+      { externalKey: '200|2025|NFL', claimDay: '2024-09-08', baseRaxEarned: 12 },
+    ]
+    const henryPass: CatalogPassInput = {
+      ...staffordPass,
+      externalKey: '200|2025|NFL',
+      entityId: 200,
+      seasonYear: 2025,
+      seasonLabel: '2024-25',
+      name: 'Derrick Henry',
+    }
+    expect(catalogDailyEarningsReplaceKeys([staffordPass, henryPass], rows)).toEqual([
+      '100|2024|NFL',
+      '200|2025|NFL',
+    ])
+  })
+})
 
 describe('reconcileDailyRowsToPassTotal', () => {
   it('keeps rows unchanged when daily sum matches stored total', () => {

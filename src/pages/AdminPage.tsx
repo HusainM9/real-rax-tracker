@@ -8,7 +8,7 @@ import {
   fetchCatalogImportProfile,
   type CatalogSearchResult,
 } from '../lib/catalogApi'
-import { catalogProfileToJson } from '../lib/catalogProfileJson'
+import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
 
 type EventsResponse = {
@@ -495,7 +495,7 @@ export default function AdminPage() {
         seasonLabel: profile.seasonLabel,
         rawJson:
           profile.rows.length > 0
-            ? catalogProfileToJson(profile)
+            ? catalogProfileToFilteredJson(profile)
             : '{\n  "earnings": []\n}',
       })
       setManualUpsertStatus(

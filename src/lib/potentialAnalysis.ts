@@ -2,7 +2,16 @@ import { CALENDAR_MONTH_NAMES } from './calendarView'
 import { monthIndexFromClaimDay } from './claimDayKey'
 import { computeClaimDayResults } from './claimOptimizer'
 import type { ParsedRealAppToolsRow } from './realAppToolsImport'
-import type { ClaimCandidate, PlayerCard, RaxTrackerData, Sport } from '../types/rax'
+import type {
+  ClaimCandidate,
+  ClaimDayResult,
+  ClaimStatus,
+  PlayerCard,
+  RaxTrackerData,
+  Sport,
+} from '../types/rax'
+
+export const POTENTIAL_CARD_ID = 'potential-card'
 
 export type PotentialProfile = {
   name: string
@@ -54,17 +63,222 @@ export type DisplacedCardSummary = {
 }
 
 export type PotentialAnalysisResult = {
-  candidates: Array<{ day: ReturnType<typeof computeClaimDayResults>[number]; candidate: ClaimCandidate }>
+  candidates: Array<{ day: ClaimDayResult; candidate: ClaimCandidate }>
   claimableRax: number
   overlapRax: number
   displacedExisting: Array<{
-    day: ReturnType<typeof computeClaimDayResults>[number]
+    day: ClaimDayResult
     candidate: ClaimCandidate
     previousStatus: Exclude<ClaimCandidate['status'], 'overlap'>
   }>
   displacedRax: number
   displacedByCard: DisplacedCardSummary[]
   monthlyNet: PotentialMonthlyNet[]
+  /** Per OTD day sport ladder — same rules as the Calendar page. */
+  claimDayBreakdowns: PotentialClaimDayBreakdown[]
+}
+
+export type PotentialClaimLadderEntry = {
+  cardId: string
+  name: string
+  season: string
+  isPotential: boolean
+  raxEarned: number
+  rankInSport: number
+  statusAfter: ClaimStatus
+  statusBefore: ClaimStatus | null
+  deltaLabel: string
+  raxDelta: number
+}
+
+export type PotentialSportDayBreakdown = {
+  sport: Sport
+  ladder: PotentialClaimLadderEntry[]
+  sportNetDelta: number
+}
+
+export type PotentialClaimDayBreakdown = {
+  claimDay: string
+  monthLabel: string
+  sports: PotentialSportDayBreakdown[]
+  proBonusBefore: { cardId: string; name: string; sport: Sport; raxEarned: number } | null
+  proBonusAfter: { cardId: string; name: string; sport: Sport; raxEarned: number } | null
+  dayNetDelta: number
+}
+
+function sportLadder(day: ClaimDayResult, sport: Sport): ClaimCandidate[] {
+  const block = day.sports.find((entry) => entry.sport === sport)
+  if (!block) return []
+  return [...block.guaranteed, ...block.overlaps]
+}
+
+function statusForCardOnDay(
+  day: ClaimDayResult | undefined,
+  sport: Sport,
+  cardId: string,
+): ClaimStatus | null {
+  if (!day) return null
+  return sportLadder(day, sport).find((candidate) => candidate.card.id === cardId)?.status ?? null
+}
+
+function formatStatusLabel(status: ClaimStatus): string {
+  switch (status) {
+    case 'guaranteed':
+      return 'guaranteed'
+    case 'pro-bonus':
+      return 'Pro bonus'
+    case 'overlap':
+      return 'overlap'
+  }
+}
+
+function describeClaimStatusChange(
+  isPotential: boolean,
+  statusBefore: ClaimStatus | null,
+  statusAfter: ClaimStatus,
+  rankInSport: number,
+  raxEarned: number,
+): { deltaLabel: string; raxDelta: number } {
+  if (isPotential) {
+    if (statusAfter === 'overlap') {
+      return {
+        deltaLabel: `New pass · #${rankInSport} overlap (no net)`,
+        raxDelta: 0,
+      }
+    }
+    return {
+      deltaLabel: `New pass · #${rankInSport} ${formatStatusLabel(statusAfter)} (+${Math.round(raxEarned).toLocaleString()} RAX)`,
+      raxDelta: raxEarned,
+    }
+  }
+
+  if (!statusBefore) {
+    return { deltaLabel: '—', raxDelta: 0 }
+  }
+
+  if (statusBefore === statusAfter) {
+    return {
+      deltaLabel: `Still #${rankInSport} ${formatStatusLabel(statusAfter)}`,
+      raxDelta: 0,
+    }
+  }
+
+  if (
+    (statusBefore === 'guaranteed' || statusBefore === 'pro-bonus') &&
+    statusAfter === 'overlap'
+  ) {
+    return {
+      deltaLabel: `Was ${formatStatusLabel(statusBefore)} → #${rankInSport} overlap (−${Math.round(raxEarned).toLocaleString()} RAX)`,
+      raxDelta: -raxEarned,
+    }
+  }
+
+  if (statusBefore === 'overlap' && statusAfter !== 'overlap') {
+    return {
+      deltaLabel: `Was overlap → #${rankInSport} ${formatStatusLabel(statusAfter)} (+${Math.round(raxEarned).toLocaleString()} RAX)`,
+      raxDelta: raxEarned,
+    }
+  }
+
+  return {
+    deltaLabel: `#${rankInSport} ${formatStatusLabel(statusBefore)} → ${formatStatusLabel(statusAfter)}`,
+    raxDelta: 0,
+  }
+}
+
+function proBonusSnapshot(
+  day: ClaimDayResult | undefined,
+): { cardId: string; name: string; sport: Sport; raxEarned: number } | null {
+  if (!day?.proBonus) return null
+  return {
+    cardId: day.proBonus.card.id,
+    name: day.proBonus.card.name,
+    sport: day.proBonus.card.sport,
+    raxEarned: day.proBonus.performance.raxEarned,
+  }
+}
+
+export function buildPotentialClaimDayBreakdowns(
+  baseResults: ClaimDayResult[],
+  withPotentialResults: ClaimDayResult[],
+  potentialCandidates: PotentialAnalysisResult['candidates'],
+  displacedExisting: PotentialAnalysisResult['displacedExisting'],
+): PotentialClaimDayBreakdown[] {
+  const baseByDay = new Map(baseResults.map((day) => [day.claimDay, day]))
+  const afterByDay = new Map(withPotentialResults.map((day) => [day.claimDay, day]))
+
+  const relevantDays = new Set<string>()
+  for (const { day } of potentialCandidates) {
+    relevantDays.add(day.claimDay)
+  }
+  for (const { day } of displacedExisting) {
+    relevantDays.add(day.claimDay)
+  }
+
+  const breakdowns: PotentialClaimDayBreakdown[] = []
+
+  for (const claimDay of [...relevantDays].sort((a, b) => a.localeCompare(b))) {
+    const afterDay = afterByDay.get(claimDay)
+    if (!afterDay) continue
+    const beforeDay = baseByDay.get(claimDay)
+
+    const sports = new Set<Sport>([
+      ...afterDay.sports.map((entry) => entry.sport),
+      ...(beforeDay?.sports.map((entry) => entry.sport) ?? []),
+    ])
+
+    const sportBreakdowns: PotentialSportDayBreakdown[] = []
+
+    for (const sport of [...sports].sort((a, b) => a.localeCompare(b))) {
+      const ladder = sportLadder(afterDay, sport)
+      if (ladder.length === 0) continue
+
+      const entries: PotentialClaimLadderEntry[] = ladder.map((candidate) => {
+        const isPotential = candidate.card.id === POTENTIAL_CARD_ID
+        const statusBefore = isPotential
+          ? null
+          : statusForCardOnDay(beforeDay, sport, candidate.card.id)
+        const { deltaLabel, raxDelta } = describeClaimStatusChange(
+          isPotential,
+          statusBefore,
+          candidate.status,
+          candidate.rankInSport,
+          candidate.performance.raxEarned,
+        )
+
+        return {
+          cardId: candidate.card.id,
+          name: candidate.card.name,
+          season: candidate.card.season,
+          isPotential,
+          raxEarned: candidate.performance.raxEarned,
+          rankInSport: candidate.rankInSport,
+          statusAfter: candidate.status,
+          statusBefore,
+          deltaLabel,
+          raxDelta,
+        }
+      })
+
+      sportBreakdowns.push({
+        sport,
+        ladder: entries,
+        sportNetDelta: entries.reduce((sum, entry) => sum + entry.raxDelta, 0),
+      })
+    }
+
+    const monthIdx = monthIndexFromClaimDay(claimDay)
+    breakdowns.push({
+      claimDay,
+      monthLabel: monthIdx >= 0 ? (CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other') : 'Other',
+      sports: sportBreakdowns,
+      proBonusBefore: proBonusSnapshot(beforeDay),
+      proBonusAfter: proBonusSnapshot(afterDay),
+      dayNetDelta: sportBreakdowns.reduce((sum, sport) => sum + sport.sportNetDelta, 0),
+    })
+  }
+
+  return breakdowns
 }
 
 export function summarizeDisplacedByCard(
@@ -142,7 +356,7 @@ export function analyzePotentialCard(
   if (rows.length === 0) return null
 
   const potentialCard: PlayerCard = {
-    id: 'potential-card',
+    id: POTENTIAL_CARD_ID,
     name: profile.name.trim() || 'Potential card',
     sport: profile.sport,
     season: profile.season.trim(),
@@ -171,6 +385,7 @@ export function analyzePotentialCard(
     ],
   }
   const baseClaimableByKey = buildClaimableByKey(data)
+  const baseResults = computeClaimDayResults(data)
   const results = computeClaimDayResults(potentialData)
   const potentialCandidates = results.flatMap((day) =>
     day.sports.flatMap((sport) =>
@@ -200,6 +415,13 @@ export function analyzePotentialCard(
     0,
   )
 
+  const claimDayBreakdowns = buildPotentialClaimDayBreakdowns(
+    baseResults,
+    results,
+    potentialCandidates,
+    displacedExisting,
+  )
+
   return {
     candidates: potentialCandidates,
     claimableRax: potentialCandidates
@@ -212,5 +434,6 @@ export function analyzePotentialCard(
     displacedRax,
     displacedByCard: summarizeDisplacedByCard(displacedExisting),
     monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting),
+    claimDayBreakdowns,
   }
 }

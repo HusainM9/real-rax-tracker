@@ -13,14 +13,20 @@ import {
   type CatalogSearchResult,
 } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
-import { catalogProfileToJson } from '../lib/catalogProfileJson'
+import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax } from '../lib/format'
-import { analyzePotentialCard, type PotentialAnalysisResult } from '../lib/potentialAnalysis'
+import {
+  analyzePotentialCard,
+  type PotentialAnalysisResult,
+  type PotentialClaimDayBreakdown,
+  type PotentialClaimLadderEntry,
+} from '../lib/potentialAnalysis'
 import {
   applyRecommendationBaseline,
   countAppliedBaselineAdjustments,
   greedyPickBundleAsync,
   isAtLeastIconic1Rarity,
+  isPassInRecommendationAdjustments,
   isRecommendationPassOwnedAtIconic,
   rankAndRecommendAsync,
   RECOMMENDATION_GREEDY_RERANK_CAP,
@@ -167,6 +173,193 @@ function CollapsibleAnalysisSection({
   )
 }
 
+function claimStatusLabel(status: string): string {
+  switch (status) {
+    case 'guaranteed':
+      return 'Guaranteed'
+    case 'pro-bonus':
+      return 'Pro bonus'
+    case 'overlap':
+      return 'Overlap'
+    default:
+      return status
+  }
+}
+
+function PotentialCandidateRow({ entry }: { entry: PotentialClaimLadderEntry }) {
+  return (
+    <div
+      className={`claim-row ${entry.statusAfter}${entry.isPotential ? ' is-potential' : ''}`}
+    >
+      <span>
+        <strong>{entry.name}</strong>
+        <small>
+          rank #{entry.rankInSport}
+          {entry.season ? ` · ${entry.season}` : ''}
+          {entry.isPotential ? ' · potential pass' : ''}
+          {entry.statusBefore && entry.statusBefore !== entry.statusAfter
+            ? ` · was ${claimStatusLabel(entry.statusBefore).toLowerCase()}`
+            : null}
+          {entry.raxDelta !== 0 ? (
+            <>
+              {' · '}
+              <span className={entry.raxDelta > 0 ? 'sale-positive' : 'sale-negative'}>
+                {formatSignedRax(displayRaxValue(entry.raxDelta))} net
+              </span>
+            </>
+          ) : null}
+        </small>
+      </span>
+      <b>{formatRax(displayRaxValue(entry.raxEarned))} RAX</b>
+    </div>
+  )
+}
+
+function PotentialOverlapSection({ overlaps }: { overlaps: PotentialClaimLadderEntry[] }) {
+  const [open, setOpen] = useState(false)
+  const overlapRax = overlaps.reduce((sum, entry) => sum + entry.raxEarned, 0)
+
+  if (overlaps.length === 0) {
+    return <p className="empty overlap-empty">No overlap in this sport.</p>
+  }
+
+  return (
+    <div className="overlap-section">
+      <button
+        type="button"
+        className="overlap-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="overlap-toggle-chevron" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span>
+          Overlaps ({overlaps.length}) · {formatRax(displayRaxValue(overlapRax))} RAX
+        </span>
+      </button>
+      {open ? (
+        <div className="overlap-list">
+          {overlaps.map((entry) => (
+            <PotentialCandidateRow entry={entry} key={`${entry.cardId}-${entry.rankInSport}`} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PotentialDayPanel({ day }: { day: PotentialClaimDayBreakdown }) {
+  return (
+    <article className="day-panel compact-day-panel">
+      <div className="section-heading">
+        <div>
+          <h3>
+            <Link to={`/calendar?monthDay=${day.claimDay}`}>{formatClaimDay(day.claimDay)}</Link>
+          </h3>
+          <p>
+            {formatSignedRax(displayRaxValue(day.dayNetDelta))} net · {day.monthLabel} · top 2 per
+            sport + Pro bonus
+          </p>
+        </div>
+        <span className="badge">{formatSignedRax(displayRaxValue(day.dayNetDelta))}</span>
+      </div>
+
+      {day.proBonusBefore?.cardId !== day.proBonusAfter?.cardId ? (
+        <p className="mini-heading potential-probonus-note">
+          Pro bonus:{' '}
+          {day.proBonusBefore
+            ? `${day.proBonusBefore.name} (${formatRax(displayRaxValue(day.proBonusBefore.raxEarned))})`
+            : 'none'}{' '}
+          →{' '}
+          {day.proBonusAfter
+            ? `${day.proBonusAfter.name} (${formatRax(displayRaxValue(day.proBonusAfter.raxEarned))})`
+            : 'none'}
+        </p>
+      ) : day.proBonusAfter ? (
+        <p className="mini-heading potential-probonus-note">
+          Pro: {day.proBonusAfter.name} · {formatRax(displayRaxValue(day.proBonusAfter.raxEarned))} RAX
+        </p>
+      ) : null}
+
+      <div className="sport-grid">
+        {day.sports.map((sportBlock) => {
+          const guaranteed = sportBlock.ladder.filter((entry) => entry.statusAfter === 'guaranteed')
+          const overlaps = sportBlock.ladder.filter((entry) => entry.statusAfter !== 'guaranteed')
+
+          return (
+            <section className="sport-card" key={`${day.claimDay}-${sportBlock.sport}`}>
+              <h3>
+                {sportBlock.sport}
+                {sportBlock.sportNetDelta !== 0 ? (
+                  <small className="sport-net-chip">
+                    {' '}
+                    · {formatSignedRax(displayRaxValue(sportBlock.sportNetDelta))}
+                  </small>
+                ) : null}
+              </h3>
+              <p className="mini-heading">Top two claims</p>
+              {guaranteed.length > 0 ? (
+                guaranteed.map((entry) => (
+                  <PotentialCandidateRow
+                    entry={entry}
+                    key={`${entry.cardId}-${entry.rankInSport}`}
+                  />
+                ))
+              ) : (
+                <p className="empty">No claims for this sport.</p>
+              )}
+              <PotentialOverlapSection overlaps={overlaps} />
+            </section>
+          )
+        })}
+      </div>
+    </article>
+  )
+}
+
+function PotentialClaimDayBreakdownPanel({
+  breakdowns,
+  netCollectionDelta,
+}: {
+  breakdowns: PotentialClaimDayBreakdown[]
+  netCollectionDelta: number
+}) {
+  if (breakdowns.length === 0) return null
+
+  const totalFromDays = breakdowns.reduce((sum, day) => sum + day.dayNetDelta, 0)
+  const defaultOpenDay = breakdowns.length === 1
+
+  return (
+    <CollapsibleAnalysisSection
+      defaultOpen
+      label={`Claim days (${breakdowns.length}) · ${formatSignedRax(displayRaxValue(totalFromDays))} net`}
+    >
+      <p className="import-hint">
+        Same layout as <Link to="/calendar">Calendar</Link> — top 2 per sport, overlaps collapsed.
+        Expand a day to see ranks and net changes.
+      </p>
+      <div className="potential-claim-days">
+        {breakdowns.map((day) => (
+          <CollapsibleAnalysisSection
+            defaultOpen={defaultOpenDay}
+            key={day.claimDay}
+            label={`${formatClaimDay(day.claimDay)} · ${formatSignedRax(displayRaxValue(day.dayNetDelta))} net · ${day.sports.map((sport) => sport.sport).join(', ')}`}
+          >
+            <PotentialDayPanel day={day} />
+          </CollapsibleAnalysisSection>
+        ))}
+      </div>
+      {totalFromDays !== netCollectionDelta ? (
+        <p className="import-hint">
+          Day totals sum to {formatSignedRax(displayRaxValue(totalFromDays))}; summary net is{' '}
+          {formatSignedRax(displayRaxValue(netCollectionDelta))}.
+        </p>
+      ) : null}
+    </CollapsibleAnalysisSection>
+  )
+}
+
 function PotentialAnalysisResults({
   analysis,
   previewAs,
@@ -204,6 +397,11 @@ function PotentialAnalysisResults({
         </div>
         <span className="badge">{formatSignedRax(displayRaxValue(netCollectionDelta))} net</span>
       </div>
+
+      <PotentialClaimDayBreakdownPanel
+        breakdowns={analysis.claimDayBreakdowns}
+        netCollectionDelta={netCollectionDelta}
+      />
 
       <div className="stats-grid potential-summary-grid">
         <article className="stat-card panel">
@@ -448,14 +646,17 @@ function applyCatalogProfileToForm(
       rawJson: '',
       previewAs: profile.rarityLabel ?? '',
     })
+    const storedRows = profile.storedRowCount ?? 0
     setters.setStatus(
-      `${profile.name} is in the catalog but has no daily RAX rows yet — paste earnings manually below.`,
+      storedRows > 0
+        ? `${profile.name} has ${storedRows} stored catalog row${storedRows === 1 ? '' : 's'} for season ${profile.seasonLabel || profile.seasonYear}, but none are valid after season filtering — re-import this pass in Admin (Meowbot or realapp JSON), or paste earnings manually below.`
+        : `${profile.name} is in the catalog but has no daily RAX rows yet — re-import in Admin or paste earnings manually below.`,
     )
     return false
   }
 
   const sport = sportFromCatalog(profile.sport)
-  const rawJson = catalogProfileToJson(profile)
+  const rawJson = catalogProfileToFilteredJson(profile)
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
     rarityLabel: profile.rarityLabel,
@@ -1020,16 +1221,11 @@ export default function PotentialPage() {
     })
   }, [ownedAdjustableCards, ownedQuickAddFilter])
 
-  const adjustmentExternalKeys = useMemo(
-    () => new Set(rankAdjustments.map((adjustment) => adjustment.externalKey)),
-    [rankAdjustments],
-  )
-
   const addRankAdjustment = (
     result: Pick<CatalogSearchResult, 'externalKey' | 'name' | 'sport' | 'seasonLabel' | 'seasonYear'>,
     mode: RecommendationPassAdjustmentMode = 'assume-iconic-1',
   ) => {
-    if (adjustmentExternalKeys.has(result.externalKey)) {
+    if (isPassInRecommendationAdjustments(result, rankAdjustments)) {
       setAdjustmentSearchStatus('That pass is already in the adjustment list.')
       return
     }
@@ -1067,9 +1263,21 @@ export default function PotentialPage() {
   const addableFilteredOwnedCards = useMemo(
     () =>
       filteredOwnedQuickAddCards.filter(
-        (card) => card.externalKey && !adjustmentExternalKeys.has(card.externalKey),
+        (card) =>
+          card.externalKey &&
+          !isPassInRecommendationAdjustments(
+            {
+              externalKey: card.externalKey,
+              name: card.name,
+              sport: card.sport,
+              season: card.season,
+              seasonYear: 0,
+              passKind: card.passKind ?? 'player',
+            },
+            rankAdjustments,
+          ),
       ),
-    [adjustmentExternalKeys, filteredOwnedQuickAddCards],
+    [filteredOwnedQuickAddCards, rankAdjustments],
   )
 
   const addAllFilteredOwnedAdjustments = () => {
@@ -1081,11 +1289,24 @@ export default function PotentialPage() {
     }
 
     setRankAdjustments((current) => {
-      const existingKeys = new Set(current.map((adjustment) => adjustment.externalKey))
       const next = [...current]
       for (const card of addableFilteredOwnedCards) {
-        if (!card.externalKey || existingKeys.has(card.externalKey)) continue
-        existingKeys.add(card.externalKey)
+        if (
+          !card.externalKey ||
+          isPassInRecommendationAdjustments(
+            {
+              externalKey: card.externalKey,
+              name: card.name,
+              sport: card.sport,
+              season: card.season,
+              seasonYear: 0,
+              passKind: card.passKind ?? 'player',
+            },
+            next,
+          )
+        ) {
+          continue
+        }
         next.push({
           externalKey: card.externalKey,
           name: card.name,
@@ -1180,12 +1401,27 @@ export default function PotentialPage() {
 
   const isBundlePickClaimable = (row: PassRecommendationRow) =>
     profileByKey.has(row.externalKey) &&
-    !adjustmentExternalKeys.has(row.externalKey) &&
+    !isPassInRecommendationAdjustments(row, rankAdjustments) &&
     !isRecommendationOwnedAtIconic(row.externalKey)
 
   const claimableBundlePicks = useMemo(
     () => recommendationBundle?.picks.filter(isBundlePickClaimable) ?? [],
-    [recommendationBundle, profileByKey, adjustmentExternalKeys, data.cards],
+    [recommendationBundle, profileByKey, rankAdjustments, data.cards],
+  )
+
+  const visibleBundlePicks = useMemo(
+    () =>
+      recommendationBundle?.picks.filter(
+        (row) =>
+          !isPassInRecommendationAdjustments(row, rankAdjustments) &&
+          !isRecommendationOwnedAtIconic(row.externalKey),
+      ) ?? [],
+    [recommendationBundle, rankAdjustments, data.cards, profileByKey],
+  )
+
+  const visibleBundleCombinedNet = useMemo(
+    () => visibleBundlePicks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
+    [visibleBundlePicks],
   )
 
   const selectedClaimableBundlePicks = useMemo(
@@ -1205,7 +1441,7 @@ export default function PotentialPage() {
           .map((row) => row.externalKey),
       ),
     )
-  }, [recommendationBundle, profileByKey, adjustmentExternalKeys, data.cards])
+  }, [recommendationBundle, profileByKey, rankAdjustments, data.cards])
 
   const toggleBundleClaimSelection = (externalKey: string) => {
     setBundleClaimSelection((current) => {
@@ -1235,8 +1471,9 @@ export default function PotentialPage() {
       return
     }
 
-    const existingKeys = new Set(rankAdjustments.map((adjustment) => adjustment.externalKey))
-    const additions = rows.filter((row) => !existingKeys.has(row.externalKey))
+    const additions = rows.filter(
+      (row) => !isPassInRecommendationAdjustments(row, rankAdjustments),
+    )
     if (additions.length === 0) {
       setRankStatus('Selected passes are already in your ranking baseline adjustments.')
       return
@@ -1432,11 +1669,7 @@ export default function PotentialPage() {
       setRankCatalogProfiles(profiles)
 
       const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
-      const baselineAdjustmentCount = rankAdjustments.filter(
-        (adjustment) =>
-          adjustment.mode === 'assume-iconic-1' &&
-          (profileMap.get(adjustment.externalKey)?.rows.length ?? 0) > 0,
-      ).length
+      const baselineAdjustmentCount = countAppliedBaselineAdjustments(profileMap, rankAdjustments)
 
       setRankStatus(`Analyzing top candidates at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`)
       const { ranked, bundle } = await rankAndRecommendAsync(baselineData, profiles, bundleSize, {
@@ -1602,7 +1835,17 @@ export default function PotentialPage() {
                 <div className="recommendation-adjustment-owned-list button-row wrap-row">
                   {filteredOwnedQuickAddCards.map((card) => {
                     const alreadyAdded = card.externalKey
-                      ? adjustmentExternalKeys.has(card.externalKey)
+                      ? isPassInRecommendationAdjustments(
+                          {
+                            externalKey: card.externalKey,
+                            name: card.name,
+                            sport: card.sport,
+                            season: card.season,
+                            seasonYear: 0,
+                            passKind: card.passKind ?? 'player',
+                          },
+                          rankAdjustments,
+                        )
                       : false
                     const missingCatalogLink = !card.externalKey
                     return (
@@ -1665,7 +1908,8 @@ export default function PotentialPage() {
                       className="button compact"
                       type="button"
                       disabled={
-                        catalogAnalysisBusy || adjustmentExternalKeys.has(result.externalKey)
+                        catalogAnalysisBusy ||
+                        isPassInRecommendationAdjustments(result, rankAdjustments)
                       }
                       onClick={() => addRankAdjustment(result, 'assume-iconic-1')}
                     >
@@ -1675,7 +1919,8 @@ export default function PotentialPage() {
                       className="button compact"
                       type="button"
                       disabled={
-                        catalogAnalysisBusy || adjustmentExternalKeys.has(result.externalKey)
+                        catalogAnalysisBusy ||
+                        isPassInRecommendationAdjustments(result, rankAdjustments)
                       }
                       onClick={() => addRankAdjustment(result, 'exclude')}
                     >
@@ -2074,10 +2319,10 @@ export default function PotentialPage() {
               <div>
                 <h3>Recommended bundle (greedy)</h3>
                 <p>
-                  {recommendationBundle.picks.length > 0 ? (
+                  {visibleBundlePicks.length > 0 ? (
                     <>
-                      Top {recommendationBundle.picks.length} pass
-                      {recommendationBundle.picks.length === 1 ? '' : 'es'} to add one at a time.
+                      Top {visibleBundlePicks.length} pass
+                      {visibleBundlePicks.length === 1 ? '' : 'es'} to add one at a time.
                       Claim assumes selected passes at {RECOMMENDATION_SIMULATED_RARITY} in your
                       ranking baseline — nothing is saved to your real collection. Each pick&apos;s
                       net is <strong>marginal</strong> (after prior picks in the bundle). After
@@ -2089,9 +2334,9 @@ export default function PotentialPage() {
                   )}
                 </p>
               </div>
-              {recommendationBundle.picks.length > 0 ? (
+              {visibleBundlePicks.length > 0 ? (
                 <span className="badge">
-                  {formatSignedRax(displayRaxValue(recommendationBundle.combinedNetDelta))} combined
+                  {formatSignedRax(displayRaxValue(visibleBundleCombinedNet))} combined
                   net
                 </span>
               ) : null}
@@ -2142,9 +2387,9 @@ export default function PotentialPage() {
               </div>
             ) : null}
             <div className="list">
-              {recommendationBundle.picks.map((row, index) => {
+              {visibleBundlePicks.map((row, index) => {
                 const alreadyOwned = isRecommendationOwnedAtIconic(row.externalKey)
-                const alreadyAssumed = adjustmentExternalKeys.has(row.externalKey)
+                const alreadyAssumed = isPassInRecommendationAdjustments(row, rankAdjustments)
                 const claimable = isBundlePickClaimable(row)
                 const selected = bundleClaimSelection.has(row.externalKey)
                 return (
