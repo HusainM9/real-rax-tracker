@@ -1,3 +1,4 @@
+import { BULK_PROFILE_KEYS_BATCH } from '../../lib/meowbotCatalogStore'
 import { readResponseJson } from './readResponseJson'
 
 export type CatalogPassKind = 'player' | 'team'
@@ -32,8 +33,7 @@ export type CatalogSeasonYearOption = {
   seasonLabel: string
 }
 
-/** Match server batch size — one API request should stay under Edge timeout limits. */
-export const CATALOG_BULK_KEYS_PER_REQUEST = 15
+export { BULK_PROFILE_KEYS_BATCH }
 
 export async function searchCatalog(query: string, signal?: AbortSignal): Promise<{
   results: CatalogSearchResult[]
@@ -137,7 +137,7 @@ export async function fetchCatalogImportProfilesBulk(
     return { profiles: [], storageConfigured: true }
   }
 
-  const BULK_KEYS_PER_REQUEST = CATALOG_BULK_KEYS_PER_REQUEST
+  const BULK_KEYS_PER_REQUEST = BULK_PROFILE_KEYS_BATCH
   const profiles: CatalogImportProfile[] = []
   let storageConfigured = true
 

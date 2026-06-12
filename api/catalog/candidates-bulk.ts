@@ -1,5 +1,5 @@
 import { requireAppSession } from '../admin/_helpers'
-import { fetchCatalogImportProfilesBulk } from '../../lib/meowbotCatalogStore'
+import { fetchCatalogImportProfilesBulk, BULK_PROFILE_KEYS_BATCH } from '../../lib/meowbotCatalogStore'
 
 export const config = {
   runtime: 'edge',
@@ -29,8 +29,13 @@ export default async function handler(request: Request): Promise<Response> {
       return Response.json({ error: 'externalKeys array is required' }, { status: 400 })
     }
 
-    if (externalKeys.length > 20) {
-      return Response.json({ error: 'externalKeys exceeds maximum of 20 per request' }, { status: 400 })
+    if (externalKeys.length > BULK_PROFILE_KEYS_BATCH) {
+      return Response.json(
+        {
+          error: `Too many passes in one request (max ${BULK_PROFILE_KEYS_BATCH}). Hard-refresh the page (Ctrl+Shift+R) if this persists after updating.`,
+        },
+        { status: 400 },
+      )
     }
 
     const result = await fetchCatalogImportProfilesBulk(externalKeys)
