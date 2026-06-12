@@ -1,16 +1,10 @@
 function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(bytes).toString('base64')
-  }
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary)
 }
 
 function base64ToBytes(base64: string): Uint8Array {
-  if (typeof Buffer !== 'undefined') {
-    return new Uint8Array(Buffer.from(base64, 'base64'))
-  }
   const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) {
@@ -19,32 +13,27 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
-function canUseWebCompression(): boolean {
-  return (
-    typeof CompressionStream !== 'undefined' &&
-    typeof Blob !== 'undefined' &&
-    typeof Blob.prototype.stream === 'function'
-  )
+function assertWebCompression(): void {
+  if (
+    typeof CompressionStream === 'undefined' ||
+    typeof DecompressionStream === 'undefined' ||
+    typeof Blob === 'undefined' ||
+    typeof Blob.prototype.stream !== 'function'
+  ) {
+    throw new Error('Gzip compression is unavailable in this runtime.')
+  }
 }
 
 async function gzipBytes(input: Uint8Array): Promise<Uint8Array> {
-  if (canUseWebCompression()) {
-    const stream = new Blob([input as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'))
-    return new Uint8Array(await new Response(stream).arrayBuffer())
-  }
-
-  const { gzipSync } = await import('node:zlib')
-  return gzipSync(input)
+  assertWebCompression()
+  const stream = new Blob([input as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
 async function gunzipBytes(input: Uint8Array): Promise<Uint8Array> {
-  if (canUseWebCompression()) {
-    const stream = new Blob([input as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'))
-    return new Uint8Array(await new Response(stream).arrayBuffer())
-  }
-
-  const { gunzipSync } = await import('node:zlib')
-  return gunzipSync(input)
+  assertWebCompression()
+  const stream = new Blob([input as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
 export async function gzipJsonToBase64(data: unknown): Promise<string> {
