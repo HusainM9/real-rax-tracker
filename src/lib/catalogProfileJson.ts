@@ -1,4 +1,3 @@
-import { filterDailyRowsToPassSeason } from '../../lib/seasonClaimWindow'
 import type { CatalogImportProfile } from './catalogApi'
 
 export type CatalogProfileRowsInput = Pick<
@@ -6,13 +5,9 @@ export type CatalogProfileRowsInput = Pick<
   'rows' | 'seasonYear' | 'seasonLabel' | 'sport'
 >
 
+/** Daily rows are season-scoped when written to the catalog — do not re-filter on read. */
 export function filteredCatalogProfileRows(profile: CatalogProfileRowsInput) {
-  return filterDailyRowsToPassSeason(
-    profile.rows,
-    profile.seasonYear,
-    profile.sport,
-    profile.seasonLabel,
-  )
+  return profile.rows
 }
 
 export function catalogProfileToJson(profile: Pick<CatalogImportProfile, 'rows'>): string {

@@ -3,7 +3,7 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
-import { filterDailyRowsToPassSeason, importSeasonLabelForCatalog, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
+import { importSeasonLabelForCatalog, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_Al7QsFGnNTlknoI8KVxjag_JUwrytZy'
@@ -404,12 +404,7 @@ async function fetchDailyRows(pass: ImportPass): Promise<CatalogDailyEarningInpu
         row.baseRaxEarned > 0,
     )
 
-  return filterDailyRowsToPassSeason(
-    rows,
-    canonicalPass.seasonYear,
-    canonicalPass.sport,
-    canonicalPass.seasonLabel,
-  )
+  return rows
 }
 
 function passToCatalogInput(

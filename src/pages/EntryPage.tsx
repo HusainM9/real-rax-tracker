@@ -503,8 +503,8 @@ export default function EntryPage() {
           : ''
       const raxNote =
         result.rowsImported > 0
-          ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from shared catalog (OTD adjusted from saved rarity)`
-          : ' · no RAX rows found in shared catalog yet'
+          ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from admin snapshot (OTD adjusted from saved rarity)`
+          : ' · no RAX rows found in admin snapshot yet'
       const issueNote =
         failedPlayerPasses.length > 0
           ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
@@ -632,10 +632,10 @@ export default function EntryPage() {
         </p>
         {importDisabled ? (
           <p className="import-status">
-            Automatic username import is closed. Search the{' '}
-            <a href="#catalog-search">shared catalog</a> above to import passes and RAX. If admin
-            cached your passes from earlier imports, use the snapshot button below. Existing imported
-            data stays in this browser — use Export JSON on Dashboard for backups.
+            Automatic username import is closed. If admin imported your username before shutdown,
+            use the snapshot button below for passes and RAX. Otherwise search the{' '}
+            <a href="#catalog-search">shared catalog</a> above. Existing imported data stays in
+            this browser — use Export JSON on Dashboard for backups.
           </p>
         ) : null}
         <div className="button-row">

@@ -1,5 +1,4 @@
 import type { Sport } from '../types/rax'
-import { claimDayInPassSeason } from '../../lib/seasonClaimWindow'
 import { seasonLabelFromPass } from './seasonLabel'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
@@ -356,9 +355,7 @@ export async function fetchDailyEarnings(
     if (typeof row.day !== 'string' || !Number.isFinite(Number(row.earnings)) || Number(row.earnings) <= 0) {
       return false
     }
-    const claimDay = /^(\d{4}-\d{2}-\d{2})/.exec(row.day)?.[1]
-    if (!claimDay) return false
-    return claimDayInPassSeason(claimDay, params.season, params.sport, params.seasonLabel)
+    return /^(\d{4}-\d{2}-\d{2})/.test(row.day)
   })
 }
 

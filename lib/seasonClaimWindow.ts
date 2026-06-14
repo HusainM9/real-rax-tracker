@@ -173,6 +173,41 @@ export function buildCatalogExternalKey(
   return `${entityId}|${seasonYear}|${normalizeSportForSeasonWindow(sport)}`
 }
 
+/** Try every likely catalog key — listing season_year often differs from stored canonical keys. */
+export function catalogExternalKeyCandidates(input: {
+  entityId: number
+  sport: string
+  seasonYear: number
+  seasonLabel?: string
+}): string[] {
+  const sport = normalizeSportForSeasonWindow(input.sport)
+  const seasonLabel = input.seasonLabel?.replace(/\u2013|\u2014/g, '-').trim() ?? ''
+  const keys = new Set<string>()
+
+  keys.add(buildCatalogExternalKey(input.entityId, input.seasonYear, sport))
+
+  if (seasonLabel) {
+    keys.add(
+      buildCatalogExternalKey(
+        input.entityId,
+        resolveCatalogPassSeasonYear(input.seasonYear, seasonLabel, sport),
+        sport,
+      ),
+    )
+  }
+
+  const catalogLabel = importSeasonLabelForCatalog(sport, input.seasonYear, seasonLabel)
+  keys.add(
+    buildCatalogExternalKey(
+      input.entityId,
+      resolveCatalogPassSeasonYear(input.seasonYear, catalogLabel, sport),
+      sport,
+    ),
+  )
+
+  return [...keys]
+}
+
 export function canonicalCatalogPassMetadata(input: {
   entityId: number
   sport: string

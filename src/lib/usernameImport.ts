@@ -1,4 +1,4 @@
-import { importCatalogProfileIntoData, sportFromCatalog } from './catalogImport'
+import { importCatalogProfileIntoData } from './catalogImport'
 import { fetchCatalogImportProfile, type CatalogImportProfile } from './catalogApi'
 import { createId } from './id'
 import {
@@ -8,12 +8,10 @@ import {
   fetchDailyEarnings,
   fetchUserOtdPassMetadata,
   mapMeowbotSport,
-  normalizeMeowbotSport,
   resolveUserPasses,
   runWithConcurrency,
   type MeowbotPlayerPass,
 } from './meowbotApi'
-import { computeOtdRax } from './otdRax'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
 import { passMetadataKey, seasonLabelFromPass, isCalendarYearSport } from './seasonLabel'
@@ -146,6 +144,11 @@ type OwnershipSnapshotPass = {
   rarityLabel?: string
   externalKey: string
   passKind: 'player' | 'team'
+  earnings?: Array<{
+    claimDay: string
+    baseRaxEarned: number
+    playerBoxScoreId?: number | null
+  }>
 }
 
 type OwnershipSnapshotPayload = {
@@ -297,39 +300,140 @@ async function attachCatalogEarningsForPasses(
   }
 }
 
-function catalogPerformanceDrafts(
+function snapshotEarningsToDrafts(
   cardId: string,
-  profile: CatalogImportProfile,
+  pass: MeowbotPlayerPass,
+  sport: Sport,
+  earnings: NonNullable<OwnershipSnapshotPass['earnings']>,
 ): PerformanceDraft[] {
-  const sport = sportFromCatalog(profile.sport)
-  return profile.rows.map((row) => ({
+  const parsed = parseRealAppToolsDailyRows(
+    earnings.map((row) => ({
+      day: row.claimDay,
+      earnings: row.baseRaxEarned,
+      player_box_score_id: row.playerBoxScoreId ?? undefined,
+    })),
+    {
+      sport,
+      rarityLabel: pass.rarityLabel,
+      applyOtdMultiplier: true,
+      passKind: pass.passKind,
+    },
+  )
+
+  return parsed.rows.map((entry) => ({
     cardId,
-    claimDay: row.claimDay,
-    raxEarned: computeOtdRax(row.baseRaxEarned, sport, profile.rarityLabel, profile.passKind),
-    baseRaxEarned: row.baseRaxEarned,
-    note: `Meowbot catalog source ${row.claimDay}${
-      row.playerBoxScoreId ? ` · box score ${row.playerBoxScoreId}` : ''
-    } · OTD adjusted`,
+    claimDay: entry.claimDay,
+    raxEarned: entry.raxEarned,
+    baseRaxEarned: entry.baseRaxEarned,
+    note: entry.note,
   }))
 }
 
-async function loadCatalogPerformanceDrafts(
-  externalKey: string,
+async function attachAdminSnapshotEarnings(
+  current: RaxTrackerData,
+  passes: MeowbotPlayerPass[],
+  earningsByExternalKey: Map<string, NonNullable<OwnershipSnapshotPass['earnings']>>,
+  cardIdByExternalKey: Map<string, string>,
+  options?: Pick<UsernameImportOptions, 'signal' | 'onProgress'>,
+): Promise<{
+  data: RaxTrackerData
+  rowsImported: number
+  rowsUpdated: number
+  passesWithNoEarnings: PassWithNoEarnings[]
+  passFetchErrors: PassFetchError[]
+  errors: string[]
+  catalogConfigured: boolean
+}> {
+  const passesNeedingCatalog: MeowbotPlayerPass[] = []
+  const performanceDrafts: PerformanceDraft[] = []
+  const cardIdsToReplace = new Set<string>()
+
+  for (const pass of passes) {
+    const sport = mapMeowbotSport(pass.sportRaw) as Sport
+    const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
+    const cardId = cardIdByExternalKey.get(externalKey)
+    if (!cardId) continue
+
+    const earnings = earningsByExternalKey.get(externalKey)
+    if (earnings && earnings.length > 0) {
+      cardIdsToReplace.add(cardId)
+      performanceDrafts.push(...snapshotEarningsToDrafts(cardId, pass, sport, earnings))
+    } else {
+      passesNeedingCatalog.push(pass)
+    }
+  }
+
+  const merged = mergePerformances(current, performanceDrafts, cardIdsToReplace)
+  let rowsImported = merged.rowsImported
+  let rowsUpdated = 0
+
+  if (passesNeedingCatalog.length === 0) {
+    return {
+      data: merged.data,
+      rowsImported,
+      rowsUpdated,
+      passesWithNoEarnings: [],
+      passFetchErrors: [],
+      errors: [],
+      catalogConfigured: true,
+    }
+  }
+
+  const catalogAttach = await attachCatalogEarningsForPasses(
+    merged.data,
+    passesNeedingCatalog,
+    options,
+  )
+
+  return {
+    data: catalogAttach.data,
+    rowsImported: rowsImported + catalogAttach.rowsImported,
+    rowsUpdated: catalogAttach.rowsUpdated,
+    passesWithNoEarnings: catalogAttach.passesWithNoEarnings,
+    passFetchErrors: catalogAttach.passFetchErrors,
+    errors: catalogAttach.errors,
+    catalogConfigured: catalogAttach.catalogConfigured,
+  }
+}
+
+async function loadMeowbotPerformanceDrafts(
   pass: MeowbotPlayerPass,
-  passName: string,
+  sport: Sport,
+  seasonLabel: string,
   cardId: string,
   signal?: AbortSignal,
-): Promise<PerformanceDraft[]> {
-  const { profile, storageConfigured } = await fetchCatalogImportProfile(externalKey, signal)
-  if (!storageConfigured || !profile || profile.rows.length === 0) return []
-
-  const enrichedProfile: CatalogImportProfile = {
-    ...profile,
-    name: profile.name.trim() || passName,
-    rarityLabel: pass.rarityLabel ?? profile.rarityLabel,
-    passKind: pass.passKind,
+): Promise<{ drafts: PerformanceDraft[]; skipped: number }> {
+  const dailyRows = await fetchDailyEarnings(
+    {
+      entityId: pass.entityId,
+      season: pass.season,
+      sport: pass.sportRaw,
+      seasonLabel,
+      passKind: pass.passKind,
+    },
+    signal,
+  )
+  if (dailyRows.length === 0) {
+    return { drafts: [], skipped: 0 }
   }
-  return catalogPerformanceDrafts(cardId, enrichedProfile)
+
+  const parsed = parseRealAppToolsDailyRows(dailyRows, {
+    sport,
+    rarityLabel: pass.rarityLabel,
+    applyOtdMultiplier: true,
+    passKind: pass.passKind,
+  })
+
+  return {
+    drafts: parsed.rows.map((entry) => ({
+      cardId,
+      claimDay: entry.claimDay,
+      raxEarned: entry.raxEarned,
+      baseRaxEarned: entry.baseRaxEarned,
+      note: entry.note,
+    })),
+    skipped: parsed.skipped,
+  }
 }
 
 function uniquePasses(passes: MeowbotPlayerPass[]): MeowbotPlayerPass[] {
@@ -649,73 +753,29 @@ export async function importFromUsername(
       const cardId = cardIdByExternalKey.get(externalKey)
 
       try {
-        const dailyRows = await fetchDailyEarnings(
-          {
-            entityId: pass.entityId,
-            season: pass.season,
-            sport: pass.sportRaw,
-            seasonLabel,
-            passKind: pass.passKind,
-          },
+        if (!cardId) return
+
+        const { drafts, skipped } = await loadMeowbotPerformanceDrafts(
+          pass,
+          sport,
+          seasonLabel,
+          cardId,
           options?.signal,
         )
-        if (cardId && dailyRows.length > 0) {
-          const parsed = parseRealAppToolsDailyRows(dailyRows, {
-            sport: normalizeMeowbotSport(pass.sportRaw),
-            rarityLabel: pass.rarityLabel,
-            applyOtdMultiplier: true,
-            passKind: pass.passKind,
-          })
-          fetchSkipped += parsed.skipped
-          for (const entry of parsed.rows) {
-            performanceDrafts.push({
-              cardId,
-              claimDay: entry.claimDay,
-              raxEarned: entry.raxEarned,
-              baseRaxEarned: entry.baseRaxEarned,
-              note: entry.note,
-            })
-          }
-        } else if (cardId && dailyRows.length === 0) {
-          const catalogDrafts = await loadCatalogPerformanceDrafts(
-            externalKey,
-            pass,
-            passName,
-            cardId,
-            options?.signal,
+        fetchSkipped += skipped
+        if (drafts.length > 0) {
+          performanceDrafts.push(...drafts)
+        } else {
+          passesWithNoEarnings.push(passMeta)
+          errors.push(
+            `${passName}: no daily earnings from Meowbot — add RAX manually on the Entry page (Add card & earnings).`,
           )
-          if (catalogDrafts.length > 0) {
-            performanceDrafts.push(...catalogDrafts)
-          } else {
-            passesWithNoEarnings.push(passMeta)
-            errors.push(
-              `${passName}: no daily earnings from Meowbot or shared catalog — add RAX manually on the Entry page (Add card & earnings).`,
-            )
-          }
         }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Could not fetch daily earnings.'
-        if (cardId) {
-          try {
-            const catalogDrafts = await loadCatalogPerformanceDrafts(
-              externalKey,
-              pass,
-              passName,
-              cardId,
-              options?.signal,
-            )
-            if (catalogDrafts.length > 0) {
-              performanceDrafts.push(...catalogDrafts)
-            } else {
-              passFetchErrors.push({ ...passMeta, message })
-              errors.push(`${passName}: ${message}`)
-            }
-          } catch {
-            passFetchErrors.push({ ...passMeta, message })
-            errors.push(`${passName}: ${message}`)
-          }
-        }
+        passFetchErrors.push({ ...passMeta, message })
+        errors.push(`${passName}: ${message}`)
       } finally {
         completed += 1
         reportProgress?.({
@@ -815,10 +875,22 @@ export async function importFromAdminOwnership(
       passKind: pass.passKind,
     }
   })
-  const { data: nextData, cardsCreated, cardsUpdated } = upsertCards(current, cardDrafts)
+  const { data: nextData, cardsCreated, cardsUpdated, cardIdByExternalKey } = upsertCards(current, cardDrafts)
 
-  const catalogAttach = await attachCatalogEarningsForPasses(nextData, selectedPasses, options)
-  const finalData = catalogAttach.data
+  const earningsByExternalKey = new Map(
+    rawPasses.flatMap((pass) =>
+      pass.earnings && pass.earnings.length > 0 ? [[pass.externalKey, pass.earnings] as const] : [],
+    ),
+  )
+
+  const earningsAttach = await attachAdminSnapshotEarnings(
+    nextData,
+    selectedPasses,
+    earningsByExternalKey,
+    cardIdByExternalKey,
+    options,
+  )
+  const finalData = earningsAttach.data
 
   reportProgress?.({
     phase: 'fetching',
@@ -849,16 +921,16 @@ export async function importFromAdminOwnership(
     result: {
       cardsCreated,
       cardsUpdated,
-      rowsImported: catalogAttach.rowsImported,
+      rowsImported: earningsAttach.rowsImported,
       skipped: 0,
       passesFetched: selectedPasses.length,
       passesSkipped: allPasses.length - selectedPasses.length,
       cachedPlayerPasses: 0,
       ownedPasses,
       cachedProfiles: [],
-      errors: catalogAttach.errors,
-      passesWithNoEarnings: catalogAttach.passesWithNoEarnings,
-      passFetchErrors: catalogAttach.passFetchErrors,
+      errors: earningsAttach.errors,
+      passesWithNoEarnings: earningsAttach.passesWithNoEarnings,
+      passFetchErrors: earningsAttach.passFetchErrors,
     },
   }
 }

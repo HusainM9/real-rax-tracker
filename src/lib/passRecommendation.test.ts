@@ -103,7 +103,7 @@ describe('passRecommendation', () => {
     savedCardProfiles: [],
   }
 
-  it('drops out-of-season NFL rows before ranking catalog passes', () => {
+  it('uses catalog daily rows as stored without re-filtering by claim day', () => {
     const profile: CatalogImportProfile = {
       ...catalogProfile('300|2025|NFL', 'Derrick Henry', [
         { claimDay: '2024-09-08', baseRaxEarned: 12 },
@@ -114,7 +114,7 @@ describe('passRecommendation', () => {
       seasonLabel: '2024-25',
     }
     const rows = catalogProfileToParsedRows(profile)
-    expect(rows.map((row) => row.claimDay)).toEqual(['2024-09-08'])
+    expect(rows.map((row) => row.claimDay)).toEqual(['2024-09-08', '2023-09-10'])
   })
 
   it('netClaimableDelta matches analyzePotentialCard output', () => {

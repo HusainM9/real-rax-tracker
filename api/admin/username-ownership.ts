@@ -52,11 +52,16 @@ export default async function handler(request: Request): Promise<Response> {
   const usernamesSaved: Array<{
     username: string
     passesSaved: number
+    rowsSaved: number
+    passesWithNoEarnings: number
+    failures: string[]
     error?: string
   }> = []
   const totals = {
     usernames: 0,
     passesSaved: 0,
+    rowsSaved: 0,
+    passesWithNoEarnings: 0,
     failures: 0,
   }
 
@@ -66,13 +71,22 @@ export default async function handler(request: Request): Promise<Response> {
       usernamesSaved.push({
         username: result.realUsername,
         passesSaved: result.passesSaved,
+        rowsSaved: result.rowsSaved,
+        passesWithNoEarnings: result.passesWithNoEarnings,
+        failures: result.failures,
       })
       totals.usernames += 1
       totals.passesSaved += result.passesSaved
+      totals.rowsSaved += result.rowsSaved
+      totals.passesWithNoEarnings += result.passesWithNoEarnings
+      totals.failures += result.failures.length
     } catch (error) {
       usernamesSaved.push({
         username,
         passesSaved: 0,
+        rowsSaved: 0,
+        passesWithNoEarnings: 0,
+        failures: [],
         error: error instanceof Error ? error.message : 'Ownership import failed',
       })
       totals.failures += 1

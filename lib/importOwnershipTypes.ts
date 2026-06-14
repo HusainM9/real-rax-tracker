@@ -1,3 +1,9 @@
+export type ImportOwnershipEarningRow = {
+  claimDay: string
+  baseRaxEarned: number
+  playerBoxScoreId?: number | null
+}
+
 export type ImportOwnershipPass = {
   name: string
   sport: string
@@ -7,6 +13,7 @@ export type ImportOwnershipPass = {
   rarityLabel?: string
   externalKey: string
   passKind: 'player' | 'team'
+  earnings?: ImportOwnershipEarningRow[]
 }
 
 export type ImportOwnershipSnapshot = {
@@ -21,6 +28,8 @@ export type StoredImportOwnershipSnapshot = ImportOwnershipSnapshot & {
 }
 
 const MAX_PASSES = 2500
+const MAX_EARNINGS_PER_PASS = 400
+const MAX_TOTAL_EARNINGS = 50000
 
 const SPORTS = new Set([
   'NBA',
@@ -91,5 +100,45 @@ function validateImportOwnershipPass(input: unknown): ImportOwnershipPass | null
       typeof record.rarityLabel === 'string' ? record.rarityLabel.trim().slice(0, 80) : undefined,
     externalKey,
     passKind,
+    earnings: validateImportOwnershipEarnings(record.earnings),
   }
+}
+
+function validateImportOwnershipEarnings(input: unknown): ImportOwnershipEarningRow[] | undefined {
+  if (!Array.isArray(input) || input.length === 0) return undefined
+
+  const rows: ImportOwnershipEarningRow[] = []
+  for (const item of input.slice(0, MAX_EARNINGS_PER_PASS)) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const claimDay =
+      typeof record.claimDay === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(record.claimDay)?.[1] ?? '' : ''
+    const baseRaxEarned = Number(record.baseRaxEarned)
+    if (!claimDay || !Number.isFinite(baseRaxEarned) || baseRaxEarned <= 0) continue
+    rows.push({
+      claimDay,
+      baseRaxEarned,
+      playerBoxScoreId:
+        record.playerBoxScoreId === null || record.playerBoxScoreId === undefined
+          ? undefined
+          : Number.isFinite(Number(record.playerBoxScoreId))
+            ? Number(record.playerBoxScoreId)
+            : undefined,
+    })
+  }
+
+  return rows.length > 0 ? rows : undefined
+}
+
+export function trimOwnershipSnapshotEarnings(snapshot: ImportOwnershipSnapshot): ImportOwnershipSnapshot {
+  let totalRows = 0
+  const passes = snapshot.passes.map((pass) => {
+    if (!pass.earnings || pass.earnings.length === 0) return pass
+    const remaining = MAX_TOTAL_EARNINGS - totalRows
+    if (remaining <= 0) return { ...pass, earnings: undefined }
+    const earnings = pass.earnings.slice(0, Math.min(MAX_EARNINGS_PER_PASS, remaining))
+    totalRows += earnings.length
+    return { ...pass, earnings }
+  })
+  return { ...snapshot, passes }
 }

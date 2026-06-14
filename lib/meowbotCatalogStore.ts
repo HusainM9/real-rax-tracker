@@ -1,8 +1,6 @@
 import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
 import {
   canonicalCatalogPassMetadata,
-  claimDayInPassSeason,
-  filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
   resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'
@@ -260,12 +258,8 @@ function filterDailyEarningsForPasses(
   passes: CatalogPassInput[],
   rows: CatalogDailyEarningInput[],
 ): CatalogDailyEarningInput[] {
-  const passByKey = new Map(passes.map((pass) => [pass.externalKey, pass]))
-  return rows.filter((row) => {
-    const pass = passByKey.get(row.externalKey)
-    if (!pass) return false
-    return claimDayInPassSeason(row.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)
-  })
+  const passByKey = new Set(passes.map((pass) => pass.externalKey))
+  return rows.filter((row) => passByKey.has(row.externalKey))
 }
 
 /** Only replace stored earnings for passes that receive new daily rows in this import. */
@@ -495,30 +489,20 @@ function buildImportProfileFromPass(
   pass: SupabasePassRow,
   dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const allMappedRows = dailyRowsForPass.map((row) => ({
-    claimDay: row.claim_day,
-    baseRaxEarned: Number(row.base_rax_earned),
-    playerBoxScoreId: row.player_box_score_id ?? undefined,
-  }))
-  const mappedRows = filterDailyRowsToPassSeason(
-    allMappedRows,
-    pass.season_year,
-    pass.sport,
-    pass.season_label,
-  ).sort((a, b) => a.claimDay.localeCompare(b.claimDay))
-  const filteredOutOfSeason = mappedRows.length < allMappedRows.length
-  const { rows, totalBaseRax } = filteredOutOfSeason
-    ? {
-        rows: mappedRows,
-        totalBaseRax: mappedRows.reduce((sum, row) => sum + row.baseRaxEarned, 0),
-      }
-    : reconcileDailyRowsToPassTotal(Number(pass.total_base_rax) || 0, mappedRows)
+  const rows = dailyRowsForPass
+    .map((row) => ({
+      claimDay: row.claim_day,
+      baseRaxEarned: Number(row.base_rax_earned),
+      playerBoxScoreId: row.player_box_score_id ?? undefined,
+    }))
+    .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
+  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
   const base = fromPassRow(pass)
   const latestClaimDay = rows.length > 0 ? rows[rows.length - 1]?.claimDay : undefined
   return {
     ...base,
     rowCount: rows.length,
-    storedRowCount: allMappedRows.length,
+    storedRowCount: rows.length,
     totalBaseRax,
     latestClaimDay,
     rows,

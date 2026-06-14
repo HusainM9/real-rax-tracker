@@ -27,7 +27,7 @@ type OwnershipLookupResponse = {
     realUsername: string
     importedAt: string
     updatedAt: string
-    passes: Array<{ rarityLabel?: string }>
+    passes: Array<{ rarityLabel?: string; earnings?: Array<{ claimDay: string; baseRaxEarned: number }> }>
   } | null
   storageConfigured: boolean
 }
@@ -65,11 +65,16 @@ type UsernameOwnershipResponse = {
   usernamesSaved?: Array<{
     username: string
     passesSaved: number
+    rowsSaved: number
+    passesWithNoEarnings: number
+    failures: string[]
     error?: string
   }>
   totals?: {
     usernames: number
     passesSaved: number
+    rowsSaved: number
+    passesWithNoEarnings: number
     failures: number
   }
   error?: string
@@ -222,8 +227,12 @@ export default function AdminPage() {
           rarity.startsWith('iconic')
         )
       }).length
+      const raxRows = body.ownership.passes.reduce(
+        (sum, pass) => sum + (pass.earnings?.length ?? 0),
+        0,
+      )
       setOwnershipLookupStatus(
-        `Snapshot found for @${body.ownership.realUsername}: ${body.ownership.passes.length} total passes (${legendaryPlusCount} Legendary+). Users can recover these via Entry -> "Import from admin cached passes".`,
+        `Snapshot found for @${body.ownership.realUsername}: ${body.ownership.passes.length} total passes (${legendaryPlusCount} Legendary+, ${raxRows} saved RAX row${raxRows === 1 ? '' : 's'}). Users can recover via Entry → Import from admin cached passes.`,
       )
     } catch (error) {
       setOwnershipLookupStatus(
@@ -401,7 +410,7 @@ export default function AdminPage() {
 
   const saveUsernameOwnership = async () => {
     setOwnershipSaving(true)
-    setOwnershipSaveStatus('Resolving passes from Meowbot and saving ownership snapshot…')
+    setOwnershipSaveStatus('Fetching passes and daily RAX from Meowbot…')
     try {
       const response = await fetch('/api/admin/username-ownership', {
         method: 'POST',
@@ -420,10 +429,10 @@ export default function AdminPage() {
       }
       const failed = (data.usernamesSaved ?? []).filter((entry) => entry.error)
       setOwnershipSaveStatus(
-        `Saved ownership for ${totals.usernames} username${totals.usernames === 1 ? '' : 's'} (${totals.passesSaved} pass${totals.passesSaved === 1 ? '' : 'es'} total${totals.failures > 0 ? `, ${totals.failures} failure${totals.failures === 1 ? '' : 's'}` : ''}).` +
+        `Saved full Meowbot import for ${totals.usernames} username${totals.usernames === 1 ? '' : 's'} (${totals.passesSaved} pass${totals.passesSaved === 1 ? '' : 'es'}, ${totals.rowsSaved} RAX row${totals.rowsSaved === 1 ? '' : 's'}${totals.passesWithNoEarnings > 0 ? `, ${totals.passesWithNoEarnings} with no earnings` : ''}${totals.failures > 0 ? `, ${totals.failures} pass failure${totals.failures === 1 ? '' : 's'}` : ''}).` +
           (failed.length > 0
             ? ` Errors: ${failed.map((entry) => `@${entry.username}: ${entry.error}`).join('; ')}`
-            : ' Users can recover pass lists from Entry after Meowbot shuts down; attach RAX from the shared catalog separately.'),
+            : ' Users can recover passes and RAX from Entry → Import from admin cached passes.'),
       )
     } catch (error) {
       setOwnershipSaveStatus(error instanceof Error ? error.message : 'Ownership save failed.')
@@ -643,12 +652,11 @@ export default function AdminPage() {
         <div className="form-subsection">
           <div className="section-heading">
             <div>
-              <h3>Username ownership failsafe</h3>
+              <h3>Username import failsafe</h3>
               <p className="subsection-note">
-                Resolve @username from Meowbot and save pass IDs (entity, season, sport, name,
-                rarity) to the ownership cache only. Does not fetch daily RAX — pair this with
-                catalog import or manual RAX override so Entry can attach earnings later if Meowbot
-                import fails or shuts down.
+                Full Meowbot import for @username: resolves passes, fetches daily RAX, and saves
+                everything to the ownership cache. Users recover passes and earnings from Entry →
+                Import from admin cached passes after Meowbot shuts down.
               </p>
             </div>
           </div>
@@ -673,7 +681,7 @@ export default function AdminPage() {
               }
               onClick={() => void saveUsernameOwnership()}
             >
-              {ownershipSaving ? 'Saving ownership…' : 'Save username pass ownership'}
+              {ownershipSaving ? 'Importing from Meowbot…' : 'Import username from Meowbot'}
             </button>
           </div>
           {ownershipSaveStatus ? <p className="import-status">{ownershipSaveStatus}</p> : null}

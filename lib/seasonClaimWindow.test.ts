@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  catalogExternalKeyCandidates,
   claimDayInPassSeason,
   filterDailyRowsToPassSeason,
   passSeasonDateWindow,
@@ -186,6 +187,30 @@ describe('end-year pro sports with clean catalog metadata (NBA/FC)', () => {
 
   it('accepts FC 2025-26 on season_year 2026', () => {
     expect(isCatalogSeasonMetadataAligned(2026, '2025-26', 'FC')).toBe(true)
+  })
+})
+
+describe('catalogExternalKeyCandidates', () => {
+  it('includes listing and canonical keys for end-year sports', () => {
+    expect(
+      catalogExternalKeyCandidates({
+        entityId: 100,
+        sport: 'NFL',
+        seasonYear: 2024,
+        seasonLabel: '2023-24',
+      }),
+    ).toEqual(['100|2024|NFL'])
+  })
+
+  it('includes resolved key when listing season_year differs from label', () => {
+    expect(
+      catalogExternalKeyCandidates({
+        entityId: 200,
+        sport: 'NFL',
+        seasonYear: 2024,
+        seasonLabel: '2024-25',
+      }),
+    ).toEqual(expect.arrayContaining(['200|2024|NFL', '200|2025|NFL']))
   })
 })
 
