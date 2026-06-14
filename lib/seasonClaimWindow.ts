@@ -60,7 +60,16 @@ export function passSeasonDateWindowFromLabel(
   seasonLabel: string,
   sport: string,
 ): PassSeasonDateWindow | null {
-  const split = parseSplitSeasonLabel(seasonLabel)
+  const trimmed = seasonLabel.trim().replace(/\u2013|\u2014/g, '-')
+  const calendarYear = /^(\d{4})$/.exec(trimmed)
+  if (calendarYear) {
+    const year = Number(calendarYear[1])
+    if (Number.isInteger(year) && year >= 1000) {
+      return { start: `${year}-01-01`, end: `${year}-12-31` }
+    }
+  }
+
+  const split = parseSplitSeasonLabel(trimmed)
   if (!split) return null
 
   const normalized = normalizeSportForSeasonWindow(sport)
@@ -132,6 +141,30 @@ export function expectedSeasonLabelFromYear(seasonYear: number, sport: string): 
   return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
 }
 
+export function sportSkipsClaimDaySeasonFilter(sport: string): boolean {
+  return normalizeSportForSeasonWindow(sport) === 'FC'
+}
+
+/** Label used when fetching/importing earnings — aligned split labels are kept; others use canonical season_year. */
+export function importSeasonLabelForCatalog(
+  sport: string,
+  seasonYear: number,
+  seasonLabel?: string,
+): string {
+  const incoming = seasonLabel?.replace(/\u2013|\u2014/g, '-').trim() ?? ''
+  const expected = expectedSeasonLabelFromYear(seasonYear, sport)
+  if (!incoming) return expected
+
+  if (
+    parseSplitSeasonLabel(incoming) &&
+    resolveCatalogPassSeasonYear(seasonYear, incoming, sport) === seasonYear
+  ) {
+    return incoming
+  }
+
+  return expected
+}
+
 export function buildCatalogExternalKey(
   entityId: number,
   seasonYear: number,
@@ -167,8 +200,9 @@ export function isCatalogSeasonMetadataAligned(
   seasonLabel: string,
   sport: string,
 ): boolean {
-  return canonicalCatalogPassMetadata({ entityId: 0, sport, seasonYear, seasonLabel }).aligned &&
-    seasonYear === resolveCatalogPassSeasonYear(seasonYear, seasonLabel, sport)
+  const trimmed = seasonLabel.trim().replace(/\u2013|\u2014/g, '-')
+  return canonicalCatalogPassMetadata({ entityId: 0, sport, seasonYear, seasonLabel: trimmed }).aligned &&
+    seasonYear === resolveCatalogPassSeasonYear(seasonYear, trimmed, sport)
 }
 
 export function claimDayDateValue(claimDay: string): string | null {
@@ -181,6 +215,8 @@ export function claimDayInPassSeason(
   sport: string,
   seasonLabel?: string,
 ): boolean {
+  if (sportSkipsClaimDaySeasonFilter(sport)) return true
+
   const window = resolvePassSeasonDateWindow(seasonYear, sport, seasonLabel)
   if (!window) return true
   const date = claimDayDateValue(claimDay)

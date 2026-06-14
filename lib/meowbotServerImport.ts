@@ -3,7 +3,7 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
-import { expectedSeasonLabelFromYear, filterDailyRowsToPassSeason, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
+import { filterDailyRowsToPassSeason, importSeasonLabelForCatalog, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_Al7QsFGnNTlknoI8KVxjag_JUwrytZy'
@@ -166,7 +166,7 @@ function externalKey(entityId: number, seasonYear: number, sport: string): strin
 export function canonicalizeImportPass(pass: ImportPass): ImportPass {
   const sport = normalizeSportForSeasonWindow(pass.sport)
   const seasonYear = pass.seasonYear
-  const seasonLabel = expectedSeasonLabelFromYear(seasonYear, pass.sport)
+  const seasonLabel = importSeasonLabelForCatalog(pass.sport, seasonYear, pass.seasonLabel)
   return {
     ...pass,
     sport,
@@ -367,7 +367,13 @@ async function enrichPassMetadata(passes: ImportPass[]): Promise<ImportPass[]> {
 
   return passes.map((pass) => {
     const metadata = names.get(metadataKey(pass.entityId, pass.seasonYear, pass.sportRaw))
-    return metadata ? { ...pass, name: metadata.name || pass.name } : pass
+    return metadata
+      ? {
+          ...pass,
+          name: metadata.name || pass.name,
+          seasonLabel: metadata.seasonLabel?.trim() || pass.seasonLabel,
+        }
+      : pass
   })
 }
 

@@ -183,6 +183,10 @@ describe('end-year pro sports with clean catalog metadata (NBA/FC)', () => {
   it('accepts FC 2023-24 on season_year 2024', () => {
     expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'FC')).toBe(true)
   })
+
+  it('accepts FC 2025-26 on season_year 2026', () => {
+    expect(isCatalogSeasonMetadataAligned(2026, '2025-26', 'FC')).toBe(true)
+  })
 })
 
 describe('filterDailyRowsToPassSeason', () => {
@@ -196,5 +200,19 @@ describe('filterDailyRowsToPassSeason', () => {
       { claimDay: '2024-09-08', baseRaxEarned: 12 },
       { claimDay: '2025-01-19', baseRaxEarned: 18 },
     ])
+  })
+
+  it('keeps all FC daily rows regardless of claim day', () => {
+    const rows = [
+      { claimDay: '2025-02-10', baseRaxEarned: 12 },
+      { claimDay: '2024-12-31', baseRaxEarned: 99 },
+      { claimDay: '2026-01-01', baseRaxEarned: 18 },
+    ]
+    expect(filterDailyRowsToPassSeason(rows, 2026, 'FC', '2025-26')).toEqual(rows)
+  })
+
+  it('skips claim-day season filtering for FC', () => {
+    expect(claimDayInPassSeason('2020-01-01', 2026, 'FC', '2025-26')).toBe(true)
+    expect(claimDayInPassSeason('2030-12-31', 2026, 'FC', '2025-26')).toBe(true)
   })
 })

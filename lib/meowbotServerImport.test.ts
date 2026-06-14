@@ -44,4 +44,41 @@ describe('canonicalizeImportPass', () => {
       externalKey: '8476389|2024|NHL',
     })
   })
+
+  it('uses 2025-26 on FC season_year 2026', () => {
+    expect(
+      canonicalizeImportPass({
+        entityId: 123,
+        seasonYear: 2026,
+        sportRaw: 'fc',
+        sport: 'FC',
+        seasonLabel: '2025-26',
+        name: 'Player',
+        passKind: 'player',
+        externalKey: '123|2026|FC',
+      }),
+    ).toMatchObject({
+      seasonYear: 2026,
+      seasonLabel: '2025-26',
+      externalKey: '123|2026|FC',
+    })
+  })
+
+  it('repairs bare calendar FC labels to the canonical split season', () => {
+    expect(
+      canonicalizeImportPass({
+        entityId: 123,
+        seasonYear: 2026,
+        sportRaw: 'fc',
+        sport: 'FC',
+        seasonLabel: '2026',
+        name: 'Player',
+        passKind: 'player',
+        externalKey: '123|2026|FC',
+      }),
+    ).toMatchObject({
+      seasonYear: 2026,
+      seasonLabel: '2025-26',
+    })
+  })
 })

@@ -296,22 +296,22 @@ describe('passRecommendation', () => {
 
   it('filters FC passes by season label when multiple labels share a year', () => {
     const current = {
-      ...catalogProfile('current|2025|FC', 'Current', [{ claimDay: '2026-03-01', baseRaxEarned: 10 }]),
+      ...catalogProfile('current|2026|FC', 'Current', [{ claimDay: '2026-03-01', baseRaxEarned: 10 }]),
       sport: 'FC',
-      seasonYear: 2025,
-      seasonLabel: '2025',
+      seasonYear: 2026,
+      seasonLabel: '2025-26',
     }
     const prior = {
-      ...catalogProfile('prior|2025|FC', 'Prior', [{ claimDay: '2026-03-01', baseRaxEarned: 8 }]),
+      ...catalogProfile('prior|2026|FC', 'Prior', [{ claimDay: '2026-03-01', baseRaxEarned: 8 }]),
       sport: 'FC',
-      seasonYear: 2025,
+      seasonYear: 2026,
       seasonLabel: '2024-25',
     }
 
     const filtered = filterRecommendationProfiles(data, [current, prior], {
       excludedSportSeasonKeys: [sportSeasonFilterKey('FC', '2024-25')],
     })
-    expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['current|2025|FC'])
+    expect(filtered.candidates.map((item) => item.externalKey)).toEqual(['current|2026|FC'])
   })
 
   it('prefilterRecommendationProfiles keeps top iconic1 earners', () => {
