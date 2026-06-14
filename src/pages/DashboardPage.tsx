@@ -334,9 +334,15 @@ export default function DashboardPage() {
           <strong>Load from cloud</strong> replaces your local collection — you do not need a
           separate username import afterward. Cached player earnings, sell-ranking snapshots, and
           original JSON pastes are omitted to save space. Your sync PIN is required to load or save.
-          After an admin reset, sign in with
-          the PIN they gave you, then use <strong>Change sync PIN</strong> below to pick your own.
-          Forgot your PIN? Ask an admin to reset it.
+          After an admin reset, sign in with the PIN they gave you, then use{' '}
+          <strong>Change sync PIN</strong> below to pick your own. Forgot your PIN? Ask an admin to
+          reset it.
+        </p>
+        <p className="import-hint">
+          <strong>Large collections (Mac / Safari):</strong> if the site forgets your data after
+          refresh, your browser storage may be full or you may be in Private Browsing. After
+          importing, use <strong>Save to cloud</strong> with your Real @username and a sync PIN —
+          then <strong>Load from cloud</strong> on your next visit. Export JSON as an extra backup.
         </p>
         <div className="sort-controls">
           <label className="field inline-field">

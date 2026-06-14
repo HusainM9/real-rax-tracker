@@ -631,12 +631,41 @@ export default function EntryPage() {
           is saved in this browser after a successful import.
         </p>
         {importDisabled ? (
-          <p className="import-status">
-            Automatic username import is closed. If admin imported your username before shutdown,
-            use the snapshot button below for passes and RAX. Otherwise search the{' '}
-            <a href="#catalog-search">shared catalog</a> above. Existing imported data stays in
-            this browser — use Export JSON on Dashboard for backups.
-          </p>
+          <>
+            <section className="panel import-hint" aria-labelledby="admin-cache-info-heading">
+              <h3 id="admin-cache-info-heading">Recovering from admin cache</h3>
+              <p>
+                If you never imported while Meowbot was online, use{' '}
+                <strong>Import from admin cached passes</strong> below with your Real @username.
+                Admin may have saved a full snapshot before shutdown.
+              </p>
+              <ul className="help-list">
+                <li>
+                  Data may <strong>not be up to date</strong> — it reflects what was saved when admin
+                  ran the import, not live Meowbot.
+                </li>
+                <li>
+                  Some RAX or pass values <strong>could be wrong</strong>. Treat totals as estimates
+                  until you verify against Real.
+                </li>
+                <li>
+                  Everything is tied to the <strong>Real @username</strong> admin used at import time
+                  (before Meowbot shut down). Use that exact username below — a different spelling
+                  will not find your snapshot.
+                </li>
+                <li>
+                  After importing, set up a <strong>cloud sync PIN</strong> on the{' '}
+                  <Link to="/dashboard">Dashboard</Link> using the same Real username so you can
+                  back up and restore your collection on other devices.
+                </li>
+              </ul>
+            </section>
+            <p className="import-status">
+              Automatic username import is closed. If admin did not import your username, search the{' '}
+              <a href="#catalog-search">shared catalog</a> above instead. Existing local data stays
+              in this browser — use Export JSON on Dashboard for backups.
+            </p>
+          </>
         ) : null}
         <div className="button-row">
           <button

@@ -15,10 +15,13 @@ import {
   createEmptyData,
   exportTrackerData,
   importTrackerData,
-  loadTrackerData,
   normalizeData,
-  saveTrackerData,
 } from '../lib/storage'
+import {
+  loadPersistedTrackerData,
+  persistTrackerData,
+  storageWarningMessage,
+} from '../lib/trackerPersistence'
 import {
   importFromAdminOwnership as runAdminOwnershipImport,
   importFromUsername as runUsernameImport,
@@ -63,6 +66,8 @@ type ImportFromUsernameOptions = UsernameImportOptions
 
 type RaxDataContextValue = {
   data: RaxTrackerData
+  storageReady: boolean
+  storageWarning: string | null
   setSettings: (patch: Partial<AppSettings>) => void
   addCard: (input: CardInput) => string
   upsertCard: (externalKey: string, input: CardInput) => string
@@ -102,19 +107,38 @@ function nowIso(): string {
 }
 
 export function RaxDataProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<RaxTrackerData>(loadTrackerData)
+  const [data, setData] = useState<RaxTrackerData>(createEmptyData)
+  const [storageReady, setStorageReady] = useState(false)
+  const [storageWarning, setStorageWarning] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!saveTrackerData(data)) {
-      console.warn(
-        'Could not save tracker data to browser storage — your collection may not persist after refresh. Export a JSON backup.',
-      )
+    let cancelled = false
+    void loadPersistedTrackerData().then((loaded) => {
+      if (cancelled) return
+      setData(loaded.data)
+      setStorageReady(true)
+    })
+    return () => {
+      cancelled = true
     }
-  }, [data])
+  }, [])
+
+  useEffect(() => {
+    if (!storageReady) return
+    void persistTrackerData(data).then((result) => {
+      const warning = storageWarningMessage(result)
+      setStorageWarning(warning || null)
+      if (!result.ok) {
+        console.warn('Could not persist tracker data:', result)
+      }
+    })
+  }, [data, storageReady])
 
   const value = useMemo<RaxDataContextValue>(
     () => ({
       data,
+      storageReady,
+      storageWarning,
       setSettings: (patch) => {
         setData((current) => ({
           ...current,
@@ -382,7 +406,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       },
       resetAll: () => setData(createEmptyData()),
     }),
-    [data],
+    [data, storageReady, storageWarning],
   )
 
   return <RaxDataContext.Provider value={value}>{children}</RaxDataContext.Provider>
