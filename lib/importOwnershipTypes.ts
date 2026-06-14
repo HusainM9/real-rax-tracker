@@ -21,6 +21,8 @@ export type ImportOwnershipSnapshot = {
   clientId: string
   importedAt: string
   passes: ImportOwnershipPass[]
+  /** Meowbot rarity map — keeps admin cache import aligned with live username import. */
+  rarities?: Record<string, string[]>
 }
 
 export type StoredImportOwnershipSnapshot = ImportOwnershipSnapshot & {
@@ -66,12 +68,32 @@ export function validateImportOwnershipSnapshot(input: unknown): ImportOwnership
 
   if (passes.length === 0) return null
 
+  const rarities = validateImportOwnershipRarities(record.rarities)
+
   return {
     realUsername,
     clientId,
     importedAt,
     passes,
+    ...(rarities ? { rarities } : {}),
   }
+}
+
+function validateImportOwnershipRarities(input: unknown): Record<string, string[]> | undefined {
+  if (!input || typeof input !== 'object') return undefined
+  const record = input as Record<string, unknown>
+  const rarities: Record<string, string[]> = {}
+  for (const [key, value] of Object.entries(record).slice(0, 5000)) {
+    if (!Array.isArray(value)) continue
+    const labels = value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim().slice(0, 80))
+      .filter(Boolean)
+    if (labels.length > 0) {
+      rarities[key.trim().slice(0, 120)] = labels
+    }
+  }
+  return Object.keys(rarities).length > 0 ? rarities : undefined
 }
 
 function validateImportOwnershipPass(input: unknown): ImportOwnershipPass | null {

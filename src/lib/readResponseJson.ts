@@ -37,3 +37,37 @@ export async function readResponseError(response: Response, fallback: string): P
 
   return `${fallback} (${response.status}).`
 }
+
+/** Read response body once; throws a readable error for non-JSON or failed requests. */
+export async function parseFetchJson<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text()
+  if (!text.trim()) {
+    if (!response.ok) {
+      throw new Error(`${fallback} (${response.status}).`)
+    }
+    return {} as T
+  }
+
+  let data: T
+  try {
+    data = JSON.parse(text) as T
+  } catch {
+    const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
+    throw new Error(
+      response.ok
+        ? `Server returned invalid JSON: ${snippet}`
+        : `${fallback} (${response.status}): ${snippet}`,
+    )
+  }
+
+  if (!response.ok) {
+    const errorRecord = data as { error?: string }
+    throw new Error(
+      typeof errorRecord.error === 'string' && errorRecord.error.trim()
+        ? errorRecord.error.trim()
+        : `${fallback} (${response.status}).`,
+    )
+  }
+
+  return data
+}

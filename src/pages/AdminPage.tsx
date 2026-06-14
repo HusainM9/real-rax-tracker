@@ -10,6 +10,11 @@ import {
 } from '../lib/catalogApi'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
+import { parseFetchJson } from '../lib/readResponseJson'
+
+function parseAdminUsernames(raw: string): string[] {
+  return [...new Set(raw.split(/[\s,]+/).map((value) => value.replace(/^@/, '').trim().toLowerCase()).filter(Boolean))]
+}
 
 type EventsResponse = {
   events: AdminEvent[]
@@ -19,6 +24,20 @@ type EventsResponse = {
 
 type UsersResponse = {
   users: AdminUserSummary[]
+  storageConfigured: boolean
+}
+
+type OwnershipSnapshotSummary = {
+  realUsername: string
+  importedAt: string
+  updatedAt: string
+  passCount: number
+  legendaryPlusCount: number
+  raxRowCount: number
+}
+
+type OwnershipSnapshotsResponse = {
+  snapshots: OwnershipSnapshotSummary[]
   storageConfigured: boolean
 }
 
@@ -120,6 +139,9 @@ export default function AdminPage() {
   const [ownershipSaveUsernames, setOwnershipSaveUsernames] = useState('')
   const [ownershipSaveStatus, setOwnershipSaveStatus] = useState('')
   const [ownershipSaving, setOwnershipSaving] = useState(false)
+  const [ownershipSnapshots, setOwnershipSnapshots] = useState<OwnershipSnapshotSummary[]>([])
+  const [ownershipSnapshotsLoading, setOwnershipSnapshotsLoading] = useState(false)
+  const [ownershipSnapshotsError, setOwnershipSnapshotsError] = useState('')
   const [catalogSavedLimit, setCatalogSavedLimit] = useState('25')
   const [catalogStatus, setCatalogStatus] = useState('')
   const [catalogImporting, setCatalogImporting] = useState(false)
@@ -188,6 +210,29 @@ export default function AdminPage() {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  const loadOwnershipSnapshots = useCallback(async () => {
+    setOwnershipSnapshotsLoading(true)
+    setOwnershipSnapshotsError('')
+    try {
+      const response = await fetch('/api/admin/ownership?list=1', { credentials: 'include' })
+      if (!response.ok) {
+        throw new Error('Could not load ownership snapshots.')
+      }
+      const body = (await response.json()) as OwnershipSnapshotsResponse
+      setOwnershipSnapshots(body.snapshots ?? [])
+    } catch (loadError) {
+      setOwnershipSnapshotsError(
+        loadError instanceof Error ? loadError.message : 'Could not load ownership snapshots.',
+      )
+    } finally {
+      setOwnershipSnapshotsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadOwnershipSnapshots()
+  }, [loadOwnershipSnapshots])
 
   const summary = useMemo(() => {
     const noEarnings = users.reduce((sum, user) => sum + user.passNoEarningsCount, 0)
@@ -362,11 +407,7 @@ export default function AdminPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const data = (await response.json()) as CatalogImportResponse
-    if (!response.ok) {
-      throw new Error(data.error || `Catalog import failed (${response.status}).`)
-    }
-    return data
+    return parseFetchJson<CatalogImportResponse>(response, 'Catalog import failed')
   }
 
   const summarizeCatalogImport = (data: CatalogImportResponse): string => {
@@ -393,41 +434,119 @@ export default function AdminPage() {
   }
 
   const importManualUsernames = async () => {
+    const usernames = parseAdminUsernames(catalogUsernames)
+    if (usernames.length === 0) {
+      setCatalogStatus('Enter at least one username.')
+      return
+    }
+
     setCatalogImporting(true)
-    setCatalogStatus('Importing usernames into Supabase catalog…')
+    const aggregated: CatalogImportResponse = {
+      ok: true,
+      mode: 'usernames',
+      totals: {
+        usernames: 0,
+        passesScanned: 0,
+        passesUpserted: 0,
+        rowsUpserted: 0,
+        passesWithNoEarnings: 0,
+        failures: 0,
+      },
+      usernamesImported: [],
+    }
+
     try {
-      const data = await postCatalogImport({
-        mode: 'usernames',
-        usernames: catalogUsernames,
-      })
-      setCatalogStatus(summarizeCatalogImport(data))
+      for (let index = 0; index < usernames.length; index += 1) {
+        const username = usernames[index] ?? ''
+        setCatalogStatus(
+          `Importing @${username} into Supabase catalog (${index + 1}/${usernames.length})…`,
+        )
+        const data = await postCatalogImport({ mode: 'usernames', usernames: username })
+        const entry = data.usernamesImported?.[0]
+        if (entry) {
+          aggregated.usernamesImported?.push(entry)
+        }
+        const totals = data.totals
+        if (totals && aggregated.totals) {
+          aggregated.totals.usernames += totals.usernames
+          aggregated.totals.passesScanned += totals.passesScanned
+          aggregated.totals.passesUpserted += totals.passesUpserted
+          aggregated.totals.rowsUpserted += totals.rowsUpserted
+          aggregated.totals.passesWithNoEarnings += totals.passesWithNoEarnings
+          aggregated.totals.failures += totals.failures
+        }
+      }
+      setCatalogStatus(summarizeCatalogImport(aggregated))
     } catch (error) {
-      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
+      const partial = aggregated.totals
+      const partialNote =
+        partial && partial.usernames > 0
+          ? ` Partial progress saved for ${partial.usernames} username${partial.usernames === 1 ? '' : 's'} before the failure.`
+          : ''
+      setCatalogStatus(
+        (error instanceof Error ? error.message : 'Catalog import failed.') + partialNote,
+      )
     } finally {
       setCatalogImporting(false)
     }
   }
 
   const saveUsernameOwnership = async () => {
+    const usernames = parseAdminUsernames(ownershipSaveUsernames)
+    if (usernames.length === 0) {
+      setOwnershipSaveStatus('Enter at least one username.')
+      return
+    }
+
     setOwnershipSaving(true)
-    setOwnershipSaveStatus('Fetching passes and daily RAX from Meowbot…')
+    const aggregated: UsernameOwnershipResponse = {
+      ok: true,
+      usernamesSaved: [],
+      totals: {
+        usernames: 0,
+        passesSaved: 0,
+        rowsSaved: 0,
+        passesWithNoEarnings: 0,
+        failures: 0,
+      },
+    }
+
     try {
-      const response = await fetch('/api/admin/username-ownership', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usernames: ownershipSaveUsernames }),
-      })
-      const data = (await response.json()) as UsernameOwnershipResponse
-      if (!response.ok) {
-        throw new Error(data.error || `Ownership save failed (${response.status}).`)
+      for (let index = 0; index < usernames.length; index += 1) {
+        const username = usernames[index] ?? ''
+        setOwnershipSaveStatus(
+          `Fetching passes and daily RAX from Meowbot for @${username} (${index + 1}/${usernames.length})…`,
+        )
+        const response = await fetch('/api/admin/username-ownership', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usernames: username }),
+        })
+        const data = await parseFetchJson<UsernameOwnershipResponse>(response, 'Ownership save failed')
+        const entry = data.usernamesSaved?.[0]
+        if (entry) {
+          aggregated.usernamesSaved?.push(entry)
+        }
+        const totals = data.totals
+        if (totals && aggregated.totals) {
+          aggregated.totals.usernames += totals.usernames
+          aggregated.totals.passesSaved += totals.passesSaved
+          aggregated.totals.rowsSaved += totals.rowsSaved
+          aggregated.totals.passesWithNoEarnings += totals.passesWithNoEarnings
+          aggregated.totals.failures += totals.failures
+        }
+        if (!data.ok && !entry?.error) {
+          throw new Error(`Ownership save failed for @${username}.`)
+        }
       }
-      const totals = data.totals
+
+      const totals = aggregated.totals
       if (!totals) {
         setOwnershipSaveStatus('Ownership save completed.')
         return
       }
-      const failed = (data.usernamesSaved ?? []).filter((entry) => entry.error)
+      const failed = (aggregated.usernamesSaved ?? []).filter((entry) => entry.error)
       setOwnershipSaveStatus(
         `Saved full Meowbot import for ${totals.usernames} username${totals.usernames === 1 ? '' : 's'} (${totals.passesSaved} pass${totals.passesSaved === 1 ? '' : 'es'}, ${totals.rowsSaved} RAX row${totals.rowsSaved === 1 ? '' : 's'}${totals.passesWithNoEarnings > 0 ? `, ${totals.passesWithNoEarnings} with no earnings` : ''}${totals.failures > 0 ? `, ${totals.failures} pass failure${totals.failures === 1 ? '' : 's'}` : ''}).` +
           (failed.length > 0
@@ -435,9 +554,17 @@ export default function AdminPage() {
             : ' Users can recover passes and RAX from Entry → Import from admin cached passes.'),
       )
     } catch (error) {
-      setOwnershipSaveStatus(error instanceof Error ? error.message : 'Ownership save failed.')
+      const partial = aggregated.totals
+      const partialNote =
+        partial && partial.usernames > 0
+          ? ` Partial progress saved for ${partial.usernames} username${partial.usernames === 1 ? '' : 's'} before the failure.`
+          : ''
+      setOwnershipSaveStatus(
+        (error instanceof Error ? error.message : 'Ownership save failed.') + partialNote,
+      )
     } finally {
       setOwnershipSaving(false)
+      void loadOwnershipSnapshots()
     }
   }
 
@@ -655,7 +782,8 @@ export default function AdminPage() {
               <h3>Username import failsafe</h3>
               <p className="subsection-note">
                 Full Meowbot import for @username: resolves passes, fetches daily RAX, and saves
-                everything to the ownership cache. Users recover passes and earnings from Entry →
+                everything to the ownership cache. Large collections import one username at a time
+                and may take several minutes each. Users recover passes and earnings from Entry →
                 Import from admin cached passes after Meowbot shuts down.
               </p>
             </div>
@@ -685,6 +813,60 @@ export default function AdminPage() {
             </button>
           </div>
           {ownershipSaveStatus ? <p className="import-status">{ownershipSaveStatus}</p> : null}
+        </div>
+
+        <div className="form-subsection">
+          <div className="section-heading">
+            <div>
+              <h3>Cached ownership snapshots</h3>
+              <p className="subsection-note">
+                All usernames currently saved in the ownership KV cache. Re-import a username after
+                code fixes to refresh its snapshot.
+              </p>
+            </div>
+            <button
+              className="button"
+              type="button"
+              disabled={ownershipSnapshotsLoading || ownershipSaving}
+              onClick={() => void loadOwnershipSnapshots()}
+            >
+              {ownershipSnapshotsLoading ? 'Refreshing…' : 'Refresh list'}
+            </button>
+          </div>
+          {ownershipSnapshotsError ? (
+            <p className="import-status import-status-error">{ownershipSnapshotsError}</p>
+          ) : null}
+          {ownershipSnapshots.length === 0 && !ownershipSnapshotsLoading ? (
+            <p className="empty">No ownership snapshots saved yet.</p>
+          ) : null}
+          {ownershipSnapshots.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Passes</th>
+                    <th>Legendary+</th>
+                    <th>RAX rows</th>
+                    <th>Imported</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ownershipSnapshots.map((snapshot) => (
+                    <tr key={snapshot.realUsername}>
+                      <td>@{snapshot.realUsername}</td>
+                      <td>{snapshot.passCount}</td>
+                      <td>{snapshot.legendaryPlusCount}</td>
+                      <td>{snapshot.raxRowCount.toLocaleString()}</td>
+                      <td>{new Date(snapshot.importedAt).toLocaleString()}</td>
+                      <td>{new Date(snapshot.updatedAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
 
         <div className="form-subsection">

@@ -3,7 +3,15 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
+import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
+import { resolveImportPassKind } from './passKind'
 import { importSeasonLabelForCatalog, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
+import {
+  displaySportFromRaw,
+  resolveUsernameImportSeasonLabel,
+  uniqueUsernameImportPasses,
+  usernameImportExternalKey,
+} from './usernameImportShared'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
 const DEFAULT_SUPABASE_KEY = 'sb_publishable_Al7QsFGnNTlknoI8KVxjag_JUwrytZy'
@@ -220,13 +228,27 @@ async function runWithConcurrency<T>(
   await Promise.all(workers)
 }
 
-async function resolveUsernamePasses(username: string): Promise<ImportPass[]> {
+function normalizeImportPassKind(pass: ImportPass): ImportPass {
+  const passKind = resolveImportPassKind({
+    passKind: pass.passKind,
+    name: pass.name,
+    sportRaw: pass.sportRaw,
+    sport: pass.sport,
+  })
+  return passKind === pass.passKind ? pass : { ...pass, passKind }
+}
+
+async function resolveUsernamePasses(username: string): Promise<{
+  passes: ImportPass[]
+  rarities: Record<string, string[]>
+}> {
   const data = (await invokeMeowbot('resolve-listing', 'get_user_passes', {
     username: username.replace(/^@/, '').trim(),
   })) as {
     playerPairs?: string[]
     teamPairs?: string[]
     passSnapshots?: MeowbotPassSnapshot[]
+    rarities?: Record<string, string[]>
   }
 
   const snapshots = new Map(
@@ -247,7 +269,10 @@ async function resolveUsernamePasses(username: string): Promise<ImportPass[]> {
     pass.rarityLabel = snapshot.rarityLabel || undefined
   }
 
-  return enrichPassMetadata(passes)
+  return {
+    passes: (await enrichPassMetadata(passes)).map(normalizeImportPassKind),
+    rarities: data.rarities ?? {},
+  }
 }
 
 async function getAvailableMeowbotSeasons(): Promise<number[]> {
@@ -407,6 +432,72 @@ async function fetchDailyRows(pass: ImportPass): Promise<CatalogDailyEarningInpu
   return rows
 }
 
+function prepareOwnershipPass(pass: ImportPass): ImportPass {
+  const sport = normalizeSportForSeasonWindow(displaySportFromRaw(pass.sportRaw))
+  const seasonLabel = resolveUsernameImportSeasonLabel({
+    sportRaw: pass.sportRaw,
+    seasonYear: pass.seasonYear,
+    passSeasonLabel: pass.seasonLabel,
+  })
+  return {
+    ...pass,
+    sport,
+    seasonLabel,
+    externalKey: usernameImportExternalKey(pass.entityId, pass.seasonYear, pass.sportRaw),
+  }
+}
+
+async function fetchDailyRowsForOwnership(pass: ImportPass): Promise<CatalogDailyEarningInput[]> {
+  const ready = prepareOwnershipPass(pass)
+  const data = (await invokeMeowbot(
+    'market-data',
+    ready.passKind === 'team' ? 'get_team_daily_earnings' : 'get_daily_earnings',
+    {
+      entityId: ready.entityId,
+      season: ready.seasonYear,
+      sport: normalizeSport(ready.sportRaw),
+      seasonLabel: ready.seasonLabel,
+    },
+  )) as { rows?: Array<{ day?: string; earnings?: number; player_box_score_id?: number | null }> }
+
+  const rows = (data.rows ?? [])
+    .map((row) => ({
+      externalKey: ready.externalKey,
+      claimDay: /^(\d{4}-\d{2}-\d{2})/.exec(row.day ?? '')?.[1] ?? '',
+      baseRaxEarned: Number(row.earnings),
+      playerBoxScoreId: row.player_box_score_id ?? null,
+    }))
+    .filter(
+      (row) =>
+        row.claimDay &&
+        Number.isFinite(row.baseRaxEarned) &&
+        row.baseRaxEarned > 0,
+    )
+
+  return rows
+}
+
+function passToOwnershipInput(
+  pass: ImportPass,
+  hasEarnings: boolean,
+  totalBaseRax: number,
+): CatalogPassInput {
+  const ready = prepareOwnershipPass(pass)
+  return {
+    externalKey: ready.externalKey,
+    entityId: ready.entityId,
+    passKind: ready.passKind,
+    sport: ready.sport,
+    seasonYear: ready.seasonYear,
+    seasonLabel: ready.seasonLabel,
+    name: ready.name,
+    rarityLabel: ready.rarityLabel,
+    hasEarnings,
+    totalBaseRax,
+    sourceUpdatedAt: new Date().toISOString(),
+  }
+}
+
 function passToCatalogInput(
   pass: ImportPass,
   hasEarnings: boolean,
@@ -428,12 +519,79 @@ function passToCatalogInput(
 }
 
 export async function fetchMeowbotUsernamePasses(username: string): Promise<ImportPass[]> {
-  return resolveUsernamePasses(username)
+  const { passes } = await resolveUsernamePasses(username)
+  return passes
 }
 
 export async function importMeowbotUsernameToCatalog(username: string): Promise<MeowbotCatalogImportSummary> {
-  const passes = await resolveUsernamePasses(username)
+  const { passes } = await resolveUsernamePasses(username)
   return importPassesToCatalogPayload(passes)
+}
+
+export type MeowbotOwnershipImportSummary = MeowbotCatalogImportSummary & {
+  allPasses: ImportPass[]
+  rarities: Record<string, string[]>
+}
+
+export async function importMeowbotUsernameToOwnershipSnapshot(
+  username: string,
+): Promise<MeowbotOwnershipImportSummary> {
+  const { passes: allPasses, rarities } = await resolveUsernamePasses(username)
+  const selectedPasses = allPasses.filter((pass) =>
+    passMatchesRarityFilter(
+      { entityId: pass.entityId, season: pass.seasonYear, sportRaw: pass.sportRaw },
+      rarities,
+      pass.rarityLabel,
+      legendaryPlusRarityFilter(),
+    ),
+  )
+  if (selectedPasses.length === 0) {
+    throw new Error('No Legendary+ passes found for this username.')
+  }
+
+  const passesToFetch = uniqueUsernameImportPasses(selectedPasses)
+  const summary = await importPassesToOwnershipPayload(passesToFetch)
+  return {
+    ...summary,
+    allPasses,
+    rarities,
+  }
+}
+
+async function importPassesToOwnershipPayload(
+  passes: ImportPass[],
+): Promise<MeowbotCatalogImportSummary> {
+  const catalogPasses = new Map<string, CatalogPassInput>()
+  const dailyEarnings: CatalogDailyEarningInput[] = []
+  const failures: string[] = []
+  let passesWithNoEarnings = 0
+
+  await runWithConcurrency(passes, async (pass) => {
+    try {
+      const ready = prepareOwnershipPass(pass)
+      const rows = await fetchDailyRowsForOwnership(pass)
+      if (rows.length === 0) {
+        passesWithNoEarnings += 1
+        catalogPasses.set(ready.externalKey, passToOwnershipInput(pass, false, 0))
+        return
+      }
+      const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+      catalogPasses.set(ready.externalKey, passToOwnershipInput(pass, true, totalBaseRax))
+      dailyEarnings.push(...rows)
+    } catch (error) {
+      failures.push(`${pass.name}: ${error instanceof Error ? error.message : 'unknown error'}`)
+    }
+  })
+
+  return {
+    passesScanned: passes.length,
+    passesUpserted: catalogPasses.size,
+    rowsUpserted: dailyEarnings.length,
+    passesWithNoEarnings,
+    failures,
+    passes: [...catalogPasses.values()],
+    dailyEarnings,
+  }
 }
 
 export async function importSpecificMeowbotPassToCatalog(input: {

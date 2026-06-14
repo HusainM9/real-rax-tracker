@@ -1,5 +1,9 @@
-import { importCatalogProfileIntoData } from './catalogImport'
-import { fetchCatalogImportProfile, type CatalogImportProfile } from './catalogApi'
+import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { legendaryPlusRarityFilter, passMatchesRarityFilter } from '../../lib/rarityFilter'
+import {
+  resolveUsernameImportSeasonLabel,
+  usernameImportExternalKey,
+} from '../../lib/usernameImportShared'
 import { createId } from './id'
 import {
   buildPlayerExternalKey,
@@ -13,8 +17,8 @@ import {
   type MeowbotPlayerPass,
 } from './meowbotApi'
 import { parseRealAppToolsDailyRows } from './realAppToolsImport'
-import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
-import { passMetadataKey, seasonLabelFromPass, isCalendarYearSport } from './seasonLabel'
+import { resolveImportPassKind } from './passKind'
+import { passMetadataKey } from './seasonLabel'
 import type {
   PlayerCard,
   RaxPerformance,
@@ -156,7 +160,11 @@ type OwnershipSnapshotPayload = {
   username?: string
   importedAt?: string
   updatedAt?: string
+  error?: string
+  rarities?: Record<string, string[]>
   passes?: OwnershipSnapshotPass[]
+  passesEncoding?: 'gzip-base64'
+  passesPayload?: string
 }
 
 function nowIso(): string {
@@ -168,136 +176,13 @@ function passLabel(pass: MeowbotPlayerPass): string {
   return pass.passKind === 'team' ? `Team ${pass.entityId}` : `Player ${pass.entityId}`
 }
 
-function resolvePassMeta(pass: MeowbotPlayerPass, seasonLabelByKey?: Map<string, string>): {
-  sport: Sport
-  seasonLabel: string
-  externalKey: string
-  passName: string
-} {
-  const sport = mapMeowbotSport(pass.sportRaw) as Sport
-  const metaKey = passMetadataKey(pass.entityId, pass.season, pass.sportRaw)
-  const seasonLabel = isCalendarYearSport(pass.sportRaw)
-    ? String(pass.season)
-    : (pass.seasonLabel ?? seasonLabelByKey?.get(metaKey) ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
-  return {
-    sport,
-    seasonLabel,
-    externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
-    passName: pass.playerName ?? passLabel(pass),
-  }
-}
-
-async function attachCatalogEarningsForPasses(
-  current: RaxTrackerData,
-  passes: MeowbotPlayerPass[],
-  options?: Pick<UsernameImportOptions, 'signal' | 'onProgress'>,
-): Promise<{
-  data: RaxTrackerData
-  rowsImported: number
-  rowsUpdated: number
-  passesWithNoEarnings: PassWithNoEarnings[]
-  passFetchErrors: PassFetchError[]
-  errors: string[]
-  catalogConfigured: boolean
-}> {
-  const passesWithNoEarnings: PassWithNoEarnings[] = []
-  const passFetchErrors: PassFetchError[] = []
-  const errors: string[] = []
-  let data = current
-  let rowsImported = 0
-  let rowsUpdated = 0
-  let catalogConfigured = true
-  let completed = 0
-  const total = passes.length
-  const reportProgress = options?.onProgress
-    ? createThrottledProgress(options.onProgress)
-    : undefined
-
-  await runWithConcurrency(
-    passes,
-    DEFAULT_IMPORT_CONCURRENCY,
-    async (pass) => {
-      const { sport, seasonLabel, externalKey, passName } = resolvePassMeta(pass)
-      const passMeta = {
-        name: passName,
-        sport,
-        season: seasonLabel,
-        rarityLabel: pass.rarityLabel,
-        externalKey,
-        passKind: pass.passKind,
-      }
-
-      try {
-        const { profile, storageConfigured } = await fetchCatalogImportProfile(
-          externalKey,
-          options?.signal,
-        )
-        if (!storageConfigured) {
-          catalogConfigured = false
-          return
-        }
-        if (!profile) {
-          if (pass.passKind === 'player') {
-            passFetchErrors.push({
-              ...passMeta,
-              message: 'Pass was not found in the shared catalog.',
-            })
-            errors.push(`${passName}: not found in shared catalog.`)
-          }
-          return
-        }
-        if (profile.rows.length === 0) {
-          if (pass.passKind === 'player') {
-            passesWithNoEarnings.push(passMeta)
-            errors.push(`${passName}: no daily RAX rows in shared catalog yet.`)
-          }
-          return
-        }
-
-        const enrichedProfile: CatalogImportProfile = {
-          ...profile,
-          name: profile.name.trim() || passName,
-          rarityLabel: pass.rarityLabel ?? profile.rarityLabel,
-          passKind: pass.passKind,
-        }
-        const imported = importCatalogProfileIntoData(data, enrichedProfile, {
-          nowIso: nowIso(),
-          createId,
-        })
-        data = imported.data
-        rowsImported += imported.result.rowsImported
-        rowsUpdated += imported.result.rowsUpdated
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Could not load catalog earnings.'
-        if (pass.passKind === 'player') {
-          passFetchErrors.push({ ...passMeta, message })
-        }
-        errors.push(`${passName}: ${message}`)
-      } finally {
-        completed += 1
-        reportProgress?.({
-          phase: 'fetching',
-          current: completed,
-          total,
-          label: `${passName} · catalog RAX`,
-        })
-      }
-    },
-    options?.signal,
-  )
-
-  return {
-    data,
-    rowsImported,
-    rowsUpdated,
-    passesWithNoEarnings,
-    passFetchErrors,
-    errors:
-      !catalogConfigured && passes.length > 0
-        ? [...errors, 'Shared catalog is not configured — cards were added without RAX.']
-        : errors,
-    catalogConfigured,
-  }
+function withResolvedPassKind(pass: MeowbotPlayerPass): MeowbotPlayerPass {
+  const passKind = resolveImportPassKind({
+    passKind: pass.passKind,
+    name: pass.playerName ?? passLabel(pass),
+    sportRaw: pass.sportRaw,
+  })
+  return passKind === pass.passKind ? pass : { ...pass, passKind }
 }
 
 function snapshotEarningsToDrafts(
@@ -306,6 +191,12 @@ function snapshotEarningsToDrafts(
   sport: Sport,
   earnings: NonNullable<OwnershipSnapshotPass['earnings']>,
 ): PerformanceDraft[] {
+  const passKind = resolveImportPassKind({
+    passKind: pass.passKind,
+    name: pass.playerName ?? passLabel(pass),
+    sportRaw: pass.sportRaw,
+    sport,
+  })
   const parsed = parseRealAppToolsDailyRows(
     earnings.map((row) => ({
       day: row.claimDay,
@@ -316,7 +207,7 @@ function snapshotEarningsToDrafts(
       sport,
       rarityLabel: pass.rarityLabel,
       applyOtdMultiplier: true,
-      passKind: pass.passKind,
+      passKind,
     },
   )
 
@@ -329,70 +220,72 @@ function snapshotEarningsToDrafts(
   }))
 }
 
-async function attachAdminSnapshotEarnings(
+function attachAdminSnapshotEarnings(
   current: RaxTrackerData,
-  passes: MeowbotPlayerPass[],
-  earningsByExternalKey: Map<string, NonNullable<OwnershipSnapshotPass['earnings']>>,
+  snapshotPasses: OwnershipSnapshotPass[],
   cardIdByExternalKey: Map<string, string>,
-  options?: Pick<UsernameImportOptions, 'signal' | 'onProgress'>,
-): Promise<{
+): {
   data: RaxTrackerData
   rowsImported: number
-  rowsUpdated: number
   passesWithNoEarnings: PassWithNoEarnings[]
   passFetchErrors: PassFetchError[]
   errors: string[]
-  catalogConfigured: boolean
-}> {
-  const passesNeedingCatalog: MeowbotPlayerPass[] = []
+} {
   const performanceDrafts: PerformanceDraft[] = []
   const cardIdsToReplace = new Set<string>()
+  const passesWithNoEarnings: PassWithNoEarnings[] = []
+  const errors: string[] = []
 
-  for (const pass of passes) {
-    const sport = mapMeowbotSport(pass.sportRaw) as Sport
-    const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
+  for (const pass of snapshotPasses) {
+    const sportRaw = rawSportFromDisplay(pass.sport)
+    const sport = mapMeowbotSport(sportRaw) as Sport
+    const externalKey = usernameImportExternalKey(pass.entityId, pass.seasonYear, sportRaw)
     const cardId = cardIdByExternalKey.get(externalKey)
     if (!cardId) continue
 
-    const earnings = earningsByExternalKey.get(externalKey)
-    if (earnings && earnings.length > 0) {
-      cardIdsToReplace.add(cardId)
-      performanceDrafts.push(...snapshotEarningsToDrafts(cardId, pass, sport, earnings))
-    } else {
-      passesNeedingCatalog.push(pass)
+    const seasonLabel = resolveUsernameImportSeasonLabel({
+      sportRaw,
+      seasonYear: pass.seasonYear,
+      passSeasonLabel: pass.season,
+    })
+    const passMeta = {
+      name: pass.name,
+      sport,
+      season: seasonLabel,
+      rarityLabel: pass.rarityLabel,
+      externalKey,
+      passKind: pass.passKind,
     }
+    const meowbotPass: MeowbotPlayerPass = {
+      entityId: pass.entityId,
+      season: pass.seasonYear,
+      sportRaw,
+      pair: `${pass.entityId}:${pass.seasonYear}:${sportRaw}`,
+      passKind: pass.passKind,
+      rarityLabel: pass.rarityLabel,
+      playerName: pass.name,
+      seasonLabel: pass.season,
+    }
+
+    if (pass.earnings && pass.earnings.length > 0) {
+      cardIdsToReplace.add(cardId)
+      performanceDrafts.push(...snapshotEarningsToDrafts(cardId, meowbotPass, sport, pass.earnings))
+      continue
+    }
+
+    passesWithNoEarnings.push(passMeta)
+    errors.push(
+      `${pass.name}: no daily earnings in admin snapshot — add RAX manually on the Entry page (Add card & earnings).`,
+    )
   }
 
   const merged = mergePerformances(current, performanceDrafts, cardIdsToReplace)
-  let rowsImported = merged.rowsImported
-  let rowsUpdated = 0
-
-  if (passesNeedingCatalog.length === 0) {
-    return {
-      data: merged.data,
-      rowsImported,
-      rowsUpdated,
-      passesWithNoEarnings: [],
-      passFetchErrors: [],
-      errors: [],
-      catalogConfigured: true,
-    }
-  }
-
-  const catalogAttach = await attachCatalogEarningsForPasses(
-    merged.data,
-    passesNeedingCatalog,
-    options,
-  )
-
   return {
-    data: catalogAttach.data,
-    rowsImported: rowsImported + catalogAttach.rowsImported,
-    rowsUpdated: catalogAttach.rowsUpdated,
-    passesWithNoEarnings: catalogAttach.passesWithNoEarnings,
-    passFetchErrors: catalogAttach.passFetchErrors,
-    errors: catalogAttach.errors,
-    catalogConfigured: catalogAttach.catalogConfigured,
+    data: merged.data,
+    rowsImported: merged.rowsImported,
+    passesWithNoEarnings,
+    passFetchErrors: [],
+    errors,
   }
 }
 
@@ -421,7 +314,12 @@ async function loadMeowbotPerformanceDrafts(
     sport,
     rarityLabel: pass.rarityLabel,
     applyOtdMultiplier: true,
-    passKind: pass.passKind,
+    passKind: resolveImportPassKind({
+      passKind: pass.passKind,
+      name: pass.playerName ?? passLabel(pass),
+      sportRaw: pass.sportRaw,
+      sport,
+    }),
   })
 
   return {
@@ -453,15 +351,12 @@ function resolvePassSeasonLabel(
   seasonLabelByKey: Map<string, string>,
   metaKey: string,
 ): string {
-  if (isCalendarYearSport(pass.sportRaw)) {
-    return String(pass.season)
-  }
-
-  return (
-    seasonLabelByKey.get(metaKey) ??
-    pass.seasonLabel ??
-    seasonLabelFromPass(pass.season, pass.sportRaw)
-  ).trim()
+  return resolveUsernameImportSeasonLabel({
+    sportRaw: pass.sportRaw,
+    seasonYear: pass.season,
+    otdSeasonLabel: seasonLabelByKey.get(metaKey),
+    passSeasonLabel: pass.seasonLabel,
+  })
 }
 
 function rawSportFromDisplay(sport: string): string {
@@ -492,13 +387,15 @@ function rawSportFromDisplay(sport: string): string {
   }
 }
 
-function isLegendaryPlus(rarityLabel?: string): boolean {
-  if (!rarityLabel) return false
-  const normalized = rarityLabel.trim().toLowerCase()
-  return (
-    normalized.startsWith('legendary') ||
-    normalized.startsWith('mystic') ||
-    normalized.startsWith('iconic')
+function isLegendaryPlusSnapshotPass(
+  pass: MeowbotPlayerPass,
+  rarities: Record<string, string[]>,
+): boolean {
+  return passMatchesRarityFilter(
+    pass,
+    rarities,
+    pass.rarityLabel,
+    legendaryPlusRarityFilter(),
   )
 }
 
@@ -612,7 +509,7 @@ function mergePerformances(
 async function fetchOwnershipSnapshotPayload(
   username: string,
   signal?: AbortSignal,
-): Promise<OwnershipSnapshotPayload> {
+): Promise<OwnershipSnapshotPayload & { passes: OwnershipSnapshotPass[] }> {
   const response = await fetch('/api/import/ownership', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -620,12 +517,17 @@ async function fetchOwnershipSnapshotPayload(
     signal,
   })
   const text = await response.text()
-  let body: unknown = null
+  let body: OwnershipSnapshotPayload | null = null
   if (text.trim()) {
     try {
-      body = JSON.parse(text)
+      body = JSON.parse(text) as OwnershipSnapshotPayload
     } catch {
-      body = null
+      const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
+      throw new Error(
+        response.ok
+          ? `Admin snapshot returned invalid JSON: ${snippet}`
+          : `Admin snapshot failed (${response.status}): ${snippet}`,
+      )
     }
   }
   if (!body) {
@@ -633,12 +535,26 @@ async function fetchOwnershipSnapshotPayload(
   }
   if (!response.ok) {
     const errorMessage =
-      body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
-        ? (body as { error: string }).error
+      typeof body.error === 'string'
+        ? body.error
         : `Ownership import failed (${response.status}).`
     throw new Error(errorMessage)
   }
-  return body as OwnershipSnapshotPayload
+
+  let passes = body.passes
+  if (
+    (!passes || passes.length === 0) &&
+    body.passesEncoding === 'gzip-base64' &&
+    typeof body.passesPayload === 'string'
+  ) {
+    passes = (await gunzipBase64ToJson(body.passesPayload)) as OwnershipSnapshotPass[]
+  }
+
+  if (!Array.isArray(passes) || passes.length === 0) {
+    throw new Error('Admin snapshot contained no passes.')
+  }
+
+  return { ...body, passes }
 }
 
 export async function importFromUsername(
@@ -657,7 +573,7 @@ export async function importFromUsername(
   reportProgress?.({ phase: 'resolving', current: 0, total: 1, label: 'Looking up username…' })
   const resolved = await resolveUserPasses(username, options?.signal)
 
-  const allPasses = [...resolved.playerPasses, ...resolved.teamPasses]
+  const allPasses = [...resolved.playerPasses, ...resolved.teamPasses].map(withResolvedPassKind)
   const selectedPasses = allPasses.filter((pass) =>
     passMatchesRarityFilter(
       pass,
@@ -842,9 +758,10 @@ export async function importFromAdminOwnership(
 
   const snapshot = await fetchOwnershipSnapshotPayload(username, options?.signal)
   const rawPasses = Array.isArray(snapshot.passes) ? snapshot.passes : []
+  const rarities = snapshot.rarities ?? {}
   const allPasses: MeowbotPlayerPass[] = rawPasses.map((pass) => {
     const sportRaw = rawSportFromDisplay(pass.sport)
-    return {
+    return withResolvedPassKind({
       entityId: pass.entityId,
       season: pass.seasonYear,
       sportRaw,
@@ -853,20 +770,38 @@ export async function importFromAdminOwnership(
       rarityLabel: pass.rarityLabel,
       playerName: pass.name,
       seasonLabel: pass.season,
-    }
+    })
   })
-  const selectedPasses = allPasses.filter((pass) => isLegendaryPlus(pass.rarityLabel))
+  const selectedPasses = allPasses.filter((pass) => isLegendaryPlusSnapshotPass(pass, rarities))
   if (selectedPasses.length === 0) {
     throw new Error('No Legendary+ passes found in admin ownership snapshot for this username.')
   }
 
+  const selectedSnapshotPasses = rawPasses.filter((pass) => {
+    const sportRaw = rawSportFromDisplay(pass.sport)
+    return isLegendaryPlusSnapshotPass(
+      {
+        entityId: pass.entityId,
+        season: pass.seasonYear,
+        sportRaw,
+        pair: `${pass.entityId}:${pass.seasonYear}:${sportRaw}`,
+        passKind: pass.passKind,
+        rarityLabel: pass.rarityLabel,
+        seasonLabel: pass.season,
+      },
+      rarities,
+    )
+  })
+
   const cardDrafts: CardDraft[] = selectedPasses.map((pass) => {
     const sport = mapMeowbotSport(pass.sportRaw)
-    const seasonLabel = isCalendarYearSport(pass.sportRaw)
-      ? String(pass.season)
-      : (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
+    const seasonLabel = resolveUsernameImportSeasonLabel({
+      sportRaw: pass.sportRaw,
+      seasonYear: pass.season,
+      passSeasonLabel: pass.seasonLabel,
+    })
     return {
-      externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
+      externalKey: usernameImportExternalKey(pass.entityId, pass.season, pass.sportRaw),
       name: pass.playerName ?? passLabel(pass),
       sport,
       season: seasonLabel,
@@ -877,18 +812,10 @@ export async function importFromAdminOwnership(
   })
   const { data: nextData, cardsCreated, cardsUpdated, cardIdByExternalKey } = upsertCards(current, cardDrafts)
 
-  const earningsByExternalKey = new Map(
-    rawPasses.flatMap((pass) =>
-      pass.earnings && pass.earnings.length > 0 ? [[pass.externalKey, pass.earnings] as const] : [],
-    ),
-  )
-
-  const earningsAttach = await attachAdminSnapshotEarnings(
+  const earningsAttach = attachAdminSnapshotEarnings(
     nextData,
-    selectedPasses,
-    earningsByExternalKey,
+    selectedSnapshotPasses,
     cardIdByExternalKey,
-    options,
   )
   const finalData = earningsAttach.data
 
@@ -901,9 +828,11 @@ export async function importFromAdminOwnership(
 
   const ownedPasses: OwnedPassSnapshot[] = allPasses.map((pass) => {
     const sport = mapMeowbotSport(pass.sportRaw) as Sport
-    const seasonLabel = isCalendarYearSport(pass.sportRaw)
-      ? String(pass.season)
-      : (pass.seasonLabel ?? seasonLabelFromPass(pass.season, pass.sportRaw)).trim()
+    const seasonLabel = resolveUsernameImportSeasonLabel({
+      sportRaw: pass.sportRaw,
+      seasonYear: pass.season,
+      passSeasonLabel: pass.seasonLabel,
+    })
     return {
       name: pass.playerName ?? passLabel(pass),
       sport,
@@ -911,7 +840,7 @@ export async function importFromAdminOwnership(
       seasonYear: pass.season,
       entityId: pass.entityId,
       rarityLabel: pass.rarityLabel,
-      externalKey: buildPlayerExternalKey(pass.entityId, pass.season, sport),
+      externalKey: usernameImportExternalKey(pass.entityId, pass.season, pass.sportRaw),
       passKind: pass.passKind,
     }
   })

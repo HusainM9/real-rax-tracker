@@ -22,10 +22,15 @@ export function normalizeSportForSeasonWindow(sport: string): string {
   return RAW_SPORT_MAP[trimmed.toLowerCase()] ?? trimmed.toUpperCase()
 }
 
+function isCalendarYearSportNormalized(normalized: string): boolean {
+  const upper = normalized.toUpperCase()
+  return upper === 'MLB' || upper === 'WNBA' || upper === 'GOLF' || upper === 'UFC'
+}
+
 /** How Real encodes `season_year` on a pass for each sport. */
 export function seasonYearKindForSport(sport: string): SeasonYearKind {
   const normalized = normalizeSportForSeasonWindow(sport)
-  if (normalized === 'MLB' || normalized === 'WNBA' || normalized === 'GOLF' || normalized === 'UFC') {
+  if (isCalendarYearSportNormalized(normalized)) {
     return 'calendar'
   }
   if (normalized === 'CBB' || normalized === 'CFB') {
@@ -132,7 +137,7 @@ export function resolveCatalogPassSeasonYear(
 export function expectedSeasonLabelFromYear(seasonYear: number, sport: string): string {
   if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
   const normalized = normalizeSportForSeasonWindow(sport)
-  if (normalized === 'MLB' || normalized === 'WNBA' || normalized === 'GOLF' || normalized === 'UFC') {
+  if (isCalendarYearSportNormalized(normalized)) {
     return String(seasonYear)
   }
   if (normalized === 'CBB' || normalized === 'CFB') {
@@ -163,6 +168,23 @@ export function importSeasonLabelForCatalog(
   }
 
   return expected
+}
+
+/** @deprecated Use resolveUsernameImportSeasonLabel from usernameImportShared. */
+export function ownershipImportSeasonLabel(
+  sport: string,
+  seasonYear: number,
+  seasonLabel?: string,
+): string {
+  const normalized = normalizeSportForSeasonWindow(sport)
+  if (isCalendarYearSportNormalized(normalized)) {
+    return String(seasonYear)
+  }
+
+  const incoming = seasonLabel?.replace(/\u2013|\u2014/g, '-').trim() ?? ''
+  if (incoming) return incoming
+
+  return expectedSeasonLabelFromYear(seasonYear, sport)
 }
 
 export function buildCatalogExternalKey(

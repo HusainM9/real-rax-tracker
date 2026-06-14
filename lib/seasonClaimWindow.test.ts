@@ -6,7 +6,9 @@ import {
   passSeasonDateWindow,
   canonicalCatalogPassMetadata,
   expectedSeasonLabelFromYear,
+  importSeasonLabelForCatalog,
   isCatalogSeasonMetadataAligned,
+  ownershipImportSeasonLabel,
   resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'
 
@@ -68,6 +70,20 @@ describe('expectedSeasonLabelFromYear', () => {
     expect(expectedSeasonLabelFromYear(2024, 'NBA')).toBe('2023-24')
     expect(expectedSeasonLabelFromYear(2024, 'CBB')).toBe('2024-25')
     expect(expectedSeasonLabelFromYear(2024, 'MLB')).toBe('2024')
+  })
+})
+
+describe('ownershipImportSeasonLabel', () => {
+  it('keeps Meowbot OTD labels even when catalog canonicalization would rewrite them', () => {
+    expect(ownershipImportSeasonLabel('NFL', 2024, '2024-25')).toBe('2024-25')
+    expect(importSeasonLabelForCatalog('NFL', 2024, '2024-25')).toBe('2023-24')
+    expect(ownershipImportSeasonLabel('NFL', 2025, '2024-25')).toBe('2024-25')
+    expect(ownershipImportSeasonLabel('NHL', 2024, '2023-24')).toBe('2023-24')
+  })
+
+  it('falls back to season_year encoding when OTD label is missing', () => {
+    expect(ownershipImportSeasonLabel('NFL', 2025, undefined)).toBe('2024-25')
+    expect(ownershipImportSeasonLabel('Golf', 2025, undefined)).toBe('2025')
   })
 })
 

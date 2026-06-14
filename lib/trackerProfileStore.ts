@@ -180,6 +180,67 @@ export async function getTrackerProfile(
   }
 }
 
+export type TrackerProfileTransfer = {
+  username: string
+  updatedAt: string
+  cardCount: number
+  performanceCount: number
+  data?: unknown
+  dataBlob?: string
+  dataEncoding?: 'gzip-base64'
+}
+
+export async function getTrackerProfileTransfer(
+  username: string,
+  passphrase: string,
+): Promise<{
+  transfer: TrackerProfileTransfer | null
+  storageConfigured: boolean
+  unauthorized: boolean
+}> {
+  if (!profileSyncConfigured()) {
+    return { transfer: null, storageConfigured: false, unauthorized: false }
+  }
+
+  const normalizedUsername = normalizeRealUsername(username)
+  let pin: string
+  try {
+    pin = assertValidSyncPin(passphrase)
+  } catch (error) {
+    if (!normalizedUsername) {
+      return { transfer: null, storageConfigured: true, unauthorized: true }
+    }
+    throw error
+  }
+  if (!normalizedUsername) {
+    return { transfer: null, storageConfigured: true, unauthorized: true }
+  }
+
+  const stored = await kv.get<StoredTrackerProfile | null>(profileKey(normalizedUsername))
+  if (!stored) {
+    return { transfer: null, storageConfigured: true, unauthorized: false }
+  }
+
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  if (stored.passphraseHash !== passphraseHash) {
+    return { transfer: null, storageConfigured: true, unauthorized: true }
+  }
+
+  return {
+    transfer: {
+      username: stored.username,
+      updatedAt: stored.updatedAt,
+      cardCount: stored.cardCount,
+      performanceCount: stored.performanceCount,
+      data: stored.data,
+      dataBlob: stored.dataBlob,
+      dataEncoding: stored.dataEncoding,
+    },
+    storageConfigured: true,
+    unauthorized: false,
+  }
+}
+
 export async function saveTrackerProfile(input: {
   username: string
   passphrase: string

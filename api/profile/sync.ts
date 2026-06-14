@@ -1,6 +1,6 @@
 import { requireAppSession } from '../admin/_helpers'
 import {
-  getTrackerProfile,
+  getTrackerProfileTransfer,
   profileSyncConfigured,
   saveTrackerProfile,
 } from '../../lib/trackerProfileStore'
@@ -47,22 +47,25 @@ export default async function handler(request: Request): Promise<Response> {
     }
 
     try {
-      const result = await getTrackerProfile(username, passphrase)
+      const result = await getTrackerProfileTransfer(username, passphrase)
       if (result.unauthorized) {
         return Response.json({ error: 'Incorrect sync PIN for this username.' }, { status: 403 })
       }
-      if (!result.profile) {
+      if (!result.transfer) {
         return Response.json({ error: 'No cloud profile found for this username.' }, { status: 404 })
       }
 
+      const transfer = result.transfer
       return Response.json({
         ok: true,
         storageConfigured: true,
-        username: result.profile.username,
-        updatedAt: result.profile.updatedAt,
-        cardCount: result.profile.cardCount,
-        performanceCount: result.profile.performanceCount,
-        data: result.profile.data,
+        username: transfer.username,
+        updatedAt: transfer.updatedAt,
+        cardCount: transfer.cardCount,
+        performanceCount: transfer.performanceCount,
+        dataEncoding: transfer.dataEncoding,
+        dataBlob: transfer.dataBlob,
+        data: transfer.dataEncoding === 'gzip-base64' ? undefined : transfer.data,
       })
     } catch (error) {
       return Response.json(

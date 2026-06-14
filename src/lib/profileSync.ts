@@ -1,4 +1,5 @@
 import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
+import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
 import { readResponseError, readResponseJson } from './readResponseJson'
 import { importTrackerData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
@@ -45,13 +46,20 @@ export async function loadCloudProfile(
 
   const payload = await readResponseJson<{
     data?: unknown
+    dataBlob?: string
+    dataEncoding?: 'gzip-base64'
     updatedAt?: string
     cardCount?: number
     performanceCount?: number
     storageConfigured?: boolean
   }>(response)
 
-  const parsed = importTrackerData(JSON.stringify(payload.data ?? {}))
+  let rawData: unknown = payload.data
+  if (payload.dataEncoding === 'gzip-base64' && typeof payload.dataBlob === 'string') {
+    rawData = await gunzipBase64ToJson(payload.dataBlob)
+  }
+
+  const parsed = importTrackerData(JSON.stringify(rawData ?? {}))
   const reportedCards = Number(payload.cardCount) || 0
   const reportedPerformances = Number(payload.performanceCount) || 0
   if (reportedCards > 0 && parsed.cards.length === 0) {

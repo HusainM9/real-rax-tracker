@@ -15,7 +15,8 @@ import { manualCatalogUpsertPayload } from '../../lib/manualCatalogUpsert'
 import { requireAdminSession } from './_helpers'
 
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
+  maxDuration: 300,
 }
 
 type ImportMode = 'saved-usernames' | 'usernames' | 'pass' | 'otd-table' | 'manual-upsert'

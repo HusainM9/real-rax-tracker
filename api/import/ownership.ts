@@ -1,4 +1,5 @@
 import { adminStorageConfigured } from '../../lib/adminEventStore'
+import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression'
 import { getImportOwnershipSnapshot } from '../../lib/importOwnershipStore'
 import { normalizeRealUsername } from '../../lib/importOwnershipTypes'
 import { requireAppSession } from '../admin/_helpers'
@@ -55,7 +56,9 @@ export default async function handler(request: Request): Promise<Response> {
     username: snapshot.realUsername,
     importedAt: snapshot.importedAt,
     updatedAt: snapshot.updatedAt,
-    passes: snapshot.passes,
+    ...(snapshot.rarities ? { rarities: snapshot.rarities } : {}),
+    passesEncoding: 'gzip-base64',
+    passesPayload: await gzipJsonToBase64(snapshot.passes),
   })
 }
 

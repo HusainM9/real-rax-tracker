@@ -87,7 +87,14 @@ async function invokeFunction(
     throw new Error(`Request failed (${response.status}). Try again or use manual paste.`)
   }
 
-  const data = (await response.json()) as { error?: string }
+  const text = await response.text()
+  let data: { error?: string }
+  try {
+    data = JSON.parse(text) as { error?: string }
+  } catch {
+    const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
+    throw new Error(`Meowbot returned an invalid response: ${snippet}`)
+  }
   if (data.error) {
     throw new Error(data.error)
   }

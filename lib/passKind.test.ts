@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest'
+import { looksLikeTeamPassName, resolveImportPassKind } from './passKind'
+
+describe('looksLikeTeamPassName', () => {
+  it('detects common Real team pass names', () => {
+    expect(looksLikeTeamPassName('DEN Nuggets')).toBe(true)
+    expect(looksLikeTeamPassName('LAL Lakers')).toBe(true)
+    expect(looksLikeTeamPassName('Boise St')).toBe(true)
+    expect(looksLikeTeamPassName('Team 400')).toBe(true)
+  })
+
+  it('does not treat player names as team passes', () => {
+    expect(looksLikeTeamPassName('Julian Strawther')).toBe(false)
+    expect(looksLikeTeamPassName('Christian Braun')).toBe(false)
+  })
+})
+
+describe('resolveImportPassKind', () => {
+  it('keeps explicit team passes', () => {
+    expect(resolveImportPassKind({ passKind: 'team', name: 'Anyone' })).toBe('team')
+  })
+
+  it('upgrades misclassified FC team passes', () => {
+    expect(
+      resolveImportPassKind({ passKind: 'player', name: 'MCI', sportRaw: 'fc' }),
+    ).toBe('team')
+    expect(
+      resolveImportPassKind({ passKind: 'player', name: 'MCI Card', sport: 'FC' }),
+    ).toBe('team')
+  })
+
+  it('upgrades NBA-style team names even when Meowbot marks player', () => {
+    expect(
+      resolveImportPassKind({ passKind: 'player', name: 'DEN Nuggets', sportRaw: 'nba' }),
+    ).toBe('team')
+  })
+
+  it('keeps player passes when the name is clearly a player', () => {
+    expect(
+      resolveImportPassKind({ passKind: 'player', name: 'Erling Haaland', sportRaw: 'fc' }),
+    ).toBe('player')
+  })
+})

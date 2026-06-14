@@ -6,7 +6,13 @@ import {
   type ImportOwnershipPass,
   type ImportOwnershipSnapshot,
 } from './importOwnershipTypes'
-import { importMeowbotUsernameToCatalog } from './meowbotServerImport'
+import { importMeowbotUsernameToOwnershipSnapshot } from './meowbotServerImport'
+import {
+  displaySportFromRaw,
+  resolveUsernameImportSeasonLabel,
+  usernameImportExternalKey,
+} from './usernameImportShared'
+import { resolveImportPassKind } from './passKind'
 
 const ADMIN_CLIENT_ID = 'admin-username-ownership'
 
@@ -37,6 +43,7 @@ export function meowbotPassToOwnershipPass(pass: {
 export function buildUsernameOwnershipSnapshot(
   username: string,
   passes: ImportOwnershipPass[],
+  rarities?: Record<string, string[]>,
 ): ImportOwnershipSnapshot {
   const realUsername = normalizeRealUsername(username)
   return trimOwnershipSnapshotEarnings({
@@ -44,6 +51,7 @@ export function buildUsernameOwnershipSnapshot(
     clientId: ADMIN_CLIENT_ID,
     importedAt: new Date().toISOString(),
     passes,
+    ...(rarities ? { rarities } : {}),
   })
 }
 
@@ -54,7 +62,7 @@ export async function importUsernameOwnershipSnapshot(username: string): Promise
   failures: string[]
   snapshot: ImportOwnershipSnapshot
 }> {
-  const summary = await importMeowbotUsernameToCatalog(username)
+  const summary = await importMeowbotUsernameToOwnershipSnapshot(username)
   const earningsByKey = new Map<string, ImportOwnershipEarningRow[]>()
 
   for (const row of summary.dailyEarnings) {
@@ -67,21 +75,34 @@ export async function importUsernameOwnershipSnapshot(username: string): Promise
     earningsByKey.set(row.externalKey, list)
   }
 
-  const passes: ImportOwnershipPass[] = summary.passes.map((pass) =>
-    meowbotPassToOwnershipPass({
+  const passes: ImportOwnershipPass[] = summary.allPasses.map((pass) => {
+    const sport = displaySportFromRaw(pass.sportRaw)
+    const seasonLabel = resolveUsernameImportSeasonLabel({
+      sportRaw: pass.sportRaw,
+      seasonYear: pass.seasonYear,
+      passSeasonLabel: pass.seasonLabel,
+    })
+    const passKind = resolveImportPassKind({
+      passKind: pass.passKind,
       name: pass.name,
-      sport: pass.sport,
-      seasonLabel: pass.seasonLabel,
+      sportRaw: pass.sportRaw,
+      sport,
+    })
+    const externalKey = usernameImportExternalKey(pass.entityId, pass.seasonYear, pass.sportRaw)
+    return meowbotPassToOwnershipPass({
+      name: pass.name,
+      sport,
+      seasonLabel,
       seasonYear: pass.seasonYear,
       entityId: pass.entityId,
       rarityLabel: pass.rarityLabel,
-      externalKey: pass.externalKey,
-      passKind: pass.passKind,
-      earnings: earningsByKey.get(pass.externalKey),
-    }),
-  )
+      externalKey,
+      passKind,
+      earnings: earningsByKey.get(externalKey),
+    })
+  })
 
-  const snapshot = buildUsernameOwnershipSnapshot(username, passes)
+  const snapshot = buildUsernameOwnershipSnapshot(username, passes, summary.rarities)
   if (snapshot.passes.length === 0) {
     throw new Error(`No passes found for @${snapshot.realUsername}.`)
   }

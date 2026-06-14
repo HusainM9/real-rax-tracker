@@ -2,6 +2,7 @@ import { adminStorageConfigured } from '../../lib/adminEventStore'
 import { normalizeRealUsername, validateImportOwnershipSnapshot } from '../../lib/importOwnershipTypes'
 import {
   getImportOwnershipSnapshot,
+  listImportOwnershipSnapshotSummaries,
   upsertImportOwnershipSnapshot,
 } from '../../lib/importOwnershipStore'
 import { requireAdminSession, requireAppSession } from './_helpers'
@@ -40,9 +41,15 @@ export default async function handler(request: Request): Promise<Response> {
     if (adminDenied) return adminDenied
 
     const url = new URL(request.url)
+    const listAll = url.searchParams.get('list') === '1'
     const username = normalizeRealUsername(url.searchParams.get('username') ?? '')
-    if (!username) {
-      return Response.json({ error: 'Username is required' }, { status: 400 })
+
+    if (listAll || !username) {
+      const snapshots = await listImportOwnershipSnapshotSummaries()
+      return Response.json({
+        snapshots,
+        storageConfigured: adminStorageConfigured(),
+      })
     }
 
     const snapshot = await getImportOwnershipSnapshot(username)

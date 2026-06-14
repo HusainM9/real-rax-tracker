@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
-import { usernameImportDisabled, realappToolsShutdownLabel } from '../lib/importShutdown'
+import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImportEnabled } from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
@@ -139,6 +139,7 @@ export default function EntryPage() {
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
+  const testingAdminCache = testAdminCacheImportEnabled()
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -610,7 +611,9 @@ export default function EntryPage() {
               / Meowbot — no Real API key needed.
             </p>
           </div>
-          <span className="badge">{importDisabled ? 'Closed' : 'Until shutdown'}</span>
+          <span className="badge">
+            {testingAdminCache ? 'Admin cache test' : importDisabled ? 'Closed' : 'Until shutdown'}
+          </span>
         </div>
         <div className="form-grid">
           <label className="field">

@@ -3,7 +3,8 @@ import { persistUsernameOwnershipSnapshot } from '../../lib/usernameOwnershipImp
 import { requireAdminSession } from './_helpers'
 
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
+  maxDuration: 300,
 }
 
 type RequestBody = {
