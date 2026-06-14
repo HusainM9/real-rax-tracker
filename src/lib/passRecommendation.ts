@@ -8,12 +8,14 @@ import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
+import { computeYearRollup } from './claimOptimizer'
+import { getBaseRaxEarned, sportToMeowbotSlug } from './effectiveRax'
 import { analyzePotentialCard, type PotentialAnalysisResult } from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
 import { computeOtdRax } from './otdRax'
 import { normalizeRarityTier } from './rarityFilter'
 import type { CatalogPassKind } from './catalogApi'
-import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
+import { SPORTS, type PlayerCard, type RaxTrackerData, type Sport } from '../types/rax'
 
 /** All recommendation what-if runs assume buying at this OTD tier. */
 export const RECOMMENDATION_SIMULATED_RARITY = 'Iconic 1'
@@ -518,6 +520,146 @@ function addProfileToData(data: RaxTrackerData, profile: CatalogImportProfile): 
     createId: (prefix) => nextRecommendationId(prefix),
   })
   return nextData
+}
+
+export type OwnedIconicUpgradeCandidate = {
+  key: string
+  name: string
+  sport: Sport
+  season: string
+  card?: PlayerCard
+  profile?: CatalogImportProfile
+}
+
+export type OwnedIconicUpgradeImpactRow = {
+  key: string
+  name: string
+  sport: Sport
+  season: string
+  isolatedNetDelta: number
+  marginalNetDelta: number
+}
+
+export type OwnedIconicUpgradeImpactResult = {
+  rows: OwnedIconicUpgradeImpactRow[]
+  /** Net claimable gain after all upgrades, same-sport picks ordered by isolated value. */
+  combinedNetDelta: number
+  /** Sum of each pass upgraded alone — overcounts when same-sport passes overlap. */
+  combinedIsolatedNetDelta: number
+}
+
+function collectionClaimableTotal(data: RaxTrackerData): number {
+  return computeYearRollup(data).totalClaimableRax
+}
+
+function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): RaxTrackerData {
+  const sportSlug = sportToMeowbotSlug(card.sport)
+  const passKind = card.passKind ?? 'player'
+
+  const nextPerformances = data.performances.map((performance) => {
+    if (performance.cardId !== card.id) return performance
+    const base = getBaseRaxEarned(performance, card)
+    return {
+      ...performance,
+      baseRaxEarned: base,
+      raxEarned: computeOtdRax(base, sportSlug, RECOMMENDATION_SIMULATED_RARITY, passKind),
+    }
+  })
+
+  const nextCards = data.cards.map((item) =>
+    item.id === card.id
+      ? {
+          ...item,
+          rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+          simulatedRarityLabel: undefined,
+        }
+      : item,
+  )
+
+  return { ...data, cards: nextCards, performances: nextPerformances }
+}
+
+function applyIconicUpgradeCandidate(
+  data: RaxTrackerData,
+  candidate: OwnedIconicUpgradeCandidate,
+): RaxTrackerData {
+  if (candidate.card) {
+    return applyOwnedCardIconicUpgrade(data, candidate.card)
+  }
+  if (candidate.profile?.rows.length) {
+    return addProfileToData(data, candidate.profile)
+  }
+  return data
+}
+
+export function ownedCardToIconicUpgradeCandidate(
+  card: PlayerCard,
+): OwnedIconicUpgradeCandidate | null {
+  if (!card.externalKey) return null
+  return {
+    key: card.externalKey,
+    name: card.name,
+    sport: card.sport,
+    season: card.season,
+    card,
+  }
+}
+
+export function analyzeOwnedIconicUpgradeImpacts(
+  data: RaxTrackerData,
+  candidates: OwnedIconicUpgradeCandidate[],
+): OwnedIconicUpgradeImpactResult {
+  const eligible = candidates.filter((candidate) => candidate.card || candidate.profile?.rows.length)
+  if (eligible.length === 0) {
+    return { rows: [], combinedNetDelta: 0, combinedIsolatedNetDelta: 0 }
+  }
+
+  const isolatedByKey = new Map<string, number>()
+  for (const candidate of eligible) {
+    const before = collectionClaimableTotal(data)
+    const after = collectionClaimableTotal(applyIconicUpgradeCandidate(data, candidate))
+    isolatedByKey.set(candidate.key, after - before)
+  }
+
+  const bySport = new Map<Sport, OwnedIconicUpgradeCandidate[]>()
+  for (const candidate of eligible) {
+    const list = bySport.get(candidate.sport) ?? []
+    list.push(candidate)
+    bySport.set(candidate.sport, list)
+  }
+
+  const rows: OwnedIconicUpgradeImpactRow[] = []
+  let workingData = data
+  for (const sport of [...bySport.keys()].sort()) {
+    const ordered = [...(bySport.get(sport) ?? [])].sort(
+      (a, b) => (isolatedByKey.get(b.key) ?? 0) - (isolatedByKey.get(a.key) ?? 0),
+    )
+    for (const candidate of ordered) {
+      const before = collectionClaimableTotal(workingData)
+      workingData = applyIconicUpgradeCandidate(workingData, candidate)
+      const after = collectionClaimableTotal(workingData)
+      rows.push({
+        key: candidate.key,
+        name: candidate.name,
+        sport: candidate.sport,
+        season: candidate.season,
+        isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
+        marginalNetDelta: after - before,
+      })
+    }
+  }
+
+  return {
+    rows,
+    combinedNetDelta: collectionClaimableTotal(workingData) - collectionClaimableTotal(data),
+    combinedIsolatedNetDelta: [...isolatedByKey.values()].reduce((sum, value) => sum + value, 0),
+  }
+}
+
+export function ownedIconicUpgradeImpactByKey(
+  result: OwnedIconicUpgradeImpactResult,
+): Map<string, OwnedIconicUpgradeImpactRow> {
+  return new Map(result.rows.map((row) => [row.key, row]))
 }
 
 function rankCandidatesSync(

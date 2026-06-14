@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { analyzePotentialCard } from './potentialAnalysis'
 import {
   analyzeCatalogCandidate,
+  analyzeOwnedIconicUpgradeImpacts,
   applyRecommendationBaseline,
   catalogProfileToParsedRows,
   filterRecommendationProfiles,
@@ -9,6 +10,7 @@ import {
   isAtLeastIconic1Rarity,
   isPassInRecommendationAdjustments,
   netClaimableDelta,
+  ownedCardToIconicUpgradeCandidate,
   passSeasonIncluded,
   prefilterRecommendationProfiles,
   rankCatalogRecommendations,
@@ -531,5 +533,37 @@ describe('passRecommendation', () => {
     const filtered = filterRecommendationProfiles(data, [duplicateA, duplicateB], { adjustments })
     expect(filtered.skippedAdjusted).toBe(1)
     expect(filtered.candidates).toHaveLength(0)
+  })
+
+  it('accounts for same-sport owned Iconic upgrades when scoring quick-add impact', () => {
+    const upgradeData: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [
+        card('c-low', 'Bench A', '100|2026|NBA', 'Legendary 1'),
+        card('c-high', 'Star B', '101|2026|NBA', 'Legendary 1'),
+      ],
+      performances: [
+        { ...perf('p1', 'c-low', 20, '2026-03-01'), baseRaxEarned: 1 },
+        { ...perf('p2', 'c-high', 30, '2026-03-01'), baseRaxEarned: 1.5 },
+      ],
+      potentialCards: [],
+      savedCardProfiles: [],
+    }
+
+    const candidates = [
+      ownedCardToIconicUpgradeCandidate(upgradeData.cards[1]!),
+      ownedCardToIconicUpgradeCandidate(upgradeData.cards[0]!),
+    ].filter((item): item is NonNullable<typeof item> => item !== null)
+
+    const impacts = analyzeOwnedIconicUpgradeImpacts(upgradeData, candidates)
+    expect(impacts.rows).toHaveLength(2)
+    expect(impacts.combinedNetDelta).toBeGreaterThan(0)
+    expect(impacts.combinedIsolatedNetDelta).toBeGreaterThanOrEqual(impacts.combinedNetDelta)
+
+    const highImpact = impacts.rows.find((row) => row.key === '101|2026|NBA')
+    const lowImpact = impacts.rows.find((row) => row.key === '100|2026|NBA')
+    expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
+    expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
   })
 })
