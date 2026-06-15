@@ -1171,6 +1171,117 @@ label.button input.sr-only {
   margin-top: 0.75rem;
 }
 
+.cloud-profile-panel {
+  border-color: rgba(228, 160, 36, 0.22);
+}
+
+.cloud-load-block {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(228, 160, 36, 0.18);
+  background: rgba(228, 160, 36, 0.04);
+}
+
+.cloud-load-fields {
+  margin-bottom: 0;
+}
+
+.cloud-load-button {
+  width: 100%;
+  min-height: 4rem;
+  padding: 1rem 1.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.cloud-load-meta {
+  margin: 0;
+}
+
+.cloud-sync-advanced {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.cloud-sync-subheading {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.cloud-save-actions .button {
+  flex: 0 1 auto;
+  min-width: min(100%, 9rem);
+  min-height: 2.5rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.app-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--header-height) + 0.75rem) 1rem 1rem;
+  overflow-y: auto;
+  background: rgba(8, 10, 16, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.confirm-dialog {
+  width: min(480px, 100%);
+  margin: 0;
+  padding: 1.25rem 1.35rem 1.35rem;
+}
+
+.confirm-dialog-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.2rem;
+}
+
+.confirm-dialog-body {
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.confirm-dialog-body p {
+  margin: 0 0 0.75rem;
+}
+
+.confirm-dialog-body p:last-child {
+  margin-bottom: 0;
+}
+
+.confirm-dialog-summary {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.confirm-dialog-actions {
+  margin-top: 1.25rem;
+  justify-content: flex-end;
+}
+
+.confirm-dialog-actions .button {
+  flex: 0 1 auto;
+  min-width: 7rem;
+}
+
 .season-filter-summary {
   color: var(--muted);
   font-size: 0.85rem;
