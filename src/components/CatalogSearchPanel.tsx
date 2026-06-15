@@ -13,6 +13,7 @@ export type CatalogSearchPanelProps = {
   loadingLabel?: string
   disabled?: boolean
   emptyHint?: string
+  embedded?: boolean
   onSelect: (result: CatalogSearchResult) => void | Promise<void>
 }
 
@@ -27,6 +28,7 @@ export function CatalogSearchPanel({
   loadingLabel = 'Loading…',
   disabled = false,
   emptyHint,
+  embedded = false,
   onSelect,
 }: CatalogSearchPanelProps) {
   const [query, setQuery] = useState('')
@@ -81,23 +83,34 @@ export function CatalogSearchPanel({
     }
   }, [passKind, query])
 
-  return (
-    <section className="panel form-panel" id={sectionId}>
-      <div className="section-heading">
-        <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
-          <p className="catalog-accuracy-disclaimer">
-            Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
-            totals look too low, add or correct earnings manually using JSON from{' '}
-            <a href="https://realapp.com" target="_blank" rel="noreferrer">
-              realapp.com
-            </a>
-            .
-          </p>
+  const body = (
+    <>
+      {!embedded ? (
+        <div className="section-heading">
+          <div>
+            <h2>{title}</h2>
+            <p>{description}</p>
+            <p className="catalog-accuracy-disclaimer">
+              Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
+              totals look too low, add or correct earnings manually using JSON from{' '}
+              <a href="https://realapp.com" target="_blank" rel="noreferrer">
+                realapp.com
+              </a>
+              .
+            </p>
+          </div>
+          <span className="badge">{badge}</span>
         </div>
-        <span className="badge">{badge}</span>
-      </div>
+      ) : (
+        <p className="catalog-accuracy-disclaimer">
+          Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
+          totals look too low, add or correct earnings manually using JSON from{' '}
+          <a href="https://realapp.com" target="_blank" rel="noreferrer">
+            realapp.com
+          </a>
+          .
+        </p>
+      )}
       <label className="field">
         <span>Search by name, sport, or season</span>
         <input
@@ -144,6 +157,16 @@ export function CatalogSearchPanel({
         </div>
       ) : null}
       {status ? <p className="import-status">{status}</p> : null}
+    </>
+  )
+
+  if (embedded) {
+    return <div id={sectionId}>{body}</div>
+  }
+
+  return (
+    <section className="panel form-panel" id={sectionId}>
+      {body}
     </section>
   )
 }

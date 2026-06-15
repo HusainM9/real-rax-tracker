@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSavedCardProfile,
   profileMatchKey,
+  removeCardFromCollection,
   restoreSavedCardProfile,
   upsertSavedCardProfile,
 } from './cardProfile'
@@ -103,5 +104,49 @@ describe('cardProfile', () => {
         season: '2023',
       }),
     ).toBe('name:patrick mahomes|NFL|2023')
+  })
+
+  it('removeCardFromCollection archives earnings then deletes the card', () => {
+    const base = {
+      ...createEmptyData(),
+      cards: [card],
+      performances,
+    }
+    const next = removeCardFromCollection(base, 'card-1', {
+      removedNote: 'Removed 2026-06-11 (planned sale)',
+    })
+    expect(next?.cards).toHaveLength(0)
+    expect(next?.performances).toHaveLength(0)
+    expect(next?.savedCardProfiles).toHaveLength(1)
+    expect(next?.savedCardProfiles[0]?.rows).toHaveLength(1)
+    expect(next?.savedCardProfiles[0]?.notes).toContain('planned sale')
+  })
+
+  it('removeCardFromCollection prunes saved sell rankings for the removed card', () => {
+    const base = {
+      ...createEmptyData(),
+      cards: [card],
+      performances,
+      savedSellRankings: {
+        calculatedAt: '2026-01-01T00:00:00.000Z',
+        skippedWithoutEarnings: 0,
+        skippedTeamPasses: 0,
+        skippedPlayerPasses: [],
+        rows: [
+          {
+            cardId: 'card-1',
+            name: card.name,
+            sport: card.sport,
+            season: card.season,
+            claimableNow: 100,
+            lostClaimableRax: 100,
+            freedClaimableRax: 0,
+            netClaimableDelta: 0,
+          },
+        ],
+      },
+    }
+    const next = removeCardFromCollection(base, 'card-1', { archiveProfile: false })
+    expect(next?.savedSellRankings?.rows).toHaveLength(0)
   })
 })

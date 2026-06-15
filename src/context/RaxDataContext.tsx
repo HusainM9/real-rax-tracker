@@ -8,7 +8,9 @@ import {
 } from 'react'
 import {
   buildSavedCardProfile,
+  removeCardFromCollection,
   restoreSavedCardProfile,
+  type RemoveCardFromCollectionOptions,
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
 import {
@@ -73,6 +75,7 @@ type RaxDataContextValue = {
   upsertCard: (externalKey: string, input: CardInput) => string
   updateCard: (id: string, patch: Partial<CardInput>) => void
   deleteCard: (id: string) => void
+  removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
   addPerformance: (input: PerformanceInput) => void
   addPerformances: (inputs: PerformanceInput[]) => void
   updatePerformance: (id: string, patch: Partial<PerformanceInput>) => void
@@ -223,11 +226,17 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         }))
       },
       deleteCard: (id) => {
-        setData((current) => ({
-          ...current,
-          cards: current.cards.filter((card) => card.id !== id),
-          performances: current.performances.filter((performance) => performance.cardId !== id),
-        }))
+        setData((current) => removeCardFromCollection(current, id) ?? current)
+      },
+      removeCardFromCollection: (id, options) => {
+        let removed = false
+        setData((current) => {
+          const next = removeCardFromCollection(current, id, options)
+          if (!next) return current
+          removed = true
+          return next
+        })
+        return removed
       },
       addPerformance: (input) => {
         setData((current) => ({

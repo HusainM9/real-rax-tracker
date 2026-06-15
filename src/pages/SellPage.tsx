@@ -5,6 +5,7 @@ import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer
 import { sortCards, type RarityFilterValue, type SortDirection } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRax } from '../lib/format'
+import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
 import { isPlayerPassForSell } from '../lib/passKind'
 import { RARITY_TIERS } from '../lib/rarityFilter'
 import {
@@ -60,7 +61,7 @@ function matchesCardSearch(
 }
 
 export default function SellPage() {
-  const { data, saveSellRankings, clearSellRankings } = useRaxData()
+  const { data, saveSellRankings, clearSellRankings, removeCardFromCollection } = useRaxData()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedCardId = searchParams.get('card') ?? ''
   const [salePrice, setSalePrice] = useState('')
@@ -73,6 +74,7 @@ export default function SellPage() {
   const [rankingInProgress, setRankingInProgress] = useState(false)
   const [rankProgress, setRankProgress] = useState<SellRankProgress | null>(null)
   const [rankStatus, setRankStatus] = useState('')
+  const [removeStatus, setRemoveStatus] = useState('')
   const [rankResultsPage, setRankResultsPage] = useState(1)
   const [skippedPassesPage, setSkippedPassesPage] = useState(1)
   const rankAbortRef = useRef<AbortController | null>(null)
@@ -147,6 +149,26 @@ export default function SellPage() {
       return
     }
     setSearchParams({ card: cardId })
+  }
+
+  const handleRemoveFromCollection = (card: {
+    id: string
+    name: string
+    sport: string
+    season: string
+  }) => {
+    if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
+    const removed = removeCardFromCollection(card.id, {
+      removedNote: `Removed ${new Date().toISOString().slice(0, 10)} (planned sale)`,
+    })
+    if (!removed) return
+    if (selectedCardId === card.id) {
+      setSearchParams({})
+      setSalePrice('')
+    }
+    setRemoveStatus(
+      `Removed ${card.name || 'pass'} from your collection. Earnings saved under Entry → Saved profiles.`,
+    )
   }
 
   const runBulkRanking = async () => {
@@ -250,14 +272,17 @@ export default function SellPage() {
           <h2>If you sell this pass</h2>
           <p>
             See how much claimable RAX you lose, what opens up on other cards, and whether a sale
-            price beats keeping the pass. Player passes only — team passes are excluded. Uses the
-            same guaranteed / overlap / Pro bonus rules as the rest of the tracker.
+            price beats keeping the pass. Remove passes from your collection when you plan to sell —
+            earnings are archived under Entry → Saved profiles. Player passes only — team passes are
+            excluded.
           </p>
         </div>
         <Link className="button" to="/cards">
           Card totals
         </Link>
       </section>
+
+      {removeStatus ? <p className="import-status">{removeStatus}</p> : null}
 
       <CollapsiblePanel
         title="Rank all passes"
@@ -467,6 +492,7 @@ export default function SellPage() {
                         <th>Lost if sold</th>
                         <th>Freed on others</th>
                         <th>Net claimable</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -497,6 +523,22 @@ export default function SellPage() {
                             {isNotNeededForClaims(row.netClaimableDelta) ? (
                               <small className="table-sub sell-not-needed">Not needed</small>
                             ) : null}
+                          </td>
+                          <td>
+                            <button
+                              className="button danger compact"
+                              type="button"
+                              onClick={() =>
+                                handleRemoveFromCollection({
+                                  id: row.cardId,
+                                  name: row.name,
+                                  sport: row.sport,
+                                  season: row.season,
+                                })
+                              }
+                            >
+                              Remove
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -756,6 +798,19 @@ export default function SellPage() {
           ) : (
             <p className="empty">No other cards would gain claimable RAX if you sold this pass.</p>
           )}
+          <div className="button-row">
+            <button
+              className="button danger"
+              type="button"
+              onClick={() => handleRemoveFromCollection(sellAnalysis.card)}
+            >
+              Remove from collection
+            </button>
+          </div>
+          <p className="import-hint">
+            Removes this pass from Dashboard totals and saves earnings under Entry → Saved profiles
+            so you can restore later.
+          </p>
         </CollapsiblePanel>
       )}
     </div>

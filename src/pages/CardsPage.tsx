@@ -14,6 +14,7 @@ import {
   type SortDirection,
 } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
+import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatRax } from '../lib/format'
 import { RARITY_TIERS } from '../lib/rarityFilter'
@@ -33,7 +34,8 @@ function pageCount(count: number, pageSize: number): number {
 }
 
 export default function CardsPage() {
-  const { data, updateCard } = useRaxData()
+  const { data, updateCard, removeCardFromCollection } = useRaxData()
+  const [removeStatus, setRemoveStatus] = useState('')
   const [sortKey, setSortKey] = useState<CardSortKey>('claimable')
   const [secondarySortKey, setSecondarySortKey] = useState<CardSortKey | 'none'>('none')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -88,6 +90,17 @@ export default function CardsPage() {
     }
   }, [cardsPage, cardsPageTotal])
 
+  const handleRemoveFromCollection = (card: (typeof rollup.cards)[number]['card']) => {
+    if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
+    const removed = removeCardFromCollection(card.id, {
+      removedNote: `Removed ${new Date().toISOString().slice(0, 10)} (planned sale)`,
+    })
+    if (!removed) return
+    setRemoveStatus(
+      `Removed ${card.name || 'pass'} from your collection. Earnings saved under Entry → Saved profiles.`,
+    )
+  }
+
   return (
     <div className="page-stack">
       <CollapsiblePanel
@@ -104,6 +117,7 @@ export default function CardsPage() {
           </>
         }
       >
+        {removeStatus ? <p className="import-status">{removeStatus}</p> : null}
         <div className="sort-controls">
           <label className="field inline-field rank-search-field">
             <span>Search cards</span>
@@ -209,18 +223,19 @@ export default function CardsPage() {
                 <th>Pro bonus</th>
                 <th>Overlap</th>
                 <th>Total claimable</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {rollup.cards.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="empty-cell">
+                  <td colSpan={12} className="empty-cell">
                     Add player cards to see card-level totals.
                   </td>
                 </tr>
               ) : filteredCards.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="empty-cell">
+                  <td colSpan={12} className="empty-cell">
                     No cards match the current search, sport, rarity, or team-pass filters.
                   </td>
                 </tr>
@@ -276,6 +291,15 @@ export default function CardsPage() {
                     </td>
                     <td>
                       <strong>{formatRax(displayRaxValue(cardRollup.totalClaimableRax))} RAX</strong>
+                    </td>
+                    <td>
+                      <button
+                        className="button danger compact"
+                        type="button"
+                        onClick={() => handleRemoveFromCollection(cardRollup.card)}
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))

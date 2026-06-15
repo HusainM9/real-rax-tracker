@@ -9,6 +9,7 @@ import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
+import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
 import {
   getFailedPlayerPasses,
   type FailedPlayerPassImport,
@@ -99,7 +100,7 @@ export default function EntryPage() {
     data,
     addCard,
     updateCard,
-    deleteCard,
+    removeCardFromCollection,
     addPerformance,
     addPerformances,
     updatePerformance,
@@ -1268,8 +1269,17 @@ export default function EntryPage() {
                       <input value={card.notes} onChange={(event) => updateCard(card.id, { notes: event.target.value })} />
                     </td>
                     <td>
-                      <button className="button danger" type="button" onClick={() => deleteCard(card.id)}>
-                        Delete
+                      <button
+                        className="button danger"
+                        type="button"
+                        onClick={() => {
+                          if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
+                          removeCardFromCollection(card.id, {
+                            removedNote: `Removed ${new Date().toISOString().slice(0, 10)}`,
+                          })
+                        }}
+                      >
+                        Remove
                       </button>
                     </td>
                   </tr>

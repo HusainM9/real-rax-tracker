@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { analyzePotentialCard } from './potentialAnalysis'
 import {
   analyzeCatalogCandidate,
+  analyzeIconic20CheckerImpacts,
   analyzeOwnedIconicUpgradeImpacts,
   applyRecommendationBaseline,
+  catalogProfileToIconic20CheckerCandidate,
   catalogProfileToParsedRows,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
+  isIconicBelowLevel,
   isPassInRecommendationAdjustments,
   netClaimableDelta,
+  ownedCardToIconic20CheckerCandidate,
   ownedCardToIconicUpgradeCandidate,
   passSeasonIncluded,
   prefilterRecommendationProfiles,
@@ -565,5 +569,45 @@ describe('passRecommendation', () => {
     const lowImpact = impacts.rows.find((row) => row.key === '100|2026|NBA')
     expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
     expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
+  })
+
+  it('isIconicBelowLevel identifies sub-20 Iconic passes', () => {
+    expect(isIconicBelowLevel('Iconic 1', 20)).toBe(true)
+    expect(isIconicBelowLevel('Iconic 19', 20)).toBe(true)
+    expect(isIconicBelowLevel('Iconic 20', 20)).toBe(false)
+    expect(isIconicBelowLevel('Legendary 1', 20)).toBe(false)
+  })
+
+  it('analyzeIconic20CheckerImpacts upgrades owned Iconic 1 and adds catalog passes', () => {
+    const ownedData: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [
+        card('c-owned', 'Owned Iconic', '200|2026|NBA', 'Iconic 1'),
+        card('c-other', 'Other', '201|2026|NBA', 'Legendary 1'),
+      ],
+      performances: [
+        { ...perf('p1', 'c-owned', 150, '2026-03-01'), baseRaxEarned: 1 },
+        { ...perf('p2', 'c-other', 25, '2026-03-01'), baseRaxEarned: 1 },
+      ],
+      potentialCards: [],
+      savedCardProfiles: [],
+    }
+    const catalogPass = catalogProfile('300|2026|NBA', 'Catalog new', [
+      { claimDay: '2026-03-02', baseRaxEarned: 1.2 },
+    ])
+
+    const ownedCandidate = ownedCardToIconic20CheckerCandidate(ownedData.cards[0]!)
+    const catalogCandidate = catalogProfileToIconic20CheckerCandidate(catalogPass)
+    expect(ownedCandidate?.source).toBe('owned')
+    expect(catalogCandidate?.source).toBe('catalog')
+
+    const impacts = analyzeIconic20CheckerImpacts(ownedData, [
+      ownedCandidate!,
+      catalogCandidate!,
+    ])
+    expect(impacts.rows).toHaveLength(2)
+    expect(impacts.combinedNetDelta).toBeGreaterThan(0)
+    expect(impacts.rows.every((row) => row.isolatedNetDelta >= 0)).toBe(true)
   })
 })

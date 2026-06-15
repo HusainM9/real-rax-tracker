@@ -156,3 +156,76 @@ export function restoreSavedCardProfile(
     rowsRestored: restoredPerformances.length,
   }
 }
+
+export type RemoveCardFromCollectionOptions = {
+  /** When true (default), snapshot earnings to saved profiles before deleting. */
+  archiveProfile?: boolean
+  removedNote?: string
+}
+
+export function formatRemoveCardConfirmMessage(card: {
+  name: string
+  sport: string
+  season: string
+}): string {
+  const label = [card.name, card.sport, card.season].filter(Boolean).join(' · ')
+  return (
+    `Remove ${label} from your collection?\n\n` +
+    'Earnings will be saved under Entry → Saved profiles so you can restore the pass later. ' +
+    'Dashboard and claim totals will update immediately.'
+  )
+}
+
+export function pruneSavedSellRankings(data: RaxTrackerData, cardId: string): RaxTrackerData {
+  const saved = data.savedSellRankings
+  if (!saved) return data
+
+  const rows = saved.rows.filter((row) => row.cardId !== cardId)
+  const skippedPlayerPasses = saved.skippedPlayerPasses.filter((row) => row.cardId !== cardId)
+  if (
+    rows.length === saved.rows.length &&
+    skippedPlayerPasses.length === saved.skippedPlayerPasses.length
+  ) {
+    return data
+  }
+
+  return {
+    ...data,
+    savedSellRankings: {
+      ...saved,
+      rows,
+      skippedPlayerPasses,
+    },
+  }
+}
+
+export function removeCardFromCollection(
+  data: RaxTrackerData,
+  cardId: string,
+  options?: RemoveCardFromCollectionOptions,
+): RaxTrackerData | null {
+  const card = data.cards.find((item) => item.id === cardId)
+  if (!card) return null
+
+  const archiveProfile = options?.archiveProfile !== false
+  const performances = data.performances.filter((performance) => performance.cardId === cardId)
+
+  let next = data
+  if (archiveProfile && performances.length > 0) {
+    const removedNote = options?.removedNote?.trim() || 'Removed from collection'
+    const notes = card.notes.trim() ? `${card.notes.trim()} · ${removedNote}` : removedNote
+    const profile = buildSavedCardProfile({
+      card: { ...card, notes },
+      performances,
+    })
+    next = upsertSavedCardProfile(next, profile)
+  }
+
+  next = {
+    ...next,
+    cards: next.cards.filter((item) => item.id !== cardId),
+    performances: next.performances.filter((performance) => performance.cardId !== cardId),
+  }
+
+  return pruneSavedSellRankings(next, cardId)
+}

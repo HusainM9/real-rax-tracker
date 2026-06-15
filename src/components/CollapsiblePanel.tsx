@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 
 type CollapsiblePanelProps = {
+  id?: string
   title: string
   description?: string
   badge?: string
@@ -11,6 +12,7 @@ type CollapsiblePanelProps = {
 }
 
 export default function CollapsiblePanel({
+  id,
   title,
   description,
   badge,
@@ -22,7 +24,10 @@ export default function CollapsiblePanel({
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <section className={`panel collapsible-panel${open ? ' is-open' : ''} ${className}`.trim()}>
+    <section
+      id={id}
+      className={`panel collapsible-panel${open ? ' is-open' : ''} ${className}`.trim()}
+    >
       <div className="collapsible-header">
         <button
           type="button"

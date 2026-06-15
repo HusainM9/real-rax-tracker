@@ -12,13 +12,21 @@ import { computeYearRollup } from './claimOptimizer'
 import { getBaseRaxEarned, sportToMeowbotSlug } from './effectiveRax'
 import { analyzePotentialCard, type PotentialAnalysisResult } from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
-import { computeOtdRax } from './otdRax'
+import { computeOtdRax, parseRarityLabel } from './otdRax'
 import { normalizeRarityTier } from './rarityFilter'
 import type { CatalogPassKind } from './catalogApi'
 import { SPORTS, type PlayerCard, type RaxTrackerData, type Sport } from '../types/rax'
 
 /** All recommendation what-if runs assume buying at this OTD tier. */
 export const RECOMMENDATION_SIMULATED_RARITY = 'Iconic 1'
+
+/** Iconic 20 what-if for owned upgrades and catalog preview passes. */
+export const ICONIC_20_SIMULATED_RARITY = 'Iconic 20'
+
+export function isIconicBelowLevel(rarityLabel: string | undefined, level: number): boolean {
+  const parsed = parseRarityLabel(rarityLabel)
+  return parsed.base === 'Iconic' && parsed.level < level
+}
 
 /** Default max catalog passes to fetch full daily rows for (sorted by base RAX). */
 export const RECOMMENDATION_BULK_FETCH_CAP = 1000
@@ -321,6 +329,13 @@ export function profileAsIconic1(profile: CatalogImportProfile): CatalogImportPr
   return { ...profile, rarityLabel: RECOMMENDATION_SIMULATED_RARITY }
 }
 
+export function profileAtSimulatedRarity(
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): CatalogImportProfile {
+  return { ...profile, rarityLabel }
+}
+
 export type RecommendationPassAdjustmentMode = 'assume-iconic-1' | 'exclude'
 
 export type RecommendationPassAdjustment = {
@@ -522,6 +537,22 @@ function addProfileToData(data: RaxTrackerData, profile: CatalogImportProfile): 
   return nextData
 }
 
+function addProfileToDataAtRarity(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): RaxTrackerData {
+  const { data: nextData } = importCatalogProfileIntoData(
+    data,
+    profileAtSimulatedRarity(profile, rarityLabel),
+    {
+      nowIso: new Date().toISOString(),
+      createId: (prefix) => nextRecommendationId(prefix),
+    },
+  )
+  return nextData
+}
+
 export type OwnedIconicUpgradeCandidate = {
   key: string
   name: string
@@ -552,7 +583,11 @@ function collectionClaimableTotal(data: RaxTrackerData): number {
   return computeYearRollup(data).totalClaimableRax
 }
 
-function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): RaxTrackerData {
+function applyOwnedCardRarityUpgrade(
+  data: RaxTrackerData,
+  card: PlayerCard,
+  targetRarity: string,
+): RaxTrackerData {
   const sportSlug = sportToMeowbotSlug(card.sport)
   const passKind = card.passKind ?? 'player'
 
@@ -562,7 +597,7 @@ function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): Ra
     return {
       ...performance,
       baseRaxEarned: base,
-      raxEarned: computeOtdRax(base, sportSlug, RECOMMENDATION_SIMULATED_RARITY, passKind),
+      raxEarned: computeOtdRax(base, sportSlug, targetRarity, passKind),
     }
   })
 
@@ -570,13 +605,17 @@ function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): Ra
     item.id === card.id
       ? {
           ...item,
-          rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+          rarityLabel: targetRarity,
           simulatedRarityLabel: undefined,
         }
       : item,
   )
 
   return { ...data, cards: nextCards, performances: nextPerformances }
+}
+
+function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): RaxTrackerData {
+  return applyOwnedCardRarityUpgrade(data, card, RECOMMENDATION_SIMULATED_RARITY)
 }
 
 function applyIconicUpgradeCandidate(
@@ -660,6 +699,125 @@ export function ownedIconicUpgradeImpactByKey(
   result: OwnedIconicUpgradeImpactResult,
 ): Map<string, OwnedIconicUpgradeImpactRow> {
   return new Map(result.rows.map((row) => [row.key, row]))
+}
+
+export type Iconic20CheckerCandidateSource = 'owned' | 'catalog'
+
+export type Iconic20CheckerCandidate = {
+  key: string
+  externalKey: string
+  name: string
+  sport: Sport
+  season: string
+  source: Iconic20CheckerCandidateSource
+  card?: PlayerCard
+  profile?: CatalogImportProfile
+}
+
+export function iconic20OwnedSelectionKey(externalKey: string): string {
+  return `owned:${externalKey}`
+}
+
+export function iconic20CatalogSelectionKey(externalKey: string): string {
+  return `catalog:${externalKey}`
+}
+
+export function ownedCardToIconic20CheckerCandidate(
+  card: PlayerCard,
+): Iconic20CheckerCandidate | null {
+  if (!card.externalKey || !isIconicBelowLevel(card.rarityLabel, 20)) return null
+  return {
+    key: iconic20OwnedSelectionKey(card.externalKey),
+    externalKey: card.externalKey,
+    name: card.name,
+    sport: card.sport,
+    season: card.season,
+    source: 'owned',
+    card,
+  }
+}
+
+export function catalogProfileToIconic20CheckerCandidate(
+  profile: CatalogImportProfile,
+): Iconic20CheckerCandidate | null {
+  if (profile.rows.length === 0) return null
+  return {
+    key: iconic20CatalogSelectionKey(profile.externalKey),
+    externalKey: profile.externalKey,
+    name: profile.name,
+    sport: sportFromCatalog(profile.sport),
+    season: profile.seasonLabel.trim() || String(profile.seasonYear),
+    source: 'catalog',
+    profile,
+  }
+}
+
+function applyIconic20CheckerCandidate(
+  data: RaxTrackerData,
+  candidate: Iconic20CheckerCandidate,
+): RaxTrackerData {
+  if (candidate.source === 'owned' && candidate.card) {
+    return applyOwnedCardRarityUpgrade(data, candidate.card, ICONIC_20_SIMULATED_RARITY)
+  }
+  if (candidate.source === 'catalog' && candidate.profile?.rows.length) {
+    return addProfileToDataAtRarity(data, candidate.profile, ICONIC_20_SIMULATED_RARITY)
+  }
+  return data
+}
+
+export function analyzeIconic20CheckerImpacts(
+  data: RaxTrackerData,
+  candidates: Iconic20CheckerCandidate[],
+): OwnedIconicUpgradeImpactResult {
+  const eligible = candidates.filter(
+    (candidate) =>
+      (candidate.source === 'owned' && candidate.card) ||
+      (candidate.source === 'catalog' && candidate.profile?.rows.length),
+  )
+  if (eligible.length === 0) {
+    return { rows: [], combinedNetDelta: 0, combinedIsolatedNetDelta: 0 }
+  }
+
+  const isolatedByKey = new Map<string, number>()
+  for (const candidate of eligible) {
+    const before = collectionClaimableTotal(data)
+    const after = collectionClaimableTotal(applyIconic20CheckerCandidate(data, candidate))
+    isolatedByKey.set(candidate.key, after - before)
+  }
+
+  const bySport = new Map<Sport, Iconic20CheckerCandidate[]>()
+  for (const candidate of eligible) {
+    const list = bySport.get(candidate.sport) ?? []
+    list.push(candidate)
+    bySport.set(candidate.sport, list)
+  }
+
+  const rows: OwnedIconicUpgradeImpactRow[] = []
+  let workingData = data
+  for (const sport of [...bySport.keys()].sort()) {
+    const ordered = [...(bySport.get(sport) ?? [])].sort(
+      (a, b) => (isolatedByKey.get(b.key) ?? 0) - (isolatedByKey.get(a.key) ?? 0),
+    )
+    for (const candidate of ordered) {
+      const before = collectionClaimableTotal(workingData)
+      workingData = applyIconic20CheckerCandidate(workingData, candidate)
+      const after = collectionClaimableTotal(workingData)
+      rows.push({
+        key: candidate.key,
+        name: candidate.name,
+        sport: candidate.sport,
+        season: candidate.season,
+        isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
+        marginalNetDelta: after - before,
+      })
+    }
+  }
+
+  return {
+    rows,
+    combinedNetDelta: collectionClaimableTotal(workingData) - collectionClaimableTotal(data),
+    combinedIsolatedNetDelta: [...isolatedByKey.values()].reduce((sum, value) => sum + value, 0),
+  }
 }
 
 function rankCandidatesSync(

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import CollapsiblePanel from '../components/CollapsiblePanel'
 import { SeasonMultiSelect } from '../components/SeasonMultiSelect'
 import { displayRaxValue } from '../lib/displayRax'
 import {
@@ -23,13 +24,20 @@ import {
   type PotentialClaimLadderEntry,
 } from '../lib/potentialAnalysis'
 import {
+  analyzeIconic20CheckerImpacts,
   analyzeOwnedIconicUpgradeImpacts,
   applyRecommendationBaseline,
+  catalogProfileToIconic20CheckerCandidate,
   countAppliedBaselineAdjustments,
   greedyPickBundleAsync,
+  iconic20CatalogSelectionKey,
+  iconic20OwnedSelectionKey,
+  ICONIC_20_SIMULATED_RARITY,
   isAtLeastIconic1Rarity,
+  isIconicBelowLevel,
   isPassInRecommendationAdjustments,
   isRecommendationPassOwnedAtIconic,
+  ownedCardToIconic20CheckerCandidate,
   ownedCardToIconicUpgradeCandidate,
   type OwnedIconicUpgradeCandidate,
   rankAndRecommendAsync,
@@ -377,30 +385,24 @@ function PotentialAnalysisResults({
   const displacedCardCount = analysis.displacedByCard.length
 
   return (
-    <section className="panel">
-      <div className="section-heading">
-        <div>
-          <h2>Analysis result</h2>
-          <p className="import-hint">
-            How this pass would affect your collection&apos;s claimable RAX (top 2 per sport + Pro
-            bonus rules).
-            {previewAs ? (
-              <>
-                {' '}
-                OTD preview: <strong>{previewAs}</strong>.
-              </>
-            ) : null}
-            {baselineAdjustmentCount > 0 ? (
-              <>
-                {' '}
-                Baseline includes {baselineAdjustmentCount} assumed pass
-                {baselineAdjustmentCount === 1 ? '' : 'es'} at {RECOMMENDATION_SIMULATED_RARITY}.
-              </>
-            ) : null}
-          </p>
-        </div>
-        <span className="badge">{formatSignedRax(displayRaxValue(netCollectionDelta))} net</span>
-      </div>
+    <>
+      <p className="import-hint">
+        How this pass would affect your collection&apos;s claimable RAX (top 2 per sport + Pro bonus
+        rules).
+        {previewAs ? (
+          <>
+            {' '}
+            OTD preview: <strong>{previewAs}</strong>.
+          </>
+        ) : null}
+        {baselineAdjustmentCount > 0 ? (
+          <>
+            {' '}
+            Baseline includes {baselineAdjustmentCount} assumed pass
+            {baselineAdjustmentCount === 1 ? '' : 'es'} at {RECOMMENDATION_SIMULATED_RARITY}.
+          </>
+        ) : null}
+      </p>
 
       <PotentialClaimDayBreakdownPanel
         breakdowns={analysis.claimDayBreakdowns}
@@ -626,7 +628,7 @@ function PotentialAnalysisResults({
           </CollapsibleAnalysisSection>
         </div>
       </section>
-    </section>
+    </>
   )
 }
 
@@ -693,7 +695,6 @@ export default function PotentialPage() {
   const [potentialRows, setPotentialRows] = useState<ParsedRealAppToolsRow[]>([])
   const [status, setStatus] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [showTutorial, setShowTutorial] = useState(true)
   const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
@@ -730,6 +731,18 @@ export default function PotentialPage() {
   const [quickAddAnalysisSelection, setQuickAddAnalysisSelection] = useState<Set<string>>(
     () => new Set(),
   )
+  const [iconic20OwnedFilter, setIconic20OwnedFilter] = useState('')
+  const [iconic20CatalogSearchQuery, setIconic20CatalogSearchQuery] = useState('')
+  const [iconic20CatalogSearchResults, setIconic20CatalogSearchResults] = useState<
+    CatalogSearchResult[]
+  >([])
+  const [iconic20CatalogSearchBusy, setIconic20CatalogSearchBusy] = useState(false)
+  const [iconic20CatalogSearchStatus, setIconic20CatalogSearchStatus] = useState('')
+  const [iconic20Selection, setIconic20Selection] = useState<Set<string>>(() => new Set())
+  const [iconic20ProfilesByKey, setIconic20ProfilesByKey] = useState<
+    Map<string, CatalogImportProfile>
+  >(new Map())
+  const [iconic20ProfilesLoading, setIconic20ProfilesLoading] = useState(false)
   const [adjustmentSearchQuery, setAdjustmentSearchQuery] = useState('')
   const [adjustmentSearchResults, setAdjustmentSearchResults] = useState<CatalogSearchResult[]>([])
   const [adjustmentSearchBusy, setAdjustmentSearchBusy] = useState(false)
@@ -752,7 +765,11 @@ export default function PotentialPage() {
     [sportOpportunityResults],
   )
 
-  const catalogAnalysisBusy = rankingInProgress || sportOpportunityInProgress || bundleClaimInProgress
+  const catalogAnalysisBusy =
+    rankingInProgress ||
+    sportOpportunityInProgress ||
+    bundleClaimInProgress ||
+    iconic20ProfilesLoading
 
   useEffect(() => {
     const assumeKeys = [
@@ -1202,6 +1219,91 @@ export default function PotentialPage() {
     }
   }, [excludeFormSport])
 
+  const ownedIconic20EligibleCards = useMemo(
+    () =>
+      [...data.cards]
+        .filter(
+          (card) =>
+            card.passKind !== 'team' &&
+            card.externalKey &&
+            isIconicBelowLevel(card.rarityLabel, 20),
+        )
+        .sort(
+          (a, b) =>
+            a.name.localeCompare(b.name) ||
+            a.sport.localeCompare(b.sport) ||
+            a.season.localeCompare(b.season),
+        ),
+    [data.cards],
+  )
+
+  const filteredIconic20OwnedCards = useMemo(() => {
+    const query = iconic20OwnedFilter.trim().toLowerCase()
+    if (!query) return ownedIconic20EligibleCards
+    return ownedIconic20EligibleCards.filter((card) => {
+      const haystack = [card.name, card.sport, card.season, card.rarityLabel ?? '', card.externalKey ?? '']
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [ownedIconic20EligibleCards, iconic20OwnedFilter])
+
+  const ownedCollectionExternalKeys = useMemo(
+    () => new Set(data.cards.map((card) => card.externalKey).filter(Boolean) as string[]),
+    [data.cards],
+  )
+
+  const iconic20AnalysisCandidates = useMemo(() => {
+    const cardsByKey = new Map(
+      ownedIconic20EligibleCards
+        .filter((card): card is (typeof ownedIconic20EligibleCards)[number] & { externalKey: string } =>
+          Boolean(card.externalKey),
+        )
+        .map((card) => [iconic20OwnedSelectionKey(card.externalKey), card] as const),
+    )
+    const candidates = [...iconic20Selection]
+      .map((selectionKey) => {
+        if (selectionKey.startsWith('owned:')) {
+          const card = cardsByKey.get(selectionKey)
+          return card ? ownedCardToIconic20CheckerCandidate(card) : null
+        }
+        if (selectionKey.startsWith('catalog:')) {
+          const externalKey = selectionKey.slice('catalog:'.length)
+          const profile = iconic20ProfilesByKey.get(externalKey)
+          return profile ? catalogProfileToIconic20CheckerCandidate(profile) : null
+        }
+        return null
+      })
+      .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
+    return candidates
+  }, [iconic20Selection, ownedIconic20EligibleCards, iconic20ProfilesByKey])
+
+  const iconic20Analysis = useMemo(
+    () => analyzeIconic20CheckerImpacts(data, iconic20AnalysisCandidates),
+    [data, iconic20AnalysisCandidates],
+  )
+
+  const selectedIconic20PassLabels = useMemo(
+    () =>
+      iconic20AnalysisCandidates.map((candidate) => {
+        const sourceLabel = candidate.source === 'owned' ? 'upgrade' : 'new'
+        return `${candidate.name} (${candidate.sport} · ${candidate.season} · ${sourceLabel})`
+      }),
+    [iconic20AnalysisCandidates],
+  )
+
+  const toggleIconic20Selection = (selectionKey: string) => {
+    setIconic20Selection((current) => {
+      const next = new Set(current)
+      if (next.has(selectionKey)) {
+        next.delete(selectionKey)
+      } else {
+        next.add(selectionKey)
+      }
+      return next
+    })
+  }
+
   const ownedAdjustableCards = useMemo(
     () =>
       [...data.cards]
@@ -1497,6 +1599,83 @@ export default function PotentialPage() {
       controller.abort()
     }
   }, [adjustmentSearchQuery])
+
+  useEffect(() => {
+    const trimmed = iconic20CatalogSearchQuery.trim()
+    if (trimmed.length < 2) {
+      setIconic20CatalogSearchResults([])
+      setIconic20CatalogSearchStatus('')
+      setIconic20CatalogSearchBusy(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      setIconic20CatalogSearchBusy(true)
+      searchCatalog(trimmed, controller.signal)
+        .then((result) => {
+          if (!result.storageConfigured) {
+            setIconic20CatalogSearchStatus('Shared catalog search is not configured yet.')
+            setIconic20CatalogSearchResults([])
+            return
+          }
+          const playerResults = result.results.filter(
+            (item) =>
+              item.passKind === 'player' &&
+              item.rowCount > 0 &&
+              !ownedCollectionExternalKeys.has(item.externalKey),
+          )
+          setIconic20CatalogSearchResults(playerResults)
+          setIconic20CatalogSearchStatus(
+            playerResults.length === 0
+              ? 'No new player passes match that search (already-owned passes use the collection list).'
+              : '',
+          )
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return
+          setIconic20CatalogSearchResults([])
+          setIconic20CatalogSearchStatus(
+            error instanceof Error ? error.message : 'Catalog search failed.',
+          )
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIconic20CatalogSearchBusy(false)
+        })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [iconic20CatalogSearchQuery, ownedCollectionExternalKeys])
+
+  useEffect(() => {
+    const catalogKeys = [...iconic20Selection]
+      .filter((key) => key.startsWith('catalog:'))
+      .map((key) => key.slice('catalog:'.length))
+    const missingKeys = catalogKeys.filter((key) => !iconic20ProfilesByKey.has(key))
+    if (missingKeys.length === 0) return
+
+    const controller = new AbortController()
+    setIconic20ProfilesLoading(true)
+    void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
+      .then(({ profiles, storageConfigured }) => {
+        if (!storageConfigured) return
+        setIconic20ProfilesByKey((current) => {
+          const next = new Map(current)
+          for (const profile of profiles) {
+            if (profile.rows.length > 0) next.set(profile.externalKey, profile)
+          }
+          return next
+        })
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIconic20ProfilesLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [iconic20Selection, iconic20ProfilesByKey])
 
   const rankSportOptions = useMemo(
     () => SPORTS.map((sport) => ({ value: sport, label: sport })),
@@ -1850,10 +2029,10 @@ export default function PotentialPage() {
           <p className="eyebrow">What-if</p>
           <h2>Potential card checker</h2>
           <p>
-            Test a player pass you do not own yet, rank catalog passes by net claimable RAX, or
-            analyze Iconic 1 upgrades on passes you already own. Search the shared Meowbot catalog
-            for daily RAX and base totals, or paste JSON manually from realapp.com. Saved profiles
-            stay out of your real totals.
+            Test a player pass you do not own yet, rank catalog passes by net claimable RAX, analyze
+            Iconic 1 or Iconic 20 upgrades, or preview new catalog cards at Iconic 20. Search the
+            shared Meowbot catalog for daily RAX and base totals, or paste JSON manually from
+            realapp.com. Saved profiles stay out of your real totals.
           </p>
         </div>
         <Link className="button" to="/overlaps">
@@ -1862,21 +2041,18 @@ export default function PotentialPage() {
       </section>
 
       {ownedAdjustableCards.length > 0 ? (
-        <section className="panel owned-iconic-upgrade-analyzer" id="owned-iconic-upgrade">
-          <div className="section-heading">
-            <div>
-              <h2>Iconic 1 upgrade analyzer</h2>
-              <p>
-                See how much extra claimable RAX you would get if you upgraded player passes you
-                already own to {RECOMMENDATION_SIMULATED_RARITY}. Pick one pass for a solo check, or
-                several for a bundle — same-sport picks account for overlap when fighting for top-2
-                claim slots.
-              </p>
-            </div>
-            {quickAddAnalysisSelection.size > 0 ? (
-              <span className="badge">{quickAddAnalysisSelection.size} selected</span>
-            ) : null}
-          </div>
+        <CollapsiblePanel
+          id="owned-iconic-upgrade"
+          className="owned-iconic-upgrade-analyzer"
+          title="Iconic 1 upgrade analyzer"
+          description={`See how much extra claimable RAX you would get if you upgraded player passes you already own to ${RECOMMENDATION_SIMULATED_RARITY}. Pick one pass for a solo check, or several for a bundle.`}
+          badge={
+            quickAddAnalysisSelection.size > 0
+              ? `${quickAddAnalysisSelection.size} selected`
+              : undefined
+          }
+          defaultOpen={false}
+        >
           <p className="import-hint">
             <strong>What is analyzed:</strong> daily earnings saved on each selected pass, recomputed
             at {RECOMMENDATION_SIMULATED_RARITY} OTD multipliers, then run through the same claim
@@ -2026,21 +2202,15 @@ export default function PotentialPage() {
           ) : (
             <p className="empty">No collection passes match that filter.</p>
           )}
-        </section>
+        </CollapsiblePanel>
       ) : null}
 
-      <section className="panel" id="catalog-recommendations">
-        <div className="section-heading">
-          <div>
-            <h2>Rank catalog passes</h2>
-            <p>
-              Find player passes in the shared catalog that would add the most{' '}
-              <strong>net claimable RAX</strong> to your collection for a sport. Every candidate is
-              simulated at <strong>{RECOMMENDATION_SIMULATED_RARITY}</strong> OTD. Net claimable is
-              what the new pass would claim minus RAX your existing cards would lose to overlap.
-            </p>
-          </div>
-        </div>
+      <CollapsiblePanel
+        id="catalog-recommendations"
+        title="Rank catalog passes"
+        description="Find player passes in the shared catalog that would add the most net claimable RAX to your collection. Every candidate is simulated at Iconic 1 OTD."
+        defaultOpen={false}
+      >
         <p className="import-hint">
           Candidates come from the shared Meowbot catalog only. Passes already in your collection
           at {RECOMMENDATION_SIMULATED_RARITY} or higher are skipped; lower-rarity owned passes stay
@@ -2057,19 +2227,14 @@ export default function PotentialPage() {
           ) : null}
         </p>
 
-        <section className="panel nested-panel recommendation-adjustments" id="recommendation-adjustments">
-          <div className="section-heading">
-            <div>
-              <h3>Ranking baseline adjustments</h3>
-              <p>
-                Temporarily change how your collection is treated for catalog ranking and the
-                potential card analyzer below. Does not modify your saved cards.
-              </p>
-            </div>
-            {rankAdjustments.length > 0 ? (
-              <span className="badge">{rankAdjustments.length} adjusted</span>
-            ) : null}
-          </div>
+        <CollapsiblePanel
+          id="recommendation-adjustments"
+          className="nested-panel recommendation-adjustments"
+          title="Ranking baseline adjustments"
+          description="Temporarily change how your collection is treated for catalog ranking and the potential card analyzer. Does not modify saved cards."
+          badge={rankAdjustments.length > 0 ? `${rankAdjustments.length} adjusted` : undefined}
+          defaultOpen={false}
+        >
           <p className="import-hint">
             <strong>Assume {RECOMMENDATION_SIMULATED_RARITY}</strong> — treat a pass as already at{' '}
             {RECOMMENDATION_SIMULATED_RARITY} in your collection (for passes you are upgrading, like
@@ -2260,20 +2425,15 @@ export default function PotentialPage() {
           ) : (
             <p className="empty">No adjustments — ranking uses your collection as saved.</p>
           )}
-        </section>
+        </CollapsiblePanel>
 
-        <section className="panel nested-panel" id="sport-opportunity-scan">
-          <div className="section-heading">
-            <div>
-              <h3>Sport opportunity scan</h3>
-              <p>
-                Compare every sport against your adjusted baseline and the shared catalog. Each
-                sport is scored by how much <strong>net claimable RAX</strong> you could add with
-                the top {SPORT_OPPORTUNITY_BUNDLE_SIZE} greedy catalog picks at{' '}
-                {RECOMMENDATION_SIMULATED_RARITY}.
-              </p>
-            </div>
-          </div>
+        <CollapsiblePanel
+          id="sport-opportunity-scan"
+          className="nested-panel"
+          title="Sport opportunity scan"
+          description={`Compare every sport against your adjusted baseline and score net claimable RAX from the top ${SPORT_OPPORTUNITY_BUNDLE_SIZE} greedy catalog picks at ${RECOMMENDATION_SIMULATED_RARITY}.`}
+          defaultOpen={false}
+        >
           <p className="import-hint">
             Add quick-add or catalog baseline adjustments above first — the scan treats those as
             already at {RECOMMENDATION_SIMULATED_RARITY} when scoring your collection and
@@ -2408,7 +2568,7 @@ export default function PotentialPage() {
               </div>
             </>
           ) : null}
-        </section>
+        </CollapsiblePanel>
 
         <div className="sort-controls">
           <label className="field inline-field">
@@ -2481,19 +2641,17 @@ export default function PotentialPage() {
           </label>
         </div>
 
-        <section className="panel nested-panel recommendation-exclusions">
-          <div className="section-heading recommendation-adjustment-owned-heading">
-            <div>
-              <h4>Exclude sport + season from ranking</h4>
-              <p className="import-hint">
-                Skip catalog passes for a specific sport and season (e.g. NFL · 2022-23 no longer on
-                Real). Exclusions stay when you change the rank sport above.
-              </p>
-            </div>
-            {excludedSportSeasons.length > 0 ? (
-              <span className="badge">{excludedSportSeasons.length} excluded</span>
-            ) : null}
-          </div>
+        <CollapsiblePanel
+          className="nested-panel recommendation-exclusions"
+          title="Exclude sport + season from ranking"
+          description="Skip catalog passes for a specific sport and season. Exclusions stay when you change the rank sport above."
+          badge={
+            excludedSportSeasons.length > 0
+              ? `${excludedSportSeasons.length} excluded`
+              : undefined
+          }
+          defaultOpen={false}
+        >
           <div className="sort-controls">
             <label className="field inline-field">
               <span>Sport</span>
@@ -2574,7 +2732,7 @@ export default function PotentialPage() {
           ) : (
             <p className="empty">No exclusions — all catalog sport + season pairs are eligible.</p>
           )}
-        </section>
+        </CollapsiblePanel>
 
         <div className="button-row">
           <button
@@ -2602,33 +2760,27 @@ export default function PotentialPage() {
         {rankStatus ? <p className="import-status">{rankStatus}</p> : null}
 
         {recommendationBundle ? (
-          <section className="panel nested-panel">
-            <div className="section-heading">
-              <div>
-                <h3>Recommended bundle (greedy)</h3>
-                <p>
-                  {visibleBundlePicks.length > 0 ? (
-                    <>
-                      Top {visibleBundlePicks.length} pass
-                      {visibleBundlePicks.length === 1 ? '' : 'es'} to add one at a time.
-                      Claim assumes selected passes at {RECOMMENDATION_SIMULATED_RARITY} in your
-                      ranking baseline — nothing is saved to your real collection. Each pick&apos;s
-                      net is <strong>marginal</strong> (after prior picks in the bundle). After
-                      claims, big jumps can happen when a pass fits open calendar days in the same
-                      sport.
-                    </>
-                  ) : (
-                    <>No more positive greedy picks with the current catalog pool and baseline.</>
-                  )}
-                </p>
-              </div>
-              {visibleBundlePicks.length > 0 ? (
-                <span className="badge">
-                  {formatSignedRax(displayRaxValue(visibleBundleCombinedNet))} combined
-                  net
-                </span>
-              ) : null}
-            </div>
+          <CollapsiblePanel
+            className="nested-panel"
+            title="Recommended bundle (greedy)"
+            description={
+              visibleBundlePicks.length > 0
+                ? `Top ${visibleBundlePicks.length} pass${visibleBundlePicks.length === 1 ? '' : 'es'} to add one at a time — marginal net after prior picks in the bundle.`
+                : 'No more positive greedy picks with the current catalog pool and baseline.'
+            }
+            badge={
+              visibleBundlePicks.length > 0
+                ? `${formatSignedRax(displayRaxValue(visibleBundleCombinedNet))} combined net`
+                : undefined
+            }
+            defaultOpen={false}
+          >
+            {visibleBundlePicks.length > 0 ? (
+              <p className="import-hint">
+                Claim assumes selected passes at {RECOMMENDATION_SIMULATED_RARITY} in your ranking
+                baseline — nothing is saved to your real collection.
+              </p>
+            ) : null}
             {claimableBundlePicks.length > 0 ? (
               <div className="sort-controls bundle-claim-actions">
                 <button
@@ -2736,10 +2888,17 @@ export default function PotentialPage() {
                 )
               })}
             </div>
-          </section>
+          </CollapsiblePanel>
         ) : null}
 
         {recommendationRows.length > 0 ? (
+          <CollapsiblePanel
+            className="nested-panel"
+            title="Ranking results"
+            description="Top catalog passes by net claimable RAX. Click a row to open detailed analysis below."
+            badge={`${recommendationRows.length} passes`}
+            defaultOpen={false}
+          >
           <>
             {recommendationMeta ? (
               <p className="import-hint">
@@ -2852,26 +3011,17 @@ export default function PotentialPage() {
               </div>
             ) : null}
           </>
+          </CollapsiblePanel>
         ) : null}
-      </section>
+      </CollapsiblePanel>
 
-      <section className="panel help-section">
-        <div className="section-heading">
-          <div>
-            <h2>Manual import walkthrough</h2>
-            <p>
-              Username import closes after {realappToolsShutdownLabel()}. Use{' '}
-              <a href="#catalog-search">shared catalog search</a> below for player passes and RAX, or
-              paste one card at a time from realapp.com.
-            </p>
-          </div>
-          <button className="button" type="button" onClick={() => setShowTutorial((current) => !current)}>
-            {showTutorial ? 'Hide steps' : 'Show steps'}
-          </button>
-        </div>
-        {showTutorial ? (
-          <>
-            <ol className="help-list ordered">
+      <CollapsiblePanel
+        className="help-section"
+        title="Manual import walkthrough"
+        description={`Username import closes after ${realappToolsShutdownLabel()}. Use shared catalog search below for player passes and RAX, or paste one card at a time from realapp.com.`}
+        defaultOpen={false}
+      >
+        <ol className="help-list ordered">
               <li>
                 Open{' '}
                 <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
@@ -2921,18 +3071,14 @@ export default function PotentialPage() {
               copy from <code>earnings</code> onward, paste will fail — select from the opening
               brace.
             </p>
-          </>
-        ) : null}
-      </section>
+      </CollapsiblePanel>
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Saved profiles</h2>
-            <p>Player info and pasted JSON — reload to re-run the what-if analysis.</p>
-          </div>
-          <span className="badge">{data.potentialCards.length} saved</span>
-        </div>
+      <CollapsiblePanel
+        title="Saved profiles"
+        description="Player info and pasted JSON — reload to re-run the what-if analysis."
+        badge={`${data.potentialCards.length} saved`}
+        defaultOpen={false}
+      >
         {data.potentialCards.length === 0 ? (
           <p className="empty">No saved profiles yet. Fill in the form below and save one.</p>
         ) : (
@@ -2969,31 +3115,41 @@ export default function PotentialPage() {
             ))}
           </div>
         )}
-      </section>
+      </CollapsiblePanel>
 
-      <CatalogSearchPanel
-        sectionId="catalog-search"
+      <CollapsiblePanel
+        id="catalog-search"
+        className="form-panel"
         title="Search player passes"
-        description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection. Results show row counts and total base RAX."
-        passKind="player"
-        actionLabel="Load for analysis"
-        loadingKey={catalogLoadingKey}
-        disabled={Boolean(catalogLoadingKey)}
-        onSelect={loadFromCatalog}
-      />
+        description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection."
+        badge="Shared database"
+        defaultOpen={false}
+      >
+        <CatalogSearchPanel
+          embedded
+          sectionId="catalog-search-panel"
+          description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection. Results show row counts and total base RAX."
+          passKind="player"
+          actionLabel="Load for analysis"
+          loadingKey={catalogLoadingKey}
+          disabled={Boolean(catalogLoadingKey)}
+          onSelect={loadFromCatalog}
+        />
+      </CollapsiblePanel>
 
-      <form className="panel form-panel" id="potential-card-form" onSubmit={submitAnalyze}>
-        <div className="section-heading">
-          <div>
-            <h2>{editingId ? 'Edit profile' : 'New potential card'}</h2>
-            <p>
-              {editingId
-                ? 'Update fields or JSON, then analyze again or save.'
-                : 'Search the shared catalog above, or enter details and paste realapp.com JSON below.'}
-            </p>
-          </div>
-          <span className="badge">{editingId ? 'Editing' : 'Draft'}</span>
-        </div>
+      <CollapsiblePanel
+        id="potential-card-form"
+        className="form-panel"
+        title={editingId ? 'Edit profile' : 'New potential card'}
+        description={
+          editingId
+            ? 'Update fields or JSON, then analyze again or save.'
+            : 'Search the shared catalog above, or enter details and paste realapp.com JSON below.'
+        }
+        badge={editingId ? 'Editing' : 'Draft'}
+        defaultOpen={false}
+      >
+      <form className="form-panel-inner" onSubmit={submitAnalyze}>
         <div className="form-grid">
           <label className="field">
             <span>Player / team name</span>
@@ -3072,14 +3228,245 @@ export default function PotentialPage() {
           {status ? <p className="import-status">{status}</p> : null}
         </div>
       </form>
+      </CollapsiblePanel>
 
       {potentialAnalysis ? (
-        <PotentialAnalysisResults
-          analysis={potentialAnalysis}
-          previewAs={form.previewAs}
-          baselineAdjustmentCount={potentialBaselineAdjustmentCount}
-        />
+        <CollapsiblePanel
+          title="Analysis result"
+          description="How this pass would affect your collection's claimable RAX."
+          badge={`${formatSignedRax(displayRaxValue(potentialAnalysis.claimableRax - potentialAnalysis.displacedRax))} net`}
+          defaultOpen
+        >
+          <PotentialAnalysisResults
+            analysis={potentialAnalysis}
+            previewAs={form.previewAs}
+            baselineAdjustmentCount={potentialBaselineAdjustmentCount}
+          />
+        </CollapsiblePanel>
       ) : null}
+
+      <CollapsiblePanel
+        id="iconic-20-checker"
+        className="iconic-20-checker"
+        title="Iconic 20 potential checker"
+        description={`Bundle what-if at ${ICONIC_20_SIMULATED_RARITY} OTD — upgrade owned Iconic passes and/or preview new catalog cards. Nothing is saved.`}
+        badge={
+          iconic20Selection.size > 0 ? `${iconic20Selection.size} selected` : undefined
+        }
+        defaultOpen={false}
+      >
+        <p className="import-hint">
+          <strong>What is analyzed:</strong> saved daily earnings (owned upgrades) or catalog base
+          stats (new cards), each at {ICONIC_20_SIMULATED_RARITY} multipliers, then Dashboard claim
+          rules (top 2 per sport per day, Pro bonus if enabled). Mix owned upgrades and new catalog
+          picks in one bundle — same-sport overlap is counted in bundle order.
+        </p>
+
+        <CollapsiblePanel
+          className="nested-panel iconic-20-checker-owned"
+          title="From your collection"
+          description={`Upgrade owned Iconic passes below level 20 to ${ICONIC_20_SIMULATED_RARITY}.`}
+          defaultOpen={false}
+        >
+          {ownedIconic20EligibleCards.length > 0 ? (
+            <>
+              <div className="sort-controls">
+                <label className="field inline-field recommendation-adjustment-owned-search">
+                  <span>Filter owned Iconic passes</span>
+                  <input
+                    value={iconic20OwnedFilter}
+                    disabled={catalogAnalysisBusy}
+                    placeholder="Name, sport, season, or rarity"
+                    onChange={(event) => setIconic20OwnedFilter(event.target.value)}
+                  />
+                </label>
+                {iconic20OwnedFilter.trim() ? (
+                  <span className="badge">
+                    {filteredIconic20OwnedCards.length} match
+                    {filteredIconic20OwnedCards.length === 1 ? '' : 'es'}
+                  </span>
+                ) : null}
+              </div>
+              {filteredIconic20OwnedCards.length > 0 ? (
+                <>
+                  <p className="import-hint">Click to add or remove from the bundle.</p>
+                  <div className="recommendation-adjustment-owned-list button-row wrap-row">
+                    {filteredIconic20OwnedCards.map((card) => {
+                      const selectionKey = iconic20OwnedSelectionKey(card.externalKey!)
+                      const selected = iconic20Selection.has(selectionKey)
+                      return (
+                        <button
+                          className={`button compact${selected ? ' primary' : ''}`}
+                          type="button"
+                          key={card.id}
+                          disabled={catalogAnalysisBusy}
+                          title={selected ? 'Remove from bundle' : 'Add upgrade to bundle'}
+                          onClick={() => toggleIconic20Selection(selectionKey)}
+                        >
+                          {card.name}
+                          {card.season ? ` · ${card.season}` : ''}
+                          {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <p className="empty">No owned Iconic passes match that filter.</p>
+              )}
+            </>
+          ) : (
+            <p className="empty">
+              No owned Iconic passes below level 20 — use catalog search below for new-card previews.
+            </p>
+          )}
+        </CollapsiblePanel>
+
+        <CollapsiblePanel
+          className="nested-panel iconic-20-checker-catalog"
+          title="From catalog (new card)"
+          description={`Search passes you do not own. Each pick is simulated as a new ${ICONIC_20_SIMULATED_RARITY} card — not saved to your collection.`}
+          defaultOpen={false}
+        >
+          <div className="sort-controls">
+            <label className="field inline-field recommendation-adjustment-search">
+              <span>Search catalog</span>
+              <input
+                value={iconic20CatalogSearchQuery}
+                disabled={catalogAnalysisBusy}
+                placeholder="Player name, e.g. Ashton Jeanty"
+                onChange={(event) => setIconic20CatalogSearchQuery(event.target.value)}
+              />
+            </label>
+          </div>
+          {iconic20CatalogSearchBusy ? <p className="import-hint">Searching catalog…</p> : null}
+          {iconic20CatalogSearchStatus ? (
+            <p className="import-status">{iconic20CatalogSearchStatus}</p>
+          ) : null}
+          {iconic20CatalogSearchResults.length > 0 ? (
+            <div className="recommendation-adjustment-owned-list button-row wrap-row">
+              {iconic20CatalogSearchResults.slice(0, 12).map((result) => {
+                const selectionKey = iconic20CatalogSelectionKey(result.externalKey)
+                const selected = iconic20Selection.has(selectionKey)
+                const profileReady = iconic20ProfilesByKey.has(result.externalKey)
+                return (
+                  <button
+                    className={`button compact${selected ? ' primary' : ''}`}
+                    type="button"
+                    key={result.externalKey}
+                    disabled={catalogAnalysisBusy}
+                    title={
+                      selected
+                        ? 'Remove from bundle'
+                        : profileReady
+                          ? 'Add new-card preview to bundle'
+                          : 'Add to bundle (loads catalog daily rows)'
+                    }
+                    onClick={() => toggleIconic20Selection(selectionKey)}
+                  >
+                    {result.name}
+                    {' · '}
+                    {sportFromCatalog(result.sport)} ·{' '}
+                    {result.seasonLabel.trim() || result.seasonYear}
+                    {selected && !profileReady ? ' · loading…' : ''}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+        </CollapsiblePanel>
+
+        {iconic20Selection.size > 0 ? (
+          <div className="owned-upgrade-analysis-results">
+            <div className="section-heading">
+              <div>
+                <h3>
+                  {iconic20Selection.size === 1
+                    ? 'Analysis result'
+                    : `Bundle analysis (${iconic20Selection.size} passes)`}
+                </h3>
+                <p className="import-hint">
+                  Simulating {ICONIC_20_SIMULATED_RARITY} for:{' '}
+                  {selectedIconic20PassLabels.length > 0
+                    ? selectedIconic20PassLabels.join('; ')
+                    : iconic20ProfilesLoading
+                      ? 'Loading catalog rows…'
+                      : 'Waiting for catalog rows…'}
+                </p>
+              </div>
+              <button
+                className="button compact"
+                type="button"
+                disabled={catalogAnalysisBusy}
+                onClick={() => setIconic20Selection(new Set())}
+              >
+                Clear selection
+              </button>
+            </div>
+            {iconic20AnalysisCandidates.length > 0 ? (
+              <>
+                <div className="owned-upgrade-analysis-metrics">
+                  <div className="metric-card">
+                    <span>Your collection now</span>
+                    <strong>{formatRax(displayRaxValue(collectionClaimableNow))}</strong>
+                    <small>total claimable RAX</small>
+                  </div>
+                  <div className="metric-card">
+                    <span>After simulation</span>
+                    <strong>
+                      {formatRax(
+                        displayRaxValue(collectionClaimableNow + iconic20Analysis.combinedNetDelta),
+                      )}
+                    </strong>
+                    <small>total claimable RAX</small>
+                  </div>
+                  <div className="metric-card highlight">
+                    <span>Net gain</span>
+                    <strong>
+                      {formatSignedRax(displayRaxValue(iconic20Analysis.combinedNetDelta))}
+                    </strong>
+                    <small>
+                      {iconic20Selection.size === 1
+                        ? 'solo pass'
+                        : 'bundle after same-sport overlap'}
+                    </small>
+                  </div>
+                </div>
+                {iconic20Analysis.rows.length > 1 ? (
+                  <>
+                    <p className="import-hint">Per-pass contribution inside this bundle:</p>
+                    <ul className="list compact-list">
+                      {iconic20Analysis.rows.map((row) => {
+                        const source = row.key.startsWith('catalog:') ? 'new' : 'upgrade'
+                        return (
+                          <li key={row.key}>
+                            <strong>{row.name}</strong>
+                            <small>
+                              {row.sport} · {row.season} · {source} · adds{' '}
+                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
+                            </small>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <p className="empty">
+                {iconic20ProfilesLoading
+                  ? 'Loading catalog daily rows for selected passes…'
+                  : 'Selected catalog passes need daily rows — try another pass or check catalog coverage.'}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="empty">
+            Select owned upgrades and/or catalog passes above to run the {ICONIC_20_SIMULATED_RARITY}{' '}
+            checker.
+          </p>
+        )}
+      </CollapsiblePanel>
     </div>
   )
 }

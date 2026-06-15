@@ -756,7 +756,25 @@ label.button input.sr-only {
   padding-right: 0.25rem;
 }
 
-.owned-iconic-upgrade-analyzer .owned-upgrade-analysis-results {
+.iconic-20-checker .iconic-20-checker-owned,
+.iconic-20-checker .iconic-20-checker-catalog {
+  margin-top: 0.75rem;
+}
+
+.collapsible-panel.nested-panel {
+  margin-top: 0.75rem;
+}
+
+.collapsible-panel.nested-panel .collapsible-title {
+  font-size: 1rem;
+}
+
+.collapsible-panel.nested-panel .collapsible-description {
+  font-size: 0.88rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-upgrade-analysis-results,
+.iconic-20-checker .owned-upgrade-analysis-results {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
