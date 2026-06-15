@@ -6,6 +6,7 @@ import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImport
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import CardRaritySelect from '../components/CardRaritySelect'
 import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
@@ -100,6 +101,7 @@ export default function EntryPage() {
     data,
     addCard,
     updateCard,
+    setCardRarity,
     removeCardFromCollection,
     addPerformance,
     addPerformances,
@@ -1211,7 +1213,6 @@ export default function EntryPage() {
                 <th>Sport</th>
                 <th>Season/card</th>
                 <th>Rarity</th>
-                <th>Preview as</th>
                 <th>Notes</th>
                 <th />
               </tr>
@@ -1219,7 +1220,7 @@ export default function EntryPage() {
             <tbody>
               {data.cards.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty-cell">
+                  <td colSpan={6} className="empty-cell">
                     Import while available above or use Add card & earnings below.
                   </td>
                 </tr>
@@ -1247,23 +1248,8 @@ export default function EntryPage() {
                         onChange={(event) => updateCard(card.id, { season: event.target.value })}
                       />
                     </td>
-                    <td>{card.rarityLabel || '—'}</td>
                     <td>
-                      <select
-                        value={card.simulatedRarityLabel ?? ''}
-                        aria-label={`Preview rarity for ${card.name}`}
-                        onChange={(event) =>
-                          updateCard(card.id, {
-                            simulatedRarityLabel: event.target.value || undefined,
-                          })
-                        }
-                      >
-                        {RARITY_PREVIEW_OPTIONS.map((option) => (
-                          <option key={option || 'actual'} value={option}>
-                            {option || 'Actual'}
-                          </option>
-                        ))}
-                      </select>
+                      <CardRaritySelect card={card} onConfirmChange={setCardRarity} />
                     </td>
                     <td>
                       <input value={card.notes} onChange={(event) => updateCard(card.id, { notes: event.target.value })} />

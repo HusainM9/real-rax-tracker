@@ -39,6 +39,7 @@ import {
   type CatalogProfileImportResult,
 } from '../lib/catalogImport'
 import type { CatalogImportProfile } from '../lib/catalogApi'
+import { applyCardRarityChange } from '../lib/cardRarity'
 import type {
   AppSettings,
   PlayerCard,
@@ -74,6 +75,7 @@ type RaxDataContextValue = {
   addCard: (input: CardInput) => string
   upsertCard: (externalKey: string, input: CardInput) => string
   updateCard: (id: string, patch: Partial<CardInput>) => void
+  setCardRarity: (id: string, targetRarity: string) => void
   deleteCard: (id: string) => void
   removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
   addPerformance: (input: PerformanceInput) => void
@@ -224,6 +226,9 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               : card,
           ),
         }))
+      },
+      setCardRarity: (id, targetRarity) => {
+        setData((current) => applyCardRarityChange(current, id, targetRarity) ?? current)
       },
       deleteCard: (id) => {
         setData((current) => removeCardFromCollection(current, id) ?? current)

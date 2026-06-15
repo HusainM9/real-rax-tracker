@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import CardRaritySelect from '../components/CardRaritySelect'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import {
   CARD_SORT_OPTIONS,
@@ -15,7 +16,6 @@ import {
 } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
-import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatRax } from '../lib/format'
 import { RARITY_TIERS } from '../lib/rarityFilter'
 import { isPlayerPassForSell } from '../lib/passKind'
@@ -34,7 +34,7 @@ function pageCount(count: number, pageSize: number): number {
 }
 
 export default function CardsPage() {
-  const { data, updateCard, removeCardFromCollection } = useRaxData()
+  const { data, setCardRarity, removeCardFromCollection } = useRaxData()
   const [removeStatus, setRemoveStatus] = useState('')
   const [sortKey, setSortKey] = useState<CardSortKey>('claimable')
   const [secondarySortKey, setSecondarySortKey] = useState<CardSortKey | 'none'>('none')
@@ -105,7 +105,7 @@ export default function CardsPage() {
     <div className="page-stack">
       <CollapsiblePanel
         title="Player card totals"
-        description="Claimable RAX includes guaranteed top-two claims and any Pro bonus selections. Filter by sport and rarity, then sort by base RAX and a tie-breaker. Use &quot;Preview as&quot; to simulate a rarity upgrade. Edit player, sport, or season on Entry."
+        description="Claimable RAX includes guaranteed top-two claims and any Pro bonus selections. Filter by sport and rarity, then sort by base RAX and a tie-breaker. Change rarity after a merge or upgrade — saved with cloud sync and JSON export. Edit player, sport, or season on Entry."
         badge={`${sortedCards.length} card${sortedCards.length === 1 ? '' : 's'}`}
         actions={
           <>
@@ -216,7 +216,6 @@ export default function CardsPage() {
                 <th>Sport</th>
                 <th>Season</th>
                 <th>Rarity</th>
-                <th>Preview as</th>
                 <th>Entries</th>
                 <th>Total base</th>
                 <th>Guaranteed</th>
@@ -229,13 +228,13 @@ export default function CardsPage() {
             <tbody>
               {rollup.cards.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="empty-cell">
+                  <td colSpan={11} className="empty-cell">
                     Add player cards to see card-level totals.
                   </td>
                 </tr>
               ) : filteredCards.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="empty-cell">
+                  <td colSpan={11} className="empty-cell">
                     No cards match the current search, sport, rarity, or team-pass filters.
                   </td>
                 </tr>
@@ -255,23 +254,8 @@ export default function CardsPage() {
                     </td>
                     <td>{cardRollup.card.sport}</td>
                     <td>{cardRollup.card.season}</td>
-                    <td>{cardRollup.card.rarityLabel || '—'}</td>
                     <td>
-                      <select
-                        value={cardRollup.card.simulatedRarityLabel ?? ''}
-                        aria-label={`Preview rarity for ${cardRollup.card.name || 'card'}`}
-                        onChange={(event) =>
-                          updateCard(cardRollup.card.id, {
-                            simulatedRarityLabel: event.target.value || undefined,
-                          })
-                        }
-                      >
-                        {RARITY_PREVIEW_OPTIONS.map((option) => (
-                          <option key={option || 'actual'} value={option}>
-                            {option || 'Actual rarity'}
-                          </option>
-                        ))}
-                      </select>
+                      <CardRaritySelect card={cardRollup.card} onConfirmChange={setCardRarity} />
                     </td>
                     <td>{cardRollup.performanceCount}</td>
                     <td>

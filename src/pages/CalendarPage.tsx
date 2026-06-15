@@ -22,9 +22,6 @@ function CandidateRow({ candidate }: { candidate: ClaimCandidate }) {
           {candidate.card.sport} · {candidate.card.season || 'No season'} · rank #{candidate.rankInSport}
           {' · '}
           {formatClaimDay(candidate.performance.claimDay)}
-          {candidate.card.simulatedRarityLabel
-            ? ` · preview ${candidate.card.simulatedRarityLabel}`
-            : ''}
         </small>
       </span>
       <b>{formatRax(candidate.performance.raxEarned)} RAX</b>
@@ -119,7 +116,6 @@ export default function CalendarPage() {
     : null
   const monthGroups = useMemo(() => groupClaimDaysByMonth(allResults), [allResults])
   const layoutYear = currentYear()
-  const previewCount = data.cards.filter((card) => card.simulatedRarityLabel).length
 
   const closeDayPanel = () => setSearchParams({})
 
@@ -157,9 +153,6 @@ export default function CalendarPage() {
             <p>
               Each OTD day pools every year together — only the top two per sport plus one Pro bonus
               count. Values include OTD multipliers from username import.
-              {previewCount > 0
-                ? ` ${previewCount} card${previewCount === 1 ? '' : 's'} use a rarity preview — see Cards or Entry.`
-                : ''}
             </p>
           </div>
           <Link to="/entry">Add entries</Link>

@@ -56,8 +56,6 @@ function hydrateCard(value: unknown): PlayerCard | null {
     externalKey: typeof value.externalKey === 'string' ? value.externalKey : undefined,
     rarityLabel,
     passKind: explicitPassKind ?? (looksLikeTeamPassName(name) ? 'team' : undefined),
-    simulatedRarityLabel:
-      typeof value.simulatedRarityLabel === 'string' ? value.simulatedRarityLabel : undefined,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
   }
 }

@@ -189,7 +189,7 @@ export default function HelpPage() {
           </div>
           <div>
             <dt>Cards</dt>
-            <dd>Per-card totals, sorting, and rarity preview.</dd>
+            <dd>Per-card totals, sorting, and rarity editing.</dd>
           </div>
           <div>
             <dt>If sold</dt>
@@ -211,12 +211,12 @@ export default function HelpPage() {
       </section>
 
       <section className="panel help-section">
-        <h2>Rarity preview (owned cards)</h2>
+        <h2>Changing rarity (owned cards)</h2>
         <p>
-          On the Cards or Entry page, pick a card imported via username and set &quot;Preview
-          as&quot; to simulate upgrading rarity (e.g. Mystic → Iconic). Dashboard, Calendar, and
-          Overlaps update live with the simulated OTD values. Previews are not saved to your Real
-          account — clear the dropdown to return to actual totals.
+          On the Cards or Entry page, use the rarity dropdown on a card after you merge or upgrade
+          in Real. This updates the stored rarity and recalculates all earnings rows for OTD
+          multipliers. Changes save with your collection — cloud sync, JSON export, and local storage
+          all include the updated rarity and earnings.
         </p>
       </section>
 

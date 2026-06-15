@@ -60,19 +60,6 @@ export default function DashboardPage() {
   const [cloudConfirmBusy, setCloudConfirmBusy] = useState(false)
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
   const rollup = useMemo(() => computeYearRollup(data, claimResults), [data, claimResults])
-  const previewCards = useMemo(
-    () => data.cards.filter((card) => card.simulatedRarityLabel),
-    [data.cards],
-  )
-  const baselineRollup = useMemo(() => {
-    if (previewCards.length === 0) return null
-    const baselineData = {
-      ...data,
-      cards: data.cards.map((card) => ({ ...card, simulatedRarityLabel: undefined })),
-    }
-    const baselineResults = computeClaimDayResults(baselineData)
-    return computeYearRollup(baselineData, baselineResults)
-  }, [data, previewCards.length])
   const bestDays = useMemo(
     () => [...claimResults].sort((a, b) => b.totalClaimableRax - a.totalClaimableRax).slice(0, 6),
     [claimResults],
@@ -473,18 +460,6 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
-
-      {previewCards.length > 0 && baselineRollup ? (
-        <section className="panel import-hint">
-          <strong>Rarity preview active</strong> — {previewCards.length} card
-          {previewCards.length === 1 ? '' : 's'} simulated at a higher rarity. Claimable RAX:{' '}
-          {formatRax(baselineRollup.totalClaimableRax)} →{' '}
-          {formatRax(rollup.totalClaimableRax)} (
-          {rollup.totalClaimableRax >= baselineRollup.totalClaimableRax ? '+' : ''}
-          {formatRax(rollup.totalClaimableRax - baselineRollup.totalClaimableRax)}). Clear previews on{' '}
-          <Link to="/cards">Cards</Link> or <Link to="/entry">Entry</Link>.
-        </section>
-      ) : null}
 
       <section className="stats-grid">
         <StatCard

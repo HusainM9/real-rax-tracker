@@ -9,7 +9,7 @@ import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
-import { getBaseRaxEarned, sportToMeowbotSlug } from './effectiveRax'
+import { applyCardRarityChange } from './cardRarity'
 import { analyzePotentialCard, type PotentialAnalysisResult } from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
 import { computeOtdRax, parseRarityLabel } from './otdRax'
@@ -588,30 +588,7 @@ function applyOwnedCardRarityUpgrade(
   card: PlayerCard,
   targetRarity: string,
 ): RaxTrackerData {
-  const sportSlug = sportToMeowbotSlug(card.sport)
-  const passKind = card.passKind ?? 'player'
-
-  const nextPerformances = data.performances.map((performance) => {
-    if (performance.cardId !== card.id) return performance
-    const base = getBaseRaxEarned(performance, card)
-    return {
-      ...performance,
-      baseRaxEarned: base,
-      raxEarned: computeOtdRax(base, sportSlug, targetRarity, passKind),
-    }
-  })
-
-  const nextCards = data.cards.map((item) =>
-    item.id === card.id
-      ? {
-          ...item,
-          rarityLabel: targetRarity,
-          simulatedRarityLabel: undefined,
-        }
-      : item,
-  )
-
-  return { ...data, cards: nextCards, performances: nextPerformances }
+  return applyCardRarityChange(data, card.id, targetRarity) ?? data
 }
 
 function applyOwnedCardIconicUpgrade(data: RaxTrackerData, card: PlayerCard): RaxTrackerData {
