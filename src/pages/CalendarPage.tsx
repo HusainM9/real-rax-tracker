@@ -6,10 +6,10 @@ import {
   groupClaimDaysByMonth,
   monthGroupTotals,
 } from '../lib/calendarView'
-import { monthDayKeyFromClaimDay } from '../lib/claimDayKey'
+import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from '../lib/claimDayKey'
 import { computeClaimDayResults } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
-import { currentYear, formatClaimDay, formatRax } from '../lib/format'
+import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { useRaxData } from '../context/RaxDataContext'
 import type { ClaimCandidate, ClaimDayResult } from '../types/rax'
 
@@ -116,6 +116,19 @@ export default function CalendarPage() {
     : null
   const monthGroups = useMemo(() => groupClaimDaysByMonth(allResults), [allResults])
   const layoutYear = currentYear()
+  const todayMonthDay = useMemo(() => monthDayKeyFromClaimDay(todayIsoLocal()), [])
+  const todayMonthIdx = todayMonthDay != null ? monthIndexFromMonthDay(todayMonthDay) : -1
+  const todayMonthOnCalendar = useMemo(
+    () => todayMonthIdx >= 0 && monthGroups.some((group) => group.monthIdx === todayMonthIdx),
+    [monthGroups, todayMonthIdx],
+  )
+  const todayHasClaims = useMemo(
+    () =>
+      todayMonthDay != null &&
+      allResults.some((result) => monthDayKeyFromClaimDay(result.claimDay) === todayMonthDay),
+    [allResults, todayMonthDay],
+  )
+  const showTodayNav = todayMonthDay != null && todayMonthOnCalendar
 
   const closeDayPanel = () => setSearchParams({})
 
@@ -142,6 +155,26 @@ export default function CalendarPage() {
       return
     }
     setSearchParams({ monthDay })
+  }
+
+  const goToToday = () => {
+    if (!todayMonthDay) return
+    const monthIdx = monthIndexFromMonthDay(todayMonthDay)
+    if (monthIdx >= 0 && todayMonthOnCalendar) {
+      document.getElementById(`calendar-month-${monthIdx}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }
+    window.setTimeout(() => {
+      document.getElementById(`calendar-day-${todayMonthDay}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, todayMonthOnCalendar ? 180 : 0)
+    if (todayHasClaims && selectedMonthDay !== todayMonthDay) {
+      setSearchParams({ monthDay: todayMonthDay })
+    }
   }
 
   return (
@@ -193,6 +226,11 @@ export default function CalendarPage() {
               Show all
             </button>
           ) : null}
+          {showTodayNav ? (
+            <button className="button primary" type="button" onClick={goToToday}>
+              Go to today
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -234,7 +272,7 @@ export default function CalendarPage() {
           const cells = buildCalendarCells(group.days, group.monthIdx, layoutYear)
 
           return (
-            <section className="month-section" key={group.monthIdx}>
+            <section className="month-section" key={group.monthIdx} id={`calendar-month-${group.monthIdx}`}>
               <div className="month-header">
                 <h2>{group.month}</h2>
                 <span>
@@ -254,8 +292,9 @@ export default function CalendarPage() {
                       <button
                         className={`calendar-day has-rax${
                           cell.monthDay === selectedMonthDay ? ' selected' : ''
-                        }`}
+                        }${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
                         key={cell.key}
+                        id={cell.monthDay ? `calendar-day-${cell.monthDay}` : undefined}
                         type="button"
                         onClick={() => openDay(cell.monthDay!)}
                       >
@@ -267,6 +306,14 @@ export default function CalendarPage() {
                           </small>
                         ) : null}
                       </button>
+                    ) : cell.monthDay ? (
+                      <div
+                        className={`calendar-day${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
+                        key={cell.key}
+                        id={`calendar-day-${cell.monthDay}`}
+                      >
+                        <span>{cell.dayNumber}</span>
+                      </div>
                     ) : (
                       <div className="calendar-day" key={cell.key}>
                         {cell.dayNumber ? <span>{cell.dayNumber}</span> : null}
@@ -279,6 +326,20 @@ export default function CalendarPage() {
           )
         })
       )}
+
+      {showTodayNav ? (
+        <button
+          type="button"
+          className="calendar-today-fab"
+          aria-label="Go to today's date on the calendar"
+          onClick={goToToday}
+        >
+          <span className="calendar-today-fab-arrow" aria-hidden="true">
+            ↓
+          </span>
+          <span>Today</span>
+        </button>
+      ) : null}
     </div>
   )
 }

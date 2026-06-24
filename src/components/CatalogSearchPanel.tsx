@@ -15,6 +15,9 @@ export type CatalogSearchPanelProps = {
   emptyHint?: string
   embedded?: boolean
   onSelect: (result: CatalogSearchResult) => void | Promise<void>
+  bundleExternalKeys?: Set<string>
+  onToggleBundle?: (result: CatalogSearchResult) => void
+  bundleActionLabel?: string
 }
 
 export function CatalogSearchPanel({
@@ -30,11 +33,15 @@ export function CatalogSearchPanel({
   emptyHint,
   embedded = false,
   onSelect,
+  bundleExternalKeys,
+  onToggleBundle,
+  bundleActionLabel = 'Add to bundle',
 }: CatalogSearchPanelProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<CatalogSearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [status, setStatus] = useState('')
+  const bundleEnabled = Boolean(onToggleBundle)
 
   const visibleResults = useMemo(
     () => (passKind === 'all' ? results : results.filter((result) => result.passKind === passKind)),
@@ -129,31 +136,80 @@ export function CatalogSearchPanel({
       ) : searching ? (
         <p className="import-progress">Searching shared catalog…</p>
       ) : visibleResults.length > 0 ? (
-        <div className="cached-profile-list" role="listbox" aria-label="Shared catalog results">
-          {visibleResults.map((profile) => (
-            <button
-              key={profile.externalKey}
-              type="button"
-              className="cached-profile-item"
-              disabled={disabled || Boolean(loadingKey)}
-              onClick={() => void onSelect(profile)}
-            >
-              <strong>{profile.name}</strong>
-              <small>
-                {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
-                {profile.seasonLabel || profile.seasonYear}
-                {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
-                row{profile.rowCount === 1 ? '' : 's'}
-                {profile.totalBaseRax > 0
-                  ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
-                  : profile.hasEarnings === false
-                    ? ' · no earnings'
-                    : ''}
-                {profile.latestClaimDay ? ` · latest ${formatClaimDay(profile.latestClaimDay)}` : ''}
-              </small>
-              <span>{loadingKey === profile.externalKey ? loadingLabel : actionLabel}</span>
-            </button>
-          ))}
+        <div
+          className={bundleEnabled ? 'list catalog-search-result-list' : 'cached-profile-list'}
+          role="listbox"
+          aria-label="Shared catalog results"
+        >
+          {visibleResults.map((profile) => {
+            const inBundle = bundleExternalKeys?.has(profile.externalKey) ?? false
+            if (bundleEnabled) {
+              return (
+                <div className="list-row catalog-search-result-row" key={profile.externalKey}>
+                  <span>
+                    <strong>{profile.name}</strong>
+                    <small>
+                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {profile.seasonLabel || profile.seasonYear}
+                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
+                      row{profile.rowCount === 1 ? '' : 's'}
+                      {profile.totalBaseRax > 0
+                        ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
+                        : profile.hasEarnings === false
+                          ? ' · no earnings'
+                          : ''}
+                      {profile.latestClaimDay
+                        ? ` · latest ${formatClaimDay(profile.latestClaimDay)}`
+                        : ''}
+                    </small>
+                  </span>
+                  <span className="button-row compact-actions">
+                    <button
+                      className="button compact"
+                      type="button"
+                      disabled={disabled || loadingKey === profile.externalKey}
+                      onClick={() => void onSelect(profile)}
+                    >
+                      {loadingKey === profile.externalKey ? loadingLabel : actionLabel}
+                    </button>
+                    <button
+                      className={`button compact${inBundle ? ' primary' : ''}`}
+                      type="button"
+                      disabled={disabled || profile.rowCount === 0}
+                      onClick={() => onToggleBundle?.(profile)}
+                    >
+                      {inBundle ? 'In bundle' : bundleActionLabel}
+                    </button>
+                  </span>
+                </div>
+              )
+            }
+
+            return (
+              <button
+                key={profile.externalKey}
+                type="button"
+                className="cached-profile-item"
+                disabled={disabled || Boolean(loadingKey)}
+                onClick={() => void onSelect(profile)}
+              >
+                <strong>{profile.name}</strong>
+                <small>
+                  {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                  {profile.seasonLabel || profile.seasonYear}
+                  {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
+                  row{profile.rowCount === 1 ? '' : 's'}
+                  {profile.totalBaseRax > 0
+                    ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
+                    : profile.hasEarnings === false
+                      ? ' · no earnings'
+                      : ''}
+                  {profile.latestClaimDay ? ` · latest ${formatClaimDay(profile.latestClaimDay)}` : ''}
+                </small>
+                <span>{loadingKey === profile.externalKey ? loadingLabel : actionLabel}</span>
+              </button>
+            )
+          })}
         </div>
       ) : null}
       {status ? <p className="import-status">{status}</p> : null}

@@ -729,22 +729,24 @@ export function catalogProfileToIconic20CheckerCandidate(
   }
 }
 
-function applyIconic20CheckerCandidate(
+function applySimulatedRarityCheckerCandidate(
   data: RaxTrackerData,
   candidate: Iconic20CheckerCandidate,
+  simulatedRarity: string,
 ): RaxTrackerData {
   if (candidate.source === 'owned' && candidate.card) {
-    return applyOwnedCardRarityUpgrade(data, candidate.card, ICONIC_20_SIMULATED_RARITY)
+    return applyOwnedCardRarityUpgrade(data, candidate.card, simulatedRarity)
   }
   if (candidate.source === 'catalog' && candidate.profile?.rows.length) {
-    return addProfileToDataAtRarity(data, candidate.profile, ICONIC_20_SIMULATED_RARITY)
+    return addProfileToDataAtRarity(data, candidate.profile, simulatedRarity)
   }
   return data
 }
 
-export function analyzeIconic20CheckerImpacts(
+export function analyzeSimulatedRarityCheckerImpacts(
   data: RaxTrackerData,
   candidates: Iconic20CheckerCandidate[],
+  simulatedRarity: string,
 ): OwnedIconicUpgradeImpactResult {
   const eligible = candidates.filter(
     (candidate) =>
@@ -758,7 +760,9 @@ export function analyzeIconic20CheckerImpacts(
   const isolatedByKey = new Map<string, number>()
   for (const candidate of eligible) {
     const before = collectionClaimableTotal(data)
-    const after = collectionClaimableTotal(applyIconic20CheckerCandidate(data, candidate))
+    const after = collectionClaimableTotal(
+      applySimulatedRarityCheckerCandidate(data, candidate, simulatedRarity),
+    )
     isolatedByKey.set(candidate.key, after - before)
   }
 
@@ -777,7 +781,7 @@ export function analyzeIconic20CheckerImpacts(
     )
     for (const candidate of ordered) {
       const before = collectionClaimableTotal(workingData)
-      workingData = applyIconic20CheckerCandidate(workingData, candidate)
+      workingData = applySimulatedRarityCheckerCandidate(workingData, candidate, simulatedRarity)
       const after = collectionClaimableTotal(workingData)
       rows.push({
         key: candidate.key,
@@ -795,6 +799,24 @@ export function analyzeIconic20CheckerImpacts(
     combinedNetDelta: collectionClaimableTotal(workingData) - collectionClaimableTotal(data),
     combinedIsolatedNetDelta: [...isolatedByKey.values()].reduce((sum, value) => sum + value, 0),
   }
+}
+
+export function analyzeIconic20CheckerImpacts(
+  data: RaxTrackerData,
+  candidates: Iconic20CheckerCandidate[],
+): OwnedIconicUpgradeImpactResult {
+  return analyzeSimulatedRarityCheckerImpacts(data, candidates, ICONIC_20_SIMULATED_RARITY)
+}
+
+export function analyzeCatalogBundleImpacts(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+  simulatedRarity: string = RECOMMENDATION_SIMULATED_RARITY,
+): OwnedIconicUpgradeImpactResult {
+  const candidates = profiles
+    .map(catalogProfileToIconic20CheckerCandidate)
+    .filter((candidate): candidate is Iconic20CheckerCandidate => candidate !== null)
+  return analyzeSimulatedRarityCheckerImpacts(data, candidates, simulatedRarity)
 }
 
 function rankCandidatesSync(

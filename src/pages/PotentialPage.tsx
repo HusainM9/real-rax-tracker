@@ -25,6 +25,7 @@ import {
 } from '../lib/potentialAnalysis'
 import {
   analyzeIconic20CheckerImpacts,
+  analyzeCatalogBundleImpacts,
   analyzeOwnedIconicUpgradeImpacts,
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
@@ -153,7 +154,7 @@ const EMPTY_FORM = {
   season: '',
   notes: '',
   rawJson: '',
-  previewAs: '',
+  previewAs: RECOMMENDATION_SIMULATED_RARITY,
 }
 
 function CollapsibleAnalysisSection({
@@ -640,6 +641,7 @@ function applyCatalogProfileToForm(
     setForm: React.Dispatch<React.SetStateAction<typeof EMPTY_FORM>>
     setStatus: (status: string) => void
   },
+  soloPreviewRarity: string,
 ): boolean {
   if (profile.rows.length === 0) {
     setters.setEditingId(null)
@@ -650,7 +652,7 @@ function applyCatalogProfileToForm(
       season: profile.seasonLabel || String(profile.seasonYear),
       notes: 'Loaded from shared catalog (no earnings rows)',
       rawJson: '',
-      previewAs: profile.rarityLabel ?? '',
+      previewAs: soloPreviewRarity,
     })
     const storedRows = profile.storedRowCount ?? 0
     setters.setStatus(
@@ -665,8 +667,6 @@ function applyCatalogProfileToForm(
   const rawJson = catalogProfileToFilteredJson(profile)
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
-    rarityLabel: profile.rarityLabel,
-    applyOtdMultiplier: Boolean(profile.rarityLabel),
     passKind: profile.passKind,
   })
   setters.setEditingId(null)
@@ -677,7 +677,7 @@ function applyCatalogProfileToForm(
     season: profile.seasonLabel || String(profile.seasonYear),
     notes: 'Loaded from shared Meowbot catalog',
     rawJson,
-    previewAs: profile.rarityLabel ?? '',
+    previewAs: soloPreviewRarity,
   })
   setters.setStatus(
     `Loaded ${profile.name} from catalog: ${parsed.rows.length} row${
@@ -689,6 +689,8 @@ function applyCatalogProfileToForm(
   return true
 }
 
+const POTENTIAL_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+
 export default function PotentialPage() {
   const { data, addPotentialCard, updatePotentialCard, deletePotentialCard } = useRaxData()
   const [form, setForm] = useState(EMPTY_FORM)
@@ -696,6 +698,14 @@ export default function PotentialPage() {
   const [status, setStatus] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [catalogLoadingKey, setCatalogLoadingKey] = useState('')
+  const [potentialBundleSelection, setPotentialBundleSelection] = useState<Set<string>>(new Set())
+  const [potentialBundleProfilesByKey, setPotentialBundleProfilesByKey] = useState<
+    Map<string, CatalogImportProfile>
+  >(new Map())
+  const [potentialBundleProfilesLoading, setPotentialBundleProfilesLoading] = useState(false)
+  const [potentialBundleRarity, setPotentialBundleRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
+  const [catalogRankOpen, setCatalogRankOpen] = useState(false)
+  const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
   const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>([])
@@ -831,6 +841,28 @@ export default function PotentialPage() {
     [baselineProfilesByKey, rankAdjustments],
   )
 
+  const potentialCollectionClaimable = useMemo(
+    () => computeYearRollup(potentialBaselineData).totalClaimableRax,
+    [potentialBaselineData],
+  )
+
+  const potentialBundleProfiles = useMemo(
+    () =>
+      [...potentialBundleSelection]
+        .map((externalKey) => potentialBundleProfilesByKey.get(externalKey))
+        .filter((profile): profile is CatalogImportProfile => Boolean(profile?.rows.length)),
+    [potentialBundleProfilesByKey, potentialBundleSelection],
+  )
+
+  const potentialBundleAnalysis = useMemo(() => {
+    if (potentialBundleProfiles.length === 0) return null
+    return analyzeCatalogBundleImpacts(
+      potentialBaselineData,
+      potentialBundleProfiles,
+      potentialBundleRarity,
+    )
+  }, [potentialBaselineData, potentialBundleProfiles, potentialBundleRarity])
+
   const potentialAnalysis = useMemo(
     () =>
       analyzePotentialCard(
@@ -839,18 +871,11 @@ export default function PotentialPage() {
           name: form.name,
           sport: form.sport,
           season: form.season,
-          simulatedRarityLabel: form.previewAs || undefined,
+          simulatedRarityLabel: form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
         },
         potentialRows,
       ),
-    [
-      form.name,
-      form.previewAs,
-      form.season,
-      form.sport,
-      potentialBaselineData,
-      potentialRows,
-    ],
+    [form.name, form.previewAs, form.season, form.sport, potentialBaselineData, potentialRows],
   )
 
   const resetForm = () => {
@@ -860,13 +885,36 @@ export default function PotentialPage() {
     setStatus('')
   }
 
+  const togglePotentialBundle = (result: CatalogSearchResult) => {
+    if (result.rowCount === 0) return
+    setPotentialBundleSelection((current) => {
+      const next = new Set(current)
+      if (next.has(result.externalKey)) {
+        next.delete(result.externalKey)
+      } else {
+        next.add(result.externalKey)
+      }
+      return next
+    })
+  }
+
+  const goToBaselineAdjustments = () => {
+    setCatalogRankOpen(true)
+    setBaselineAdjustmentsOpen(true)
+    window.setTimeout(() => {
+      document.getElementById('recommendation-adjustments')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+  }
+
   const submitAnalyze = (event: FormEvent) => {
     event.preventDefault()
     try {
       const parsed = parseRealAppToolsRows(form.rawJson, {
         sport: form.sport,
-        rarityLabel: form.previewAs,
-        applyOtdMultiplier: Boolean(form.previewAs),
+        passKind: 'player',
       })
       setPotentialRows(parsed.rows)
       setStatus(
@@ -892,7 +940,7 @@ export default function PotentialPage() {
       season: form.season,
       notes: form.notes,
       rawJson: form.rawJson,
-      simulatedRarityLabel: form.previewAs || undefined,
+      simulatedRarityLabel: form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
       rows: potentialRows.map((row) => ({
         claimDay: row.claimDay,
         raxEarned: row.baseRaxEarned ?? row.raxEarned,
@@ -920,7 +968,7 @@ export default function PotentialPage() {
       season: saved.season,
       notes: saved.notes,
       rawJson: saved.rawJson,
-      previewAs: saved.simulatedRarityLabel ?? '',
+      previewAs: saved.simulatedRarityLabel ?? RECOMMENDATION_SIMULATED_RARITY,
     })
     setPotentialRows(
       saved.rows.map((row) => ({
@@ -936,6 +984,7 @@ export default function PotentialPage() {
   }
 
   const loadFromCatalog = async (result: CatalogSearchResult) => {
+    const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
     setCatalogLoadingKey(result.externalKey)
     setStatus('')
     try {
@@ -948,12 +997,16 @@ export default function PotentialPage() {
         setStatus('That pass was not found in the shared catalog. Try searching again.')
         return
       }
-      applyCatalogProfileToForm(profile, {
-        setEditingId,
-        setPotentialRows,
-        setForm,
-        setStatus,
-      })
+      applyCatalogProfileToForm(
+        profile,
+        {
+          setEditingId,
+          setPotentialRows,
+          setForm,
+          setStatus,
+        },
+        soloPreviewRarity,
+      )
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not load catalog pass.')
     } finally {
@@ -967,13 +1020,17 @@ export default function PotentialPage() {
       setStatus('Catalog profile is no longer loaded — run Rank catalog passes again.')
       return
     }
-    applyCatalogProfileToForm(profile, {
-      setEditingId,
-      setPotentialRows,
-      setForm,
-      setStatus,
-    })
-    setForm((current) => ({ ...current, previewAs: RECOMMENDATION_SIMULATED_RARITY }))
+    const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
+    applyCatalogProfileToForm(
+      profile,
+      {
+        setEditingId,
+        setPotentialRows,
+        setForm,
+        setStatus,
+      },
+      soloPreviewRarity,
+    )
     document.getElementById('potential-card-form')?.scrollIntoView({ behavior: 'smooth' })
   }
 
@@ -1677,6 +1734,32 @@ export default function PotentialPage() {
     return () => controller.abort()
   }, [iconic20Selection, iconic20ProfilesByKey])
 
+  useEffect(() => {
+    const missingKeys = [...potentialBundleSelection].filter(
+      (key) => !potentialBundleProfilesByKey.has(key),
+    )
+    if (missingKeys.length === 0) return
+
+    const controller = new AbortController()
+    setPotentialBundleProfilesLoading(true)
+    void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
+      .then(({ profiles, storageConfigured }) => {
+        if (!storageConfigured) return
+        setPotentialBundleProfilesByKey((current) => {
+          const next = new Map(current)
+          for (const profile of profiles) {
+            if (profile.rows.length > 0) next.set(profile.externalKey, profile)
+          }
+          return next
+        })
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPotentialBundleProfilesLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [potentialBundleProfilesByKey, potentialBundleSelection])
+
   const rankSportOptions = useMemo(
     () => SPORTS.map((sport) => ({ value: sport, label: sport })),
     [],
@@ -2029,9 +2112,9 @@ export default function PotentialPage() {
           <p className="eyebrow">What-if</p>
           <h2>Potential card checker</h2>
           <p>
-            Test a player pass you do not own yet, rank catalog passes by net claimable RAX, analyze
-            Iconic 1 or Iconic 20 upgrades, or preview new catalog cards at Iconic 20. Search the
-            shared Meowbot catalog for daily RAX and base totals, or paste JSON manually from
+            Test a player pass you do not own yet, rank catalog passes by net claimable RAX, or analyze
+            Iconic upgrades on passes you already own. Search the shared Meowbot catalog — new card
+            analysis previews at {RECOMMENDATION_SIMULATED_RARITY} OTD — or paste JSON from
             realapp.com. Saved profiles stay out of your real totals.
           </p>
         </div>
@@ -2181,7 +2264,10 @@ export default function PotentialPage() {
                   ) : null}
                   <p className="import-hint">
                     Want catalog ranking to treat these as already upgraded? Add them under{' '}
-                    <a href="#recommendation-adjustments">Ranking baseline adjustments</a> on the
+                    <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                      Ranking baseline adjustments
+                    </button>{' '}
+                    on the
                     catalog ranker below.
                   </p>
                   <div className="button-row">
@@ -2209,6 +2295,8 @@ export default function PotentialPage() {
         id="catalog-recommendations"
         title="Rank catalog passes"
         description="Find player passes in the shared catalog that would add the most net claimable RAX to your collection. Every candidate is simulated at Iconic 1 OTD."
+        open={catalogRankOpen}
+        onOpenChange={setCatalogRankOpen}
         defaultOpen={false}
       >
         <p className="import-hint">
@@ -2231,15 +2319,17 @@ export default function PotentialPage() {
           id="recommendation-adjustments"
           className="nested-panel recommendation-adjustments"
           title="Ranking baseline adjustments"
-          description="Temporarily change how your collection is treated for catalog ranking and the potential card analyzer. Does not modify saved cards."
+          description="Temporarily change how your collection is treated for catalog ranking and the Search and analyze new potential card section (single-card and bundle checks). Does not modify saved cards."
           badge={rankAdjustments.length > 0 ? `${rankAdjustments.length} adjusted` : undefined}
+          open={baselineAdjustmentsOpen}
+          onOpenChange={setBaselineAdjustmentsOpen}
           defaultOpen={false}
         >
           <p className="import-hint">
             <strong>Assume {RECOMMENDATION_SIMULATED_RARITY}</strong> — treat a pass as already at{' '}
             {RECOMMENDATION_SIMULATED_RARITY} in your collection (for passes you are upgrading, like
-            a lower-tier Ashton Jeanty). Rankings for other passes use that baseline and the pass
-            will not appear as a recommendation. <strong>Exclude</strong> — skip a pass from
+            a lower-tier Ashton Jeanty). Rankings, single-card search analysis, and custom bundle
+            tests all use this adjusted baseline. <strong>Exclude</strong> — skip a pass from
             recommendations without adding it to your baseline.
           </p>
 
@@ -3058,8 +3148,8 @@ export default function PotentialPage() {
               </li>
               <li>
                 Fill in the player name, sport, and season/card label below, paste the JSON, and
-                click <strong>Analyze potential card</strong>. Use <strong>Preview as</strong> to
-                simulate OTD at a higher rarity (e.g. Iconic).
+                click <strong>Analyze potential card</strong>. Analysis previews at{' '}
+                {RECOMMENDATION_SIMULATED_RARITY} OTD.
               </li>
               <li>
                 Click <strong>Save profile</strong> to keep the player info and JSON for later.
@@ -3074,13 +3164,246 @@ export default function PotentialPage() {
       </CollapsiblePanel>
 
       <CollapsiblePanel
+        id="potential-card-form"
+        className="form-panel"
+        title="Search and analyze new potential card"
+        description="Search the shared catalog or paste realapp.com JSON. Solo analysis uses the preview rarity below (default Iconic 1)."
+        badge={editingId ? 'Editing' : potentialAnalysis ? 'Results ready' : 'New'}
+        defaultOpen
+      >
+        <p className="import-hint potential-baseline-notice">
+          {potentialBaselineAdjustmentCount > 0 ? (
+            <>
+              Single-card and bundle analysis use your{' '}
+              <strong>ranking baseline adjustments</strong> ({potentialBaselineAdjustmentCount}{' '}
+              pass{potentialBaselineAdjustmentCount === 1 ? '' : 'es'} assumed at{' '}
+              {RECOMMENDATION_SIMULATED_RARITY}).{' '}
+              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                Edit baseline adjustments
+              </button>
+            </>
+          ) : (
+            <>
+              Single-card and bundle analysis use your collection as saved. To simulate upgrades you
+              plan first, add{' '}
+              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                ranking baseline adjustments
+              </button>{' '}
+              under Rank
+              catalog passes.
+            </>
+          )}
+        </p>
+        <div className="sort-controls potential-solo-rarity">
+          <label className="field inline-field">
+            <span>Solo preview rarity</span>
+            <select
+              value={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, previewAs: event.target.value }))
+              }
+            >
+              {POTENTIAL_RARITY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <CatalogSearchPanel
+          embedded
+          sectionId="catalog-search-panel"
+          description="Analyze one pass at the solo preview rarity above, or add several to a bundle."
+          passKind="player"
+          actionLabel="Analyze solo"
+          bundleActionLabel="Add to bundle"
+          loadingKey={catalogLoadingKey}
+          disabled={Boolean(catalogLoadingKey)}
+          bundleExternalKeys={potentialBundleSelection}
+          onToggleBundle={togglePotentialBundle}
+          onSelect={loadFromCatalog}
+        />
+
+        {potentialBundleSelection.size > 0 ? (
+          <div className="potential-bundle-controls">
+            <div className="sort-controls">
+              <label className="field inline-field">
+                <span>Bundle preview rarity</span>
+                <select
+                  value={potentialBundleRarity}
+                  onChange={(event) => setPotentialBundleRarity(event.target.value)}
+                >
+                  {POTENTIAL_RARITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="button"
+                type="button"
+                onClick={() => setPotentialBundleSelection(new Set())}
+              >
+                Clear bundle ({potentialBundleSelection.size})
+              </button>
+            </div>
+            {potentialBundleProfilesLoading ? (
+              <p className="import-hint">Loading bundle catalog rows…</p>
+            ) : null}
+            {potentialBundleAnalysis && potentialBundleProfiles.length > 0 ? (
+              <div className="owned-upgrade-analysis-results">
+                <div className="section-heading">
+                  <div>
+                    <h3>
+                      Bundle analysis ({potentialBundleProfiles.length} pass
+                      {potentialBundleProfiles.length === 1 ? '' : 'es'} at {potentialBundleRarity})
+                    </h3>
+                    <p className="import-hint">
+                      Same-sport overlap is counted in bundle order (best isolated net first within
+                      each sport).
+                    </p>
+                  </div>
+                </div>
+                <div className="owned-upgrade-analysis-metrics">
+                  <div className="metric-card">
+                    <span>Baseline collection</span>
+                    <strong>{formatRax(displayRaxValue(potentialCollectionClaimable))}</strong>
+                    <small>claimable RAX now</small>
+                  </div>
+                  <div className="metric-card">
+                    <span>After bundle</span>
+                    <strong>
+                      {formatRax(
+                        displayRaxValue(
+                          potentialCollectionClaimable + potentialBundleAnalysis.combinedNetDelta,
+                        ),
+                      )}
+                    </strong>
+                    <small>claimable RAX</small>
+                  </div>
+                  <div className="metric-card highlight">
+                    <span>Net gain</span>
+                    <strong>
+                      {formatSignedRax(displayRaxValue(potentialBundleAnalysis.combinedNetDelta))}
+                    </strong>
+                    <small>bundle total</small>
+                  </div>
+                </div>
+                {potentialBundleAnalysis.rows.length > 1 ? (
+                  <>
+                    <p className="import-hint">Per-pass contribution inside this bundle:</p>
+                    <ul className="list compact-list">
+                      {potentialBundleAnalysis.rows.map((row) => (
+                        <li key={row.key}>
+                          <strong>{row.name}</strong>
+                          <small>
+                            {' '}
+                            · {row.sport} · {row.season} · isolated{' '}
+                            {formatSignedRax(displayRaxValue(row.isolatedNetDelta))} · marginal{' '}
+                            {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </div>
+            ) : potentialBundleSelection.size > 0 && !potentialBundleProfilesLoading ? (
+              <p className="import-hint">
+                Selected passes are loading or have no catalog earnings rows yet.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <h3 className="mini-heading potential-section-divider">Or enter manually</h3>
+        <form className="form-panel-inner" onSubmit={submitAnalyze}>
+          <div className="form-grid">
+            <label className="field">
+              <span>Player / team name</span>
+              <input
+                value={form.name}
+                placeholder="Dominik Szoboszlai"
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Sport</span>
+              <select
+                value={form.sport}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, sport: event.target.value as Sport }))
+                }
+              >
+                {SPORTS.map((sport) => (
+                  <option key={sport} value={sport}>
+                    {sport}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Season / card label</span>
+              <input
+                value={form.season}
+                placeholder="2025-26"
+                onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Profile notes (optional)</span>
+            <input
+              value={form.notes}
+              placeholder="Target price, rarity, listing link…"
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>realapp.com earnings JSON</span>
+            <textarea
+              className="bulk-import-textarea"
+              value={form.rawJson}
+              placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
+              onChange={(event) => setForm((current) => ({ ...current, rawJson: event.target.value }))}
+            />
+          </label>
+          <div className="button-row">
+            <button className="button primary" type="submit" disabled={!form.rawJson.trim()}>
+              Analyze potential card
+            </button>
+            <button className="button" type="button" disabled={!form.name.trim()} onClick={saveProfile}>
+              Save profile
+            </button>
+            <button className="button" type="button" onClick={resetForm}>
+              New profile
+            </button>
+            {status ? <p className="import-status">{status}</p> : null}
+          </div>
+        </form>
+
+        {potentialAnalysis ? (
+          <div className="potential-analysis-inline">
+            <h3 className="mini-heading potential-section-divider">Analysis result</h3>
+            <PotentialAnalysisResults
+              analysis={potentialAnalysis}
+              previewAs={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
+              baselineAdjustmentCount={potentialBaselineAdjustmentCount}
+            />
+          </div>
+        ) : null}
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
         title="Saved profiles"
         description="Player info and pasted JSON — reload to re-run the what-if analysis."
         badge={`${data.potentialCards.length} saved`}
         defaultOpen={false}
       >
         {data.potentialCards.length === 0 ? (
-          <p className="empty">No saved profiles yet. Fill in the form below and save one.</p>
+          <p className="empty">No saved profiles yet. Analyze a card above, then save it for later.</p>
         ) : (
           <div className="list">
             {data.potentialCards.map((saved) => (
@@ -3090,9 +3413,6 @@ export default function PotentialPage() {
                   <small>
                     {saved.sport} · {saved.season || 'No season'} · {saved.rows.length} row
                     {saved.rows.length === 1 ? '' : 's'}
-                    {saved.simulatedRarityLabel
-                      ? ` · preview ${saved.simulatedRarityLabel}`
-                      : ''}
                     {saved.notes ? ` · ${saved.notes}` : ''}
                   </small>
                 </span>
@@ -3116,134 +3436,6 @@ export default function PotentialPage() {
           </div>
         )}
       </CollapsiblePanel>
-
-      <CollapsiblePanel
-        id="catalog-search"
-        className="form-panel"
-        title="Search player passes"
-        description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection."
-        badge="Shared database"
-        defaultOpen={false}
-      >
-        <CatalogSearchPanel
-          embedded
-          sectionId="catalog-search-panel"
-          description="Load daily RAX from the shared Meowbot catalog to run a what-if against your collection. Results show row counts and total base RAX."
-          passKind="player"
-          actionLabel="Load for analysis"
-          loadingKey={catalogLoadingKey}
-          disabled={Boolean(catalogLoadingKey)}
-          onSelect={loadFromCatalog}
-        />
-      </CollapsiblePanel>
-
-      <CollapsiblePanel
-        id="potential-card-form"
-        className="form-panel"
-        title={editingId ? 'Edit profile' : 'New potential card'}
-        description={
-          editingId
-            ? 'Update fields or JSON, then analyze again or save.'
-            : 'Search the shared catalog above, or enter details and paste realapp.com JSON below.'
-        }
-        badge={editingId ? 'Editing' : 'Draft'}
-        defaultOpen={false}
-      >
-      <form className="form-panel-inner" onSubmit={submitAnalyze}>
-        <div className="form-grid">
-          <label className="field">
-            <span>Player / team name</span>
-            <input
-              value={form.name}
-              placeholder="Dominik Szoboszlai"
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>Sport</span>
-            <select
-              value={form.sport}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, sport: event.target.value as Sport }))
-              }
-            >
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Season / card label</span>
-            <input
-              value={form.season}
-              placeholder="2025-26"
-              onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>Preview as</span>
-            <select
-              value={form.previewAs}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, previewAs: event.target.value }))
-              }
-            >
-              {RARITY_PREVIEW_OPTIONS.map((option) => (
-                <option key={option || 'actual'} value={option}>
-                  {option || 'Base earnings (no OTD boost)'}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label className="field">
-          <span>Profile notes (optional)</span>
-          <input
-            value={form.notes}
-            placeholder="Target price, rarity, listing link…"
-            onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-          />
-        </label>
-        <label className="field">
-          <span>realapp.com earnings JSON</span>
-          <textarea
-            className="bulk-import-textarea"
-            value={form.rawJson}
-            placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
-            onChange={(event) => setForm((current) => ({ ...current, rawJson: event.target.value }))}
-          />
-        </label>
-        <div className="button-row">
-          <button className="button primary" type="submit" disabled={!form.rawJson.trim()}>
-            Analyze potential card
-          </button>
-          <button className="button" type="button" disabled={!form.name.trim()} onClick={saveProfile}>
-            Save profile
-          </button>
-          <button className="button" type="button" onClick={resetForm}>
-            New profile
-          </button>
-          {status ? <p className="import-status">{status}</p> : null}
-        </div>
-      </form>
-      </CollapsiblePanel>
-
-      {potentialAnalysis ? (
-        <CollapsiblePanel
-          title="Analysis result"
-          description="How this pass would affect your collection's claimable RAX."
-          badge={`${formatSignedRax(displayRaxValue(potentialAnalysis.claimableRax - potentialAnalysis.displacedRax))} net`}
-          defaultOpen
-        >
-          <PotentialAnalysisResults
-            analysis={potentialAnalysis}
-            previewAs={form.previewAs}
-            baselineAdjustmentCount={potentialBaselineAdjustmentCount}
-          />
-        </CollapsiblePanel>
-      ) : null}
 
       <CollapsiblePanel
         id="iconic-20-checker"

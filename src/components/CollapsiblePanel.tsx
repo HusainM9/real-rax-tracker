@@ -6,6 +6,8 @@ type CollapsiblePanelProps = {
   description?: string
   badge?: string
   defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   actions?: ReactNode
   className?: string
   children: ReactNode
@@ -17,11 +19,22 @@ export default function CollapsiblePanel({
   description,
   badge,
   defaultOpen = true,
+  open: controlledOpen,
+  onOpenChange,
   actions,
   className = '',
   children,
 }: CollapsiblePanelProps) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [internalOpen, setInternalOpen] = useState(defaultOpen)
+  const open = controlledOpen ?? internalOpen
+
+  const setOpen = (next: boolean | ((current: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next
+    if (controlledOpen === undefined) {
+      setInternalOpen(resolved)
+    }
+    onOpenChange?.(resolved)
+  }
 
   return (
     <section

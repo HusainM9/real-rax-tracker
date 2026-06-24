@@ -1,211 +1,27 @@
--- Audit and repair meowbot_passes season_year / season_label / external_key mismatches.
--- Run in Supabase SQL editor.
---
--- ============================================================================
--- RUNBOOK (one step at a time — highlight the block and click Run)
--- ============================================================================
---  1. Run Step 1b below (already active). Note row count.
---  2. Run Step 1d below (already active). Read the "bucket" column:
---       key_move        -> uncomment ONLY Step 2, run it, re-run 1d
---       collision       -> after Step 2, uncomment ONLY Step 2c, run it, re-run 1d
---       metadata_only   -> uncomment ONLY Step 2b, run it, re-run 1b (expect 0)
---  3. Order if you have both key_move and collision: Step 2 first, then Step 2c.
---  4. After 1b is 0 rows: re-import NFL/NHL earnings in Admin.
---
--- Never uncomment Step 2 and Step 2b together. Never run repair with Step 1 queries
--- selected — highlight only the repair block you need.
--- ============================================================================
---
--- Encoding reference:
---   NFL, NBA, NHL, FC  -> season_label '2023-24' means season_year 2024 (END year)
---   CBB, CFB           -> season_label '2024-25' means season_year 2024 (START year)
---   MLB, WNBA, Golf, UFC -> season_label '2024' means season_year 2024 (calendar)
+-- -- Audit and repair meowbot_passes season_year / season_label / external_key mismatches.
+-- -- Run in Supabase SQL editor.
+-- --
+-- -- ============================================================================
+-- -- RUNBOOK (one step at a time — highlight the block and click Run)
+-- -- ============================================================================
+-- --  1. Run Step 1b below (already active). Note row count.
+-- --  2. Run Step 1d below (already active). Read the "bucket" column:
+-- --       key_move        -> uncomment ONLY Step 2, run it, re-run 1d
+-- --       collision       -> after Step 2, uncomment ONLY Step 2c, run it, re-run 1d
+-- --       metadata_only   -> uncomment ONLY Step 2b, run it, re-run 1b (expect 0)
+-- --  3. Order if you have both key_move and collision: Step 2 first, then Step 2c.
+-- --  4. After 1b is 0 rows: re-import NFL/NHL earnings in Admin.
+-- --
+-- -- Never uncomment Step 2 and Step 2b together. Never run repair with Step 1 queries
+-- -- selected — highlight only the repair block you need.
+-- -- ============================================================================
+-- --
+-- -- Encoding reference:
+-- --   NFL, NBA, NHL, FC  -> season_label '2023-24' means season_year 2024 (END year)
+-- --   CBB, CFB           -> season_label '2024-25' means season_year 2024 (START year)
+-- --   MLB, WNBA, Golf, UFC -> season_label '2024' means season_year 2024 (calendar)
 
--- Step 1: audit misaligned passes (sport-aware) — READ ONLY, safe to run anytime
-with parsed as (
-  select
-    external_key,
-    entity_id,
-    sport,
-    season_year,
-    season_label,
-    name,
-    case
-      when season_label ~ '^\d{4}-\d{2}$' then substring(season_label from 1 for 4)::int
-      else null
-    end as label_start_year,
-    case
-      when season_label ~ '^\d{4}-\d{2}$' then
-        (substring(season_label from 1 for 4)::int / 100) * 100
-        + substring(season_label from 6 for 2)::int
-        + case
-            when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
-              then 100
-            else 0
-          end
-      else null
-    end as label_end_year
-  from public.meowbot_passes
-),
-canonical as (
-  select
-    p.*,
-    case
-      when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year
-      when sport in ('CBB', 'CFB') then label_start_year
-      when sport in ('NFL', 'NBA', 'NHL', 'FC') then label_end_year
-      else season_year
-    end as canonical_season_year,
-    case
-      when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year::text
-      when sport in ('CBB', 'CFB') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
-      when sport in ('NFL', 'NBA', 'NHL', 'FC') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
-      else season_label
-    end as expected_label_from_year,
-    case
-      when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_label
-      when sport in ('CBB', 'CFB') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
-      when sport in ('NFL', 'NBA', 'NHL', 'FC') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
-      else season_label
-    end as expected_label_from_label
-  from parsed p
-)
-select
-  external_key,
-  entity_id,
-  sport,
-  name,
-  season_year,
-  season_label,
-  canonical_season_year,
-  expected_label_from_year,
-  expected_label_from_label,
-  entity_id::text || '|' || canonical_season_year::text || '|' || sport as canonical_external_key
-from canonical
-where season_label ~ '^\d{4}-\d{2}$'
-  and (
-    season_year is distinct from canonical_season_year
-    or season_label is distinct from expected_label_from_label
-  )
-order by sport, name;
-
--- Step 1b: NHL/NFL only — end-year sports where wrong keys merge adjacent seasons
--- (e.g. Trocheck 23-24 showing 22-23 earnings on the same external_key)
-with parsed as (
-  select
-    external_key,
-    entity_id,
-    sport,
-    season_year,
-    season_label,
-    name,
-    substring(season_label from 1 for 4)::int as label_start_year,
-    (substring(season_label from 1 for 4)::int / 100) * 100
-      + substring(season_label from 6 for 2)::int
-      + case
-          when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
-            then 100
-          else 0
-        end as label_end_year
-  from public.meowbot_passes
-  where sport in ('NHL', 'NFL')
-    and season_label ~ '^\d{4}-\d{2}$'
-)
-select
-  external_key,
-  entity_id,
-  sport,
-  name,
-  season_year as stored_season_year,
-  season_label,
-  label_end_year as should_be_season_year,
-  (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0') as should_be_label,
-  entity_id::text || '|' || label_end_year::text || '|' || sport as should_be_external_key
-from parsed
-where season_year is distinct from label_end_year
-order by sport, name;
-
--- Step 1c: duplicate entity+sport with different labels sharing one season_year (collision risk)
-select
-  entity_id,
-  sport,
-  season_year,
-  array_agg(distinct season_label order by season_label) as labels_on_same_year,
-  count(*) as pass_rows
-from public.meowbot_passes
-where sport in ('NHL', 'NFL')
-  and season_label ~ '^\d{4}-\d{2}$'
-group by entity_id, sport, season_year
-having count(distinct season_label) > 1
-order by pass_rows desc, sport, entity_id;
-
--- Step 1d: classify remaining Step 1b rows — READ ONLY, run this now (after Step 2)
--- bucket = metadata_only -> run Step 2b only
--- bucket = key_move        -> run Step 2 only (Step 2 skips collision rows on purpose)
--- bucket = collision       -> run Step 2c only (after Step 2 finishes key_move rows)
-with parsed as (
-  select
-    external_key,
-    entity_id,
-    sport,
-    season_year,
-    season_label,
-    name,
-    case
-      when season_label ~ '^\d{4}-\d{2}$' then
-        (substring(season_label from 1 for 4)::int / 100) * 100
-        + substring(season_label from 6 for 2)::int
-        + case
-            when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
-              then 100
-            else 0
-          end
-      else null
-    end as label_end_year
-  from public.meowbot_passes
-  where sport in ('NHL', 'NFL')
-    and season_label ~ '^\d{4}-\d{2}$'
-),
-misaligned as (
-  select
-    p.*,
-    p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport as should_be_external_key,
-    (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as should_be_label
-  from parsed p
-  where p.season_year is distinct from p.label_end_year
-)
-select
-  external_key,
-  should_be_external_key,
-  entity_id,
-  sport,
-  name,
-  season_year,
-  season_label,
-  label_end_year as should_be_season_year,
-  should_be_label,
-  case
-    when external_key = should_be_external_key then 'metadata_only'
-    when exists (
-      select 1
-      from public.meowbot_passes existing
-      where existing.external_key = misaligned.should_be_external_key
-    ) then 'collision'
-    else 'key_move'
-  end as bucket
-from misaligned
-order by bucket, sport, name;
-
--- ============================================================================
--- REPAIR BLOCKS BELOW — stay commented until you need one. Uncomment ONE block.
--- Highlight from begin; through commit; only, then Run.
--- ============================================================================
-
--- Step 2: move passes to a new external_key (key_move rows only)
-
--- begin;
-
--- create temp table repair_targets on commit drop as
+-- -- Step 1: audit misaligned passes (sport-aware) — READ ONLY, safe to run anytime
 -- with parsed as (
 --   select
 --     external_key,
@@ -213,6 +29,11 @@ order by bucket, sport, name;
 --     sport,
 --     season_year,
 --     season_label,
+--     name,
+--     case
+--       when season_label ~ '^\d{4}-\d{2}$' then substring(season_label from 1 for 4)::int
+--       else null
+--     end as label_start_year,
 --     case
 --       when season_label ~ '^\d{4}-\d{2}$' then
 --         (substring(season_label from 1 for 4)::int / 100) * 100
@@ -225,82 +46,306 @@ order by bucket, sport, name;
 --       else null
 --     end as label_end_year
 --   from public.meowbot_passes
---   where sport in ('NFL', 'NHL')
 -- ),
--- repair as (
+-- canonical as (
 --   select
---     p.external_key as old_external_key,
---     p.entity_id,
---     p.sport,
---     p.label_end_year as canonical_season_year,
---     (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as canonical_season_label
+--     p.*,
+--     case
+--       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year
+--       when sport in ('CBB', 'CFB') then label_start_year
+--       when sport in ('NFL', 'NBA', 'NHL', 'FC') then label_end_year
+--       else season_year
+--     end as canonical_season_year,
+--     case
+--       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year::text
+--       when sport in ('CBB', 'CFB') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NFL', 'NBA', 'NHL', 'FC') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
+--       else season_label
+--     end as expected_label_from_year,
+--     case
+--       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_label
+--       when sport in ('CBB', 'CFB') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NFL', 'NBA', 'NHL', 'FC') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
+--       else season_label
+--     end as expected_label_from_label
 --   from parsed p
---   where p.season_label ~ '^\d{4}-\d{2}$'
---     and p.season_year is distinct from p.label_end_year
 -- )
 -- select
---   r.old_external_key,
---   r.entity_id,
---   r.sport,
---   r.canonical_season_year,
---   r.canonical_season_label,
---   r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport as new_external_key
--- from repair r
--- where r.old_external_key <> r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport
---   and not exists (
---     select 1
---     from public.meowbot_passes existing
---     where existing.external_key = r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport
---   );
-
--- insert into public.meowbot_passes (
 --   external_key,
 --   entity_id,
---   pass_kind,
 --   sport,
+--   name,
 --   season_year,
 --   season_label,
---   name,
---   rarity_label,
---   has_earnings,
---   total_base_rax,
---   source_updated_at,
---   cached_at
+--   canonical_season_year,
+--   expected_label_from_year,
+--   expected_label_from_label,
+--   entity_id::text || '|' || canonical_season_year::text || '|' || sport as canonical_external_key
+-- from canonical
+-- where season_label ~ '^\d{4}-\d{2}$'
+--   and (
+--     season_year is distinct from canonical_season_year
+--     or season_label is distinct from expected_label_from_label
+--   )
+-- order by sport, name;
+
+-- -- Step 1b: NHL/NFL only — end-year sports where wrong keys merge adjacent seasons
+-- -- (e.g. Trocheck 23-24 showing 22-23 earnings on the same external_key)
+-- with parsed as (
+--   select
+--     external_key,
+--     entity_id,
+--     sport,
+--     season_year,
+--     season_label,
+--     name,
+--     substring(season_label from 1 for 4)::int as label_start_year,
+--     (substring(season_label from 1 for 4)::int / 100) * 100
+--       + substring(season_label from 6 for 2)::int
+--       + case
+--           when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
+--             then 100
+--           else 0
+--         end as label_end_year
+--   from public.meowbot_passes
+--   where sport in ('NHL', 'NFL')
+--     and season_label ~ '^\d{4}-\d{2}$'
 -- )
 -- select
---   t.new_external_key,
---   p.entity_id,
---   p.pass_kind,
---   p.sport,
---   t.canonical_season_year,
---   t.canonical_season_label,
---   p.name,
---   p.rarity_label,
---   p.has_earnings,
---   p.total_base_rax,
---   p.source_updated_at,
---   now()
--- from repair_targets t
--- join public.meowbot_passes p on p.external_key = t.old_external_key;
+--   external_key,
+--   entity_id,
+--   sport,
+--   name,
+--   season_year as stored_season_year,
+--   season_label,
+--   label_end_year as should_be_season_year,
+--   (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0') as should_be_label,
+--   entity_id::text || '|' || label_end_year::text || '|' || sport as should_be_external_key
+-- from parsed
+-- where season_year is distinct from label_end_year
+-- order by sport, name;
 
--- update public.meowbot_daily_earnings d
--- set external_key = t.new_external_key
--- from repair_targets t
--- where d.external_key = t.old_external_key;
+-- -- Step 1c: duplicate entity+sport with different labels sharing one season_year (collision risk)
+-- select
+--   entity_id,
+--   sport,
+--   season_year,
+--   array_agg(distinct season_label order by season_label) as labels_on_same_year,
+--   count(*) as pass_rows
+-- from public.meowbot_passes
+-- where sport in ('NHL', 'NFL')
+--   and season_label ~ '^\d{4}-\d{2}$'
+-- group by entity_id, sport, season_year
+-- having count(distinct season_label) > 1
+-- order by pass_rows desc, sport, entity_id;
 
--- delete from public.meowbot_passes p
--- using repair_targets t
--- where p.external_key = t.old_external_key
---   and not exists (
---     select 1
---     from public.meowbot_daily_earnings d
---     where d.external_key = t.old_external_key
---   );
+-- -- Step 1d: classify remaining Step 1b rows — READ ONLY, run this now (after Step 2)
+-- -- bucket = metadata_only -> run Step 2b only
+-- -- bucket = key_move        -> run Step 2 only (Step 2 skips collision rows on purpose)
+-- -- bucket = collision       -> run Step 2c only (after Step 2 finishes key_move rows)
+-- with parsed as (
+--   select
+--     external_key,
+--     entity_id,
+--     sport,
+--     season_year,
+--     season_label,
+--     name,
+--     case
+--       when season_label ~ '^\d{4}-\d{2}$' then
+--         (substring(season_label from 1 for 4)::int / 100) * 100
+--         + substring(season_label from 6 for 2)::int
+--         + case
+--             when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
+--               then 100
+--             else 0
+--           end
+--       else null
+--     end as label_end_year
+--   from public.meowbot_passes
+--   where sport in ('NHL', 'NFL')
+--     and season_label ~ '^\d{4}-\d{2}$'
+-- ),
+-- misaligned as (
+--   select
+--     p.*,
+--     p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport as should_be_external_key,
+--     (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as should_be_label
+--   from parsed p
+--   where p.season_year is distinct from p.label_end_year
+-- )
+-- select
+--   external_key,
+--   should_be_external_key,
+--   entity_id,
+--   sport,
+--   name,
+--   season_year,
+--   season_label,
+--   label_end_year as should_be_season_year,
+--   should_be_label,
+--   case
+--     when external_key = should_be_external_key then 'metadata_only'
+--     when exists (
+--       select 1
+--       from public.meowbot_passes existing
+--       where existing.external_key = misaligned.should_be_external_key
+--     ) then 'collision'
+--     else 'key_move'
+--   end as bucket
+-- from misaligned
+-- order by bucket, sport, name;
 
--- commit;
+-- -- ============================================================================
+-- -- REPAIR BLOCKS BELOW — stay commented until you need one. Uncomment ONE block.
+-- -- Highlight from begin; through commit; only, then Run.
+-- -- ============================================================================
 
--- Step 2b: fix season_year/season_label in place (metadata_only rows only)
+-- -- Step 2: move passes to a new external_key (key_move rows only)
+
+-- -- begin;
+
+-- -- create temp table repair_targets on commit drop as
+-- -- with parsed as (
+-- --   select
+-- --     external_key,
+-- --     entity_id,
+-- --     sport,
+-- --     season_year,
+-- --     season_label,
+-- --     case
+-- --       when season_label ~ '^\d{4}-\d{2}$' then
+-- --         (substring(season_label from 1 for 4)::int / 100) * 100
+-- --         + substring(season_label from 6 for 2)::int
+-- --         + case
+-- --             when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
+-- --               then 100
+-- --             else 0
+-- --           end
+-- --       else null
+-- --     end as label_end_year
+-- --   from public.meowbot_passes
+-- --   where sport in ('NFL', 'NHL')
+-- -- ),
+-- -- repair as (
+-- --   select
+-- --     p.external_key as old_external_key,
+-- --     p.entity_id,
+-- --     p.sport,
+-- --     p.label_end_year as canonical_season_year,
+-- --     (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as canonical_season_label
+-- --   from parsed p
+-- --   where p.season_label ~ '^\d{4}-\d{2}$'
+-- --     and p.season_year is distinct from p.label_end_year
+-- -- )
+-- -- select
+-- --   r.old_external_key,
+-- --   r.entity_id,
+-- --   r.sport,
+-- --   r.canonical_season_year,
+-- --   r.canonical_season_label,
+-- --   r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport as new_external_key
+-- -- from repair r
+-- -- where r.old_external_key <> r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport
+-- --   and not exists (
+-- --     select 1
+-- --     from public.meowbot_passes existing
+-- --     where existing.external_key = r.entity_id::text || '|' || r.canonical_season_year::text || '|' || r.sport
+-- --   );
+
+-- -- insert into public.meowbot_passes (
+-- --   external_key,
+-- --   entity_id,
+-- --   pass_kind,
+-- --   sport,
+-- --   season_year,
+-- --   season_label,
+-- --   name,
+-- --   rarity_label,
+-- --   has_earnings,
+-- --   total_base_rax,
+-- --   source_updated_at,
+-- --   cached_at
+-- -- )
+-- -- select
+-- --   t.new_external_key,
+-- --   p.entity_id,
+-- --   p.pass_kind,
+-- --   p.sport,
+-- --   t.canonical_season_year,
+-- --   t.canonical_season_label,
+-- --   p.name,
+-- --   p.rarity_label,
+-- --   p.has_earnings,
+-- --   p.total_base_rax,
+-- --   p.source_updated_at,
+-- --   now()
+-- -- from repair_targets t
+-- -- join public.meowbot_passes p on p.external_key = t.old_external_key;
+
+-- -- update public.meowbot_daily_earnings d
+-- -- set external_key = t.new_external_key
+-- -- from repair_targets t
+-- -- where d.external_key = t.old_external_key;
+
+-- -- delete from public.meowbot_passes p
+-- -- using repair_targets t
+-- -- where p.external_key = t.old_external_key
+-- --   and not exists (
+-- --     select 1
+-- --     from public.meowbot_daily_earnings d
+-- --     where d.external_key = t.old_external_key
+-- --   );
+
+-- -- commit;
+
+-- -- Step 2b: fix season_year/season_label in place (metadata_only rows only)
+-- -- begin;
+-- -- with parsed as (
+-- --   select
+-- --     external_key,
+-- --     entity_id,
+-- --     sport,
+-- --     season_year,
+-- --     season_label,
+-- --     case
+-- --       when season_label ~ '^\d{4}-\d{2}$' then
+-- --         (substring(season_label from 1 for 4)::int / 100) * 100
+-- --         + substring(season_label from 6 for 2)::int
+-- --         + case
+-- --             when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
+-- --               then 100
+-- --             else 0
+-- --           end
+-- --       else null
+-- --     end as label_end_year
+-- --   from public.meowbot_passes
+-- --   where sport in ('NFL', 'NHL')
+-- -- ),
+-- -- targets as (
+-- --   select
+-- --     p.external_key,
+-- --     p.label_end_year as canonical_season_year,
+-- --     (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as canonical_season_label
+-- --   from parsed p
+-- --   where p.season_label ~ '^\d{4}-\d{2}$'
+-- --     and p.season_year is distinct from p.label_end_year
+-- --     and p.external_key = p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
+-- -- )
+-- -- update public.meowbot_passes p
+-- -- set
+-- --   season_year = t.canonical_season_year,
+-- --   season_label = t.canonical_season_label,
+-- --   cached_at = now()
+-- -- from targets t
+-- -- where p.external_key = t.external_key;
+-- -- commit;
+
+-- -- Step 2c: merge collision rows (wrong-key pass + canonical pass both exist)
+-- -- Moves non-conflicting daily rows to the canonical pass, drops conflicting days on the
+-- -- wrong key (re-import will restore correct days), fixes canonical metadata, deletes wrong pass.
 -- begin;
+-- create temp table collision_targets on commit drop as
 -- with parsed as (
 --   select
 --     external_key,
@@ -322,162 +367,221 @@ order by bucket, sport, name;
 --   from public.meowbot_passes
 --   where sport in ('NFL', 'NHL')
 -- ),
--- targets as (
+-- misaligned as (
 --   select
---     p.external_key,
+--     p.external_key as old_external_key,
+--     p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport as new_external_key,
 --     p.label_end_year as canonical_season_year,
 --     (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as canonical_season_label
 --   from parsed p
 --   where p.season_label ~ '^\d{4}-\d{2}$'
 --     and p.season_year is distinct from p.label_end_year
---     and p.external_key = p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
+--     and p.external_key <> p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
+--     and exists (
+--       select 1
+--       from public.meowbot_passes existing
+--       where existing.external_key = p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
+--     )
 -- )
+-- select * from misaligned;
+-- update public.meowbot_daily_earnings d
+-- set external_key = t.new_external_key
+-- from collision_targets t
+-- where d.external_key = t.old_external_key
+--   and not exists (
+--     select 1
+--     from public.meowbot_daily_earnings existing
+--     where existing.external_key = t.new_external_key
+--       and existing.claim_day = d.claim_day
+--   );
+-- delete from public.meowbot_daily_earnings d
+-- using collision_targets t
+-- where d.external_key = t.old_external_key;
 -- update public.meowbot_passes p
 -- set
 --   season_year = t.canonical_season_year,
 --   season_label = t.canonical_season_label,
 --   cached_at = now()
--- from targets t
--- where p.external_key = t.external_key;
+-- from collision_targets t
+-- where p.external_key = t.new_external_key;
+-- delete from public.meowbot_passes p
+-- using collision_targets t
+-- where p.external_key = t.old_external_key;
 -- commit;
 
--- Step 2c: merge collision rows (wrong-key pass + canonical pass both exist)
--- Moves non-conflicting daily rows to the canonical pass, drops conflicting days on the
--- wrong key (re-import will restore correct days), fixes canonical metadata, deletes wrong pass.
-begin;
-create temp table collision_targets on commit drop as
-with parsed as (
-  select
-    external_key,
-    entity_id,
-    sport,
-    season_year,
-    season_label,
-    case
-      when season_label ~ '^\d{4}-\d{2}$' then
-        (substring(season_label from 1 for 4)::int / 100) * 100
-        + substring(season_label from 6 for 2)::int
-        + case
-            when substring(season_label from 6 for 2)::int <= substring(season_label from 1 for 4)::int % 100
-              then 100
-            else 0
-          end
-      else null
-    end as label_end_year
-  from public.meowbot_passes
-  where sport in ('NFL', 'NHL')
-),
-misaligned as (
-  select
-    p.external_key as old_external_key,
-    p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport as new_external_key,
-    p.label_end_year as canonical_season_year,
-    (p.label_end_year - 1)::text || '-' || lpad((p.label_end_year % 100)::text, 2, '0') as canonical_season_label
-  from parsed p
-  where p.season_label ~ '^\d{4}-\d{2}$'
-    and p.season_year is distinct from p.label_end_year
-    and p.external_key <> p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
-    and exists (
-      select 1
-      from public.meowbot_passes existing
-      where existing.external_key = p.entity_id::text || '|' || p.label_end_year::text || '|' || p.sport
-    )
-)
-select * from misaligned;
-update public.meowbot_daily_earnings d
-set external_key = t.new_external_key
-from collision_targets t
-where d.external_key = t.old_external_key
-  and not exists (
-    select 1
-    from public.meowbot_daily_earnings existing
-    where existing.external_key = t.new_external_key
-      and existing.claim_day = d.claim_day
-  );
-delete from public.meowbot_daily_earnings d
-using collision_targets t
-where d.external_key = t.old_external_key;
-update public.meowbot_passes p
-set
-  season_year = t.canonical_season_year,
-  season_label = t.canonical_season_label,
-  cached_at = now()
-from collision_targets t
-where p.external_key = t.new_external_key;
-delete from public.meowbot_passes p
-using collision_targets t
-where p.external_key = t.old_external_key;
-commit;
+-- -- Step 3: optional — delete orphaned pass rows after repair (no daily rows, wrong external_key)
+-- -- Review output before running.
+-- -- select p.external_key, p.name, p.sport, p.season_label
+-- -- from public.meowbot_passes p
+-- -- where p.sport in ('NFL', 'NHL')
+-- --   and not exists (
+-- --     select 1 from public.meowbot_daily_earnings d where d.external_key = p.external_key
+-- --   );
 
--- Step 3: optional — delete orphaned pass rows after repair (no daily rows, wrong external_key)
--- Review output before running.
--- select p.external_key, p.name, p.sport, p.season_label
--- from public.meowbot_passes p
--- where p.sport in ('NFL', 'NHL')
---   and not exists (
---     select 1 from public.meowbot_daily_earnings d where d.external_key = p.external_key
---   );
+-- -- ============================================================================
+-- -- DAILY EARNINGS JUNK AUDITS — READ ONLY (matches app seasonClaimWindow.ts)
+-- -- ============================================================================
 
--- ============================================================================
--- DAILY EARNINGS JUNK AUDITS — READ ONLY (matches app seasonClaimWindow.ts)
--- ============================================================================
+-- -- Junk A (NFL/NHL only): daily rows outside season window — run this after repair
+-- -- CBB/CFB were not repaired; FC/NBA use different calendars — see Junk A-all for full scan.
+-- with parsed as (
+--   select
+--     p.external_key,
+--     p.entity_id,
+--     p.sport,
+--     p.name,
+--     p.season_year,
+--     p.season_label,
+--     case
+--       when p.season_label ~ '^\d{4}-\d{2}$' then substring(p.season_label from 1 for 4)::int
+--       else null
+--     end as label_start_year,
+--     case
+--       when p.season_label ~ '^\d{4}-\d{2}$' then
+--         (substring(p.season_label from 1 for 4)::int / 100) * 100
+--         + substring(p.season_label from 6 for 2)::int
+--         + case
+--             when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100
+--               then 100
+--             else 0
+--           end
+--       else null
+--     end as label_end_year
+--   from public.meowbot_passes p
+--   where p.sport in ('NFL', 'NHL')
+-- ),
+-- windows as (
+--   select
+--     parsed.*,
+--     make_date(label_start_year, 8, 1) as window_start,
+--     case
+--       when sport = 'NFL' then make_date(label_end_year, 4, 30)
+--       when sport = 'NHL' then make_date(label_end_year, 6, 30)
+--     end as window_end
+--   from parsed
+--   where season_label ~ '^\d{4}-\d{2}$'
+-- )
+-- select
+--   w.external_key,
+--   w.name,
+--   w.sport,
+--   w.season_label,
+--   d.claim_day,
+--   d.base_rax_earned,
+--   w.window_start,
+--   w.window_end
+-- from windows w
+-- join public.meowbot_daily_earnings d on d.external_key = w.external_key
+-- where w.window_start is not null
+--   and w.window_end is not null
+--   and (d.claim_day < w.window_start or d.claim_day > w.window_end)
+-- order by w.sport, w.name, d.claim_day;
 
--- Junk A (NFL/NHL only): daily rows outside season window — run this after repair
--- CBB/CFB were not repaired; FC/NBA use different calendars — see Junk A-all for full scan.
-with parsed as (
-  select
-    p.external_key,
-    p.entity_id,
-    p.sport,
-    p.name,
-    p.season_year,
-    p.season_label,
-    case
-      when p.season_label ~ '^\d{4}-\d{2}$' then substring(p.season_label from 1 for 4)::int
-      else null
-    end as label_start_year,
-    case
-      when p.season_label ~ '^\d{4}-\d{2}$' then
-        (substring(p.season_label from 1 for 4)::int / 100) * 100
-        + substring(p.season_label from 6 for 2)::int
-        + case
-            when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100
-              then 100
-            else 0
-          end
-      else null
-    end as label_end_year
-  from public.meowbot_passes p
-  where p.sport in ('NFL', 'NHL')
-),
-windows as (
-  select
-    parsed.*,
-    make_date(label_start_year, 8, 1) as window_start,
-    case
-      when sport = 'NFL' then make_date(label_end_year, 4, 30)
-      when sport = 'NHL' then make_date(label_end_year, 6, 30)
-    end as window_end
-  from parsed
-  where season_label ~ '^\d{4}-\d{2}$'
-)
-select
-  w.external_key,
-  w.name,
-  w.sport,
-  w.season_label,
-  d.claim_day,
-  d.base_rax_earned,
-  w.window_start,
-  w.window_end
-from windows w
-join public.meowbot_daily_earnings d on d.external_key = w.external_key
-where w.window_start is not null
-  and w.window_end is not null
-  and (d.claim_day < w.window_start or d.claim_day > w.window_end)
-order by w.sport, w.name, d.claim_day;
+-- -- Junk A summary (NFL/NHL): row counts by sport — expect 0 after clean repair + re-import
+-- -- with parsed as (
+-- --   select p.external_key, p.sport, p.season_label,
+-- --     substring(p.season_label from 1 for 4)::int as label_start_year,
+-- --     (substring(p.season_label from 1 for 4)::int / 100) * 100
+-- --       + substring(p.season_label from 6 for 2)::int
+-- --       + case when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100 then 100 else 0 end
+-- --       as label_end_year
+-- --   from public.meowbot_passes p
+-- --   where p.sport in ('NFL', 'NHL') and p.season_label ~ '^\d{4}-\d{2}$'
+-- -- ),
+-- -- windows as (
+-- --   select parsed.*,
+-- --     make_date(label_start_year, 8, 1) as window_start,
+-- --     case when sport = 'NFL' then make_date(label_end_year, 4, 30)
+-- --          when sport = 'NHL' then make_date(label_end_year, 6, 30) end as window_end
+-- --   from parsed
+-- -- ),
+-- -- junk as (
+-- --   select w.sport
+-- --   from windows w
+-- --   join public.meowbot_daily_earnings d on d.external_key = w.external_key
+-- --   where d.claim_day < w.window_start or d.claim_day > w.window_end
+-- -- )
+-- -- select sport, count(*) as junk_rows from junk group by sport order by junk_rows desc;
 
--- Junk A summary (NFL/NHL): row counts by sport — expect 0 after clean repair + re-import
+-- -- Junk A-all: every sport (CBB/FC/NBA etc.) — many flags may be calendar false positives
+-- -- with parsed as (
+-- --   select p.external_key, p.entity_id, p.sport, p.name, p.season_year, p.season_label,
+-- --     case when p.season_label ~ '^\d{4}-\d{2}$' then substring(p.season_label from 1 for 4)::int else null end as label_start_year,
+-- --     case when p.season_label ~ '^\d{4}-\d{2}$' then
+-- --       (substring(p.season_label from 1 for 4)::int / 100) * 100 + substring(p.season_label from 6 for 2)::int
+-- --       + case when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100 then 100 else 0 end
+-- --     else null end as label_end_year
+-- --   from public.meowbot_passes p
+-- -- ),
+-- -- windows as (
+-- --   select parsed.*,
+-- --     case when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then make_date(season_year, 1, 1)
+-- --          when season_label ~ '^\d{4}-\d{2}$' then make_date(label_start_year, 8, 1) else null end as window_start,
+-- --     case when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then make_date(season_year, 12, 31)
+-- --          when season_label ~ '^\d{4}-\d{2}$' and sport in ('CBB', 'CFB') then make_date(label_end_year, 6, 30)
+-- --          when season_label ~ '^\d{4}-\d{2}$' and sport = 'NFL' then make_date(label_end_year, 4, 30)
+-- --          when season_label ~ '^\d{4}-\d{2}$' and sport = 'NHL' then make_date(label_end_year, 6, 30)
+-- --          when season_label ~ '^\d{4}-\d{2}$' then make_date(label_end_year, 7, 31) else null end as window_end
+-- --   from parsed
+-- -- )
+-- -- select w.sport, w.name, w.season_label, d.claim_day, w.window_start, w.window_end
+-- -- from windows w
+-- -- join public.meowbot_daily_earnings d on d.external_key = w.external_key
+-- -- where w.window_start is not null and w.window_end is not null
+-- --   and (d.claim_day < w.window_start or d.claim_day > w.window_end)
+-- -- order by w.sport, w.name, d.claim_day;
+
+-- -- Junk B: one player deep-dive (edit the name filter)
+-- -- with parsed as ( ... ), windows as ( ... )
+-- -- select w.external_key, w.name, w.season_label, w.window_start, w.window_end,
+-- --   min(d.claim_day) as first_claim, max(d.claim_day) as last_claim, count(*) as daily_rows,
+-- --   sum(d.base_rax_earned) as total_base_rax
+-- -- from windows w
+-- -- join public.meowbot_daily_earnings d on d.external_key = w.external_key
+-- -- where w.name ilike '%Trocheck%'
+-- -- group by w.external_key, w.name, w.season_label, w.window_start, w.window_end
+-- -- order by w.season_label;
+
+-- -- Junk C: incomplete import? last claim ends well before season window end
+-- -- (missing data — not junk — but useful after NHL June cutoff fix + re-import)
+-- -- with parsed as ( ... ), windows as ( ... ),
+-- -- span as (
+-- --   select w.external_key, w.name, w.sport, w.season_label, w.window_start, w.window_end,
+-- --     min(d.claim_day) as first_claim, max(d.claim_day) as last_claim, count(*) as daily_rows
+-- --   from windows w
+-- --   join public.meowbot_daily_earnings d on d.external_key = w.external_key
+-- --   where w.window_start is not null and w.window_end is not null
+-- --   group by w.external_key, w.name, w.sport, w.season_label, w.window_start, w.window_end
+-- -- )
+-- -- select *
+-- -- from span
+-- -- where sport in ('NHL', 'NFL')
+-- --   and last_claim < window_end - interval '14 days'
+-- -- order by sport, name, season_label;
+
+-- -- Junk D: pass total_base_rax disagrees with sum of daily rows (metadata drift)
+-- -- select p.external_key, p.name, p.sport, p.season_label,
+-- --   p.total_base_rax as stored_total,
+-- --   coalesce(sum(d.base_rax_earned), 0) as daily_sum,
+-- --   p.total_base_rax - coalesce(sum(d.base_rax_earned), 0) as delta
+-- -- from public.meowbot_passes p
+-- -- left join public.meowbot_daily_earnings d on d.external_key = p.external_key
+-- -- group by p.external_key, p.name, p.sport, p.season_label, p.total_base_rax
+-- -- having abs(p.total_base_rax - coalesce(sum(d.base_rax_earned), 0)) > 0.01
+-- -- order by abs(p.total_base_rax - coalesce(sum(d.base_rax_earned), 0)) desc;
+
+-- -- Junk E: orphan passes (no daily rows) — same as Step 3 preview, all sports
+-- -- select p.external_key, p.name, p.sport, p.season_label, p.has_earnings
+-- -- from public.meowbot_passes p
+-- -- where not exists (
+-- --   select 1 from public.meowbot_daily_earnings d where d.external_key = p.external_key
+-- -- )
+-- -- order by p.sport, p.name;
+
+-- -- Junk F: DELETE out-of-window NFL/NHL daily rows (pre-repair stragglers)
+-- -- 1) Run Junk A first and note row count
+-- -- 2) Uncomment below, use rollback to preview, then commit for real
+-- begin;
 -- with parsed as (
 --   select p.external_key, p.sport, p.season_label,
 --     substring(p.season_label from 1 for 4)::int as label_start_year,
@@ -489,118 +593,14 @@ order by w.sport, w.name, d.claim_day;
 --   where p.sport in ('NFL', 'NHL') and p.season_label ~ '^\d{4}-\d{2}$'
 -- ),
 -- windows as (
---   select parsed.*,
+--   select parsed.external_key,
 --     make_date(label_start_year, 8, 1) as window_start,
 --     case when sport = 'NFL' then make_date(label_end_year, 4, 30)
 --          when sport = 'NHL' then make_date(label_end_year, 6, 30) end as window_end
 --   from parsed
--- ),
--- junk as (
---   select w.sport
---   from windows w
---   join public.meowbot_daily_earnings d on d.external_key = w.external_key
---   where d.claim_day < w.window_start or d.claim_day > w.window_end
 -- )
--- select sport, count(*) as junk_rows from junk group by sport order by junk_rows desc;
-
--- Junk A-all: every sport (CBB/FC/NBA etc.) — many flags may be calendar false positives
--- with parsed as (
---   select p.external_key, p.entity_id, p.sport, p.name, p.season_year, p.season_label,
---     case when p.season_label ~ '^\d{4}-\d{2}$' then substring(p.season_label from 1 for 4)::int else null end as label_start_year,
---     case when p.season_label ~ '^\d{4}-\d{2}$' then
---       (substring(p.season_label from 1 for 4)::int / 100) * 100 + substring(p.season_label from 6 for 2)::int
---       + case when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100 then 100 else 0 end
---     else null end as label_end_year
---   from public.meowbot_passes p
--- ),
--- windows as (
---   select parsed.*,
---     case when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then make_date(season_year, 1, 1)
---          when season_label ~ '^\d{4}-\d{2}$' then make_date(label_start_year, 8, 1) else null end as window_start,
---     case when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then make_date(season_year, 12, 31)
---          when season_label ~ '^\d{4}-\d{2}$' and sport in ('CBB', 'CFB') then make_date(label_end_year, 6, 30)
---          when season_label ~ '^\d{4}-\d{2}$' and sport = 'NFL' then make_date(label_end_year, 4, 30)
---          when season_label ~ '^\d{4}-\d{2}$' and sport = 'NHL' then make_date(label_end_year, 6, 30)
---          when season_label ~ '^\d{4}-\d{2}$' then make_date(label_end_year, 7, 31) else null end as window_end
---   from parsed
--- )
--- select w.sport, w.name, w.season_label, d.claim_day, w.window_start, w.window_end
--- from windows w
--- join public.meowbot_daily_earnings d on d.external_key = w.external_key
--- where w.window_start is not null and w.window_end is not null
---   and (d.claim_day < w.window_start or d.claim_day > w.window_end)
--- order by w.sport, w.name, d.claim_day;
-
--- Junk B: one player deep-dive (edit the name filter)
--- with parsed as ( ... ), windows as ( ... )
--- select w.external_key, w.name, w.season_label, w.window_start, w.window_end,
---   min(d.claim_day) as first_claim, max(d.claim_day) as last_claim, count(*) as daily_rows,
---   sum(d.base_rax_earned) as total_base_rax
--- from windows w
--- join public.meowbot_daily_earnings d on d.external_key = w.external_key
--- where w.name ilike '%Trocheck%'
--- group by w.external_key, w.name, w.season_label, w.window_start, w.window_end
--- order by w.season_label;
-
--- Junk C: incomplete import? last claim ends well before season window end
--- (missing data — not junk — but useful after NHL June cutoff fix + re-import)
--- with parsed as ( ... ), windows as ( ... ),
--- span as (
---   select w.external_key, w.name, w.sport, w.season_label, w.window_start, w.window_end,
---     min(d.claim_day) as first_claim, max(d.claim_day) as last_claim, count(*) as daily_rows
---   from windows w
---   join public.meowbot_daily_earnings d on d.external_key = w.external_key
---   where w.window_start is not null and w.window_end is not null
---   group by w.external_key, w.name, w.sport, w.season_label, w.window_start, w.window_end
--- )
--- select *
--- from span
--- where sport in ('NHL', 'NFL')
---   and last_claim < window_end - interval '14 days'
--- order by sport, name, season_label;
-
--- Junk D: pass total_base_rax disagrees with sum of daily rows (metadata drift)
--- select p.external_key, p.name, p.sport, p.season_label,
---   p.total_base_rax as stored_total,
---   coalesce(sum(d.base_rax_earned), 0) as daily_sum,
---   p.total_base_rax - coalesce(sum(d.base_rax_earned), 0) as delta
--- from public.meowbot_passes p
--- left join public.meowbot_daily_earnings d on d.external_key = p.external_key
--- group by p.external_key, p.name, p.sport, p.season_label, p.total_base_rax
--- having abs(p.total_base_rax - coalesce(sum(d.base_rax_earned), 0)) > 0.01
--- order by abs(p.total_base_rax - coalesce(sum(d.base_rax_earned), 0)) desc;
-
--- Junk E: orphan passes (no daily rows) — same as Step 3 preview, all sports
--- select p.external_key, p.name, p.sport, p.season_label, p.has_earnings
--- from public.meowbot_passes p
--- where not exists (
---   select 1 from public.meowbot_daily_earnings d where d.external_key = p.external_key
--- )
--- order by p.sport, p.name;
-
--- Junk F: DELETE out-of-window NFL/NHL daily rows (pre-repair stragglers)
--- 1) Run Junk A first and note row count
--- 2) Uncomment below, use rollback to preview, then commit for real
-begin;
-with parsed as (
-  select p.external_key, p.sport, p.season_label,
-    substring(p.season_label from 1 for 4)::int as label_start_year,
-    (substring(p.season_label from 1 for 4)::int / 100) * 100
-      + substring(p.season_label from 6 for 2)::int
-      + case when substring(p.season_label from 6 for 2)::int <= substring(p.season_label from 1 for 4)::int % 100 then 100 else 0 end
-      as label_end_year
-  from public.meowbot_passes p
-  where p.sport in ('NFL', 'NHL') and p.season_label ~ '^\d{4}-\d{2}$'
-),
-windows as (
-  select parsed.external_key,
-    make_date(label_start_year, 8, 1) as window_start,
-    case when sport = 'NFL' then make_date(label_end_year, 4, 30)
-         when sport = 'NHL' then make_date(label_end_year, 6, 30) end as window_end
-  from parsed
-)
-delete from public.meowbot_daily_earnings d
-using windows w
-where d.external_key = w.external_key
-  and (d.claim_day < w.window_start or d.claim_day > w.window_end);
-commit;
+-- delete from public.meowbot_daily_earnings d
+-- using windows w
+-- where d.external_key = w.external_key
+--   and (d.claim_day < w.window_start or d.claim_day > w.window_end);
+-- commit;

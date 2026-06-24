@@ -6,6 +6,7 @@ import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImport
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
 import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
@@ -1097,41 +1098,41 @@ export default function EntryPage() {
         </div>
       </form>
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Saved earnings profiles</h2>
-            <p>
-              Cards you add manually are saved here automatically. After re-import wipes pasted
-              earnings, click <strong>Restore</strong> to add them back onto the matching pass.
-            </p>
-          </div>
-          <span>{data.savedCardProfiles.length} saved</span>
-        </div>
+      <CollapsiblePanel
+        className="saved-earnings-profiles-panel"
+        title="Saved earnings profiles"
+        description="Cards you add manually are saved here automatically. After re-import wipes pasted earnings, click Restore to add them back onto the matching pass."
+        badge={`${data.savedCardProfiles.length} saved`}
+        defaultOpen={false}
+      >
         {data.savedCardProfiles.length === 0 ? (
           <p className="empty">
             No saved profiles yet. Import or paste earnings above — each save updates the profile
             for that player.
           </p>
         ) : (
-          <div className="list">
+          <div className="list saved-earnings-profile-list">
             {data.savedCardProfiles.map((profile) => (
-              <div className="list-row" key={profile.id}>
-                <span>
+              <div className="list-row saved-earnings-profile-row" key={profile.id}>
+                <span className="saved-earnings-profile-main">
                   <strong>{profile.name}</strong>
                   <small>
                     {profile.sport} · {profile.season || 'No season'}
                     {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
                     row{profile.rows.length === 1 ? '' : 's'}
-                    {profile.externalKey ? ' · linked to username import' : ''}
+                    {profile.externalKey ? ' · linked' : ''}
                   </small>
                 </span>
-                <span className="button-row compact-actions">
-                  <button className="button primary" type="button" onClick={() => handleRestoreProfile(profile.id)}>
+                <span className="button-row compact-actions saved-earnings-profile-actions">
+                  <button
+                    className="button primary compact"
+                    type="button"
+                    onClick={() => handleRestoreProfile(profile.id)}
+                  >
                     Restore
                   </button>
                   <button
-                    className="button"
+                    className="button compact"
                     type="button"
                     onClick={() => {
                       setCardEntry((current) => ({
@@ -1153,10 +1154,10 @@ export default function EntryPage() {
                       cardEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                     }}
                   >
-                    Load JSON
+                    JSON
                   </button>
                   <button
-                    className="button danger"
+                    className="button danger compact"
                     type="button"
                     onClick={() => {
                       deleteCardProfile(profile.id)
@@ -1176,7 +1177,7 @@ export default function EntryPage() {
           </button>
           {profileStatus ? <p className="import-status">{profileStatus}</p> : null}
         </div>
-      </section>
+      </CollapsiblePanel>
 
       <section className="panel" id="player-cards">
         <div className="section-heading">
