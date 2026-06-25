@@ -45,8 +45,23 @@ describe('analyzePotentialCard', () => {
       [{ claimDay: '2026-03-01', raxEarned: 15, note: '' }],
     )
 
-    expect(result?.overlapRax).toBe(15)
+    expect(result?.guaranteedRax).toBe(0)
+    expect(result?.proBonusRax).toBe(15)
+    expect(result?.overlapRax).toBe(0)
+    expect(result?.claimableRax).toBe(15)
+  })
+
+  it('reports pure overlap when a potential card would not reach guaranteed or pro bonus', () => {
+    const result = analyzePotentialCard(
+      data,
+      { name: 'Prospect', sport: 'NBA', season: '2025-26' },
+      [{ claimDay: '2026-03-01', raxEarned: 5, note: '' }],
+    )
+
+    expect(result?.overlapRax).toBe(5)
     expect(result?.claimableRax).toBe(0)
+    expect(result?.guaranteedRax).toBe(0)
+    expect(result?.proBonusRax).toBe(0)
   })
 
   it('applies preview rarity OTD multipliers to pasted base rows', () => {
@@ -139,6 +154,20 @@ describe('analyzePotentialCard', () => {
 
     const totalFromDays = result!.claimDayBreakdowns.reduce((sum, row) => sum + row.dayNetDelta, 0)
     expect(totalFromDays).toBe((result?.claimableRax ?? 0) - (result?.displacedRax ?? 0))
+    expect(result?.guaranteedRax).toBe(28)
+    expect(result?.proBonusRax).toBe(0)
+  })
+
+  it('tracks guaranteed and pro bonus net gain separately', () => {
+    const result = analyzePotentialCard(
+      { ...data, settings: { proBonusEnabled: true, savedUsername: '' } },
+      { name: 'Prospect', sport: 'NBA', season: '2025-26' },
+      [{ claimDay: '2026-03-01', raxEarned: 12, note: '' }],
+    )
+
+    expect(result?.guaranteedRax).toBe(0)
+    expect(result?.proBonusRax).toBe(12)
+    expect(result?.claimableRax).toBe(12)
   })
 
   it('buildPotentialMonthlyNet returns sorted months', () => {

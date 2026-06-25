@@ -10,7 +10,12 @@ import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfi
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
 import { applyCardRarityChange } from './cardRarity'
-import { analyzePotentialCard, type PotentialAnalysisResult } from './potentialAnalysis'
+import {
+  analyzePotentialCard,
+  netGuaranteedDelta,
+  netWithProDelta,
+  type PotentialAnalysisResult,
+} from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
 import { computeOtdRax, parseRarityLabel } from './otdRax'
 import { normalizeRarityTier } from './rarityFilter'
@@ -99,6 +104,7 @@ export type PassRecommendationRow = {
   displacedRax: number
   overlapRax: number
   netClaimableDelta: number
+  netGuaranteedDelta: number
 }
 
 export type PassRecommendationProgress = {
@@ -301,8 +307,10 @@ export function isRecommendationPassOwnedAtIconic(
 }
 
 export function netClaimableDelta(result: PotentialAnalysisResult): number {
-  return result.claimableRax - result.displacedRax
+  return netWithProDelta(result)
 }
+
+export { netGuaranteedDelta, netWithProDelta } from './potentialAnalysis'
 
 export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
   const sport = sportFromCatalog(profile.sport)
@@ -510,6 +518,7 @@ export function analyzeCatalogCandidate(
     displacedRax: analysis.displacedRax,
     overlapRax: analysis.overlapRax,
     netClaimableDelta: netClaimableDelta(analysis),
+    netGuaranteedDelta: netGuaranteedDelta(analysis),
   }
 }
 
@@ -575,12 +584,38 @@ export type OwnedIconicUpgradeImpactResult = {
   rows: OwnedIconicUpgradeImpactRow[]
   /** Net claimable gain after all upgrades, same-sport picks ordered by isolated value. */
   combinedNetDelta: number
+  /** Guaranteed-only net gain (top 2 per sport). */
+  combinedGuaranteedNetDelta: number
   /** Sum of each pass upgraded alone — overcounts when same-sport passes overlap. */
   combinedIsolatedNetDelta: number
 }
 
+function withProBonusAnalysisData(data: RaxTrackerData): RaxTrackerData {
+  return {
+    ...data,
+    settings: { ...data.settings, proBonusEnabled: true },
+  }
+}
+
 function collectionClaimableTotal(data: RaxTrackerData): number {
   return computeYearRollup(data).totalClaimableRax
+}
+
+function collectionGuaranteedTotal(data: RaxTrackerData): number {
+  return computeYearRollup(data).totalGuaranteedRax
+}
+
+function collectionNetDeltas(
+  before: RaxTrackerData,
+  after: RaxTrackerData,
+): { guaranteed: number; withPro: number } {
+  const beforePro = withProBonusAnalysisData(before)
+  const afterPro = withProBonusAnalysisData(after)
+  return {
+    guaranteed:
+      collectionGuaranteedTotal(afterPro) - collectionGuaranteedTotal(beforePro),
+    withPro: collectionClaimableTotal(afterPro) - collectionClaimableTotal(beforePro),
+  }
 }
 
 function applyOwnedCardRarityUpgrade(
@@ -627,7 +662,12 @@ export function analyzeOwnedIconicUpgradeImpacts(
 ): OwnedIconicUpgradeImpactResult {
   const eligible = candidates.filter((candidate) => candidate.card || candidate.profile?.rows.length)
   if (eligible.length === 0) {
-    return { rows: [], combinedNetDelta: 0, combinedIsolatedNetDelta: 0 }
+    return {
+      rows: [],
+      combinedNetDelta: 0,
+      combinedGuaranteedNetDelta: 0,
+      combinedIsolatedNetDelta: 0,
+    }
   }
 
   const isolatedByKey = new Map<string, number>()
@@ -665,9 +705,12 @@ export function analyzeOwnedIconicUpgradeImpacts(
     }
   }
 
+  const combined = collectionNetDeltas(data, workingData)
+
   return {
     rows,
-    combinedNetDelta: collectionClaimableTotal(workingData) - collectionClaimableTotal(data),
+    combinedNetDelta: combined.withPro,
+    combinedGuaranteedNetDelta: combined.guaranteed,
     combinedIsolatedNetDelta: [...isolatedByKey.values()].reduce((sum, value) => sum + value, 0),
   }
 }
@@ -754,7 +797,12 @@ export function analyzeSimulatedRarityCheckerImpacts(
       (candidate.source === 'catalog' && candidate.profile?.rows.length),
   )
   if (eligible.length === 0) {
-    return { rows: [], combinedNetDelta: 0, combinedIsolatedNetDelta: 0 }
+    return {
+      rows: [],
+      combinedNetDelta: 0,
+      combinedGuaranteedNetDelta: 0,
+      combinedIsolatedNetDelta: 0,
+    }
   }
 
   const isolatedByKey = new Map<string, number>()
@@ -794,9 +842,12 @@ export function analyzeSimulatedRarityCheckerImpacts(
     }
   }
 
+  const combined = collectionNetDeltas(data, workingData)
+
   return {
     rows,
-    combinedNetDelta: collectionClaimableTotal(workingData) - collectionClaimableTotal(data),
+    combinedNetDelta: combined.withPro,
+    combinedGuaranteedNetDelta: combined.guaranteed,
     combinedIsolatedNetDelta: [...isolatedByKey.values()].reduce((sum, value) => sum + value, 0),
   }
 }

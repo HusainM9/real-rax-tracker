@@ -51,6 +51,9 @@ export type PotentialMonthlyNet = {
   potentialGain: number
   displacedLoss: number
   netDelta: number
+  guaranteedGain: number
+  guaranteedDisplacedLoss: number
+  guaranteedNetDelta: number
 }
 
 export type DisplacedCardSummary = {
@@ -64,7 +67,12 @@ export type DisplacedCardSummary = {
 
 export type PotentialAnalysisResult = {
   candidates: Array<{ day: ClaimDayResult; candidate: ClaimCandidate }>
+  /** Guaranteed + Pro bonus claimable RAX from the new pass. */
   claimableRax: number
+  /** Guaranteed-only claimable RAX from the new pass. */
+  guaranteedRax: number
+  /** Pro bonus claimable RAX from the new pass. */
+  proBonusRax: number
   overlapRax: number
   displacedExisting: Array<{
     day: ClaimDayResult
@@ -72,10 +80,28 @@ export type PotentialAnalysisResult = {
     previousStatus: Exclude<ClaimCandidate['status'], 'overlap'>
   }>
   displacedRax: number
+  displacedGuaranteedRax: number
+  displacedProBonusRax: number
   displacedByCard: DisplacedCardSummary[]
+  displacedByCardGuaranteed: DisplacedCardSummary[]
   monthlyNet: PotentialMonthlyNet[]
   /** Per OTD day sport ladder — same rules as the Calendar page. */
   claimDayBreakdowns: PotentialClaimDayBreakdown[]
+}
+
+function withProBonusEnabled(data: RaxTrackerData): RaxTrackerData {
+  return {
+    ...data,
+    settings: { ...data.settings, proBonusEnabled: true },
+  }
+}
+
+export function netGuaranteedDelta(result: PotentialAnalysisResult): number {
+  return result.guaranteedRax - result.displacedGuaranteedRax
+}
+
+export function netWithProDelta(result: PotentialAnalysisResult): number {
+  return result.claimableRax - result.displacedRax
 }
 
 export type PotentialClaimLadderEntry = {
@@ -309,15 +335,27 @@ export function summarizeDisplacedByCard(
   )
 }
 
+type MonthlyNetBucket = {
+  gain: number
+  loss: number
+  guaranteedGain: number
+  guaranteedLoss: number
+}
+
 function addMonthlyRax(
-  buckets: Map<number, { gain: number; loss: number }>,
+  buckets: Map<number, MonthlyNetBucket>,
   claimDay: string,
-  field: 'gain' | 'loss',
+  field: 'gain' | 'loss' | 'guaranteedGain' | 'guaranteedLoss',
   rax: number,
 ): void {
   const monthIdx = monthIndexFromClaimDay(claimDay)
   if (monthIdx < 0) return
-  const bucket = buckets.get(monthIdx) ?? { gain: 0, loss: 0 }
+  const bucket = buckets.get(monthIdx) ?? {
+    gain: 0,
+    loss: 0,
+    guaranteedGain: 0,
+    guaranteedLoss: 0,
+  }
   bucket[field] += rax
   buckets.set(monthIdx, bucket)
 }
@@ -326,24 +364,43 @@ export function buildPotentialMonthlyNet(
   potentialCandidates: PotentialAnalysisResult['candidates'],
   displacedExisting: PotentialAnalysisResult['displacedExisting'],
 ): PotentialMonthlyNet[] {
-  const buckets = new Map<number, { gain: number; loss: number }>()
+  const buckets = new Map<number, MonthlyNetBucket>()
 
   for (const { candidate } of potentialCandidates) {
     if (candidate.status === 'overlap') continue
     addMonthlyRax(buckets, candidate.performance.claimDay, 'gain', candidate.performance.raxEarned)
+    if (candidate.status === 'guaranteed') {
+      addMonthlyRax(
+        buckets,
+        candidate.performance.claimDay,
+        'guaranteedGain',
+        candidate.performance.raxEarned,
+      )
+    }
   }
 
-  for (const { candidate } of displacedExisting) {
+  for (const { candidate, previousStatus } of displacedExisting) {
     addMonthlyRax(buckets, candidate.performance.claimDay, 'loss', candidate.performance.raxEarned)
+    if (previousStatus === 'guaranteed') {
+      addMonthlyRax(
+        buckets,
+        candidate.performance.claimDay,
+        'guaranteedLoss',
+        candidate.performance.raxEarned,
+      )
+    }
   }
 
   return [...buckets.entries()]
-    .map(([monthIdx, { gain, loss }]) => ({
+    .map(([monthIdx, bucket]) => ({
       monthIdx,
       month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
-      potentialGain: gain,
-      displacedLoss: loss,
-      netDelta: gain - loss,
+      potentialGain: bucket.gain,
+      displacedLoss: bucket.loss,
+      netDelta: bucket.gain - bucket.loss,
+      guaranteedGain: bucket.guaranteedGain,
+      guaranteedDisplacedLoss: bucket.guaranteedLoss,
+      guaranteedNetDelta: bucket.guaranteedGain - bucket.guaranteedLoss,
     }))
     .sort((a, b) => a.monthIdx - b.monthIdx)
 }
@@ -365,11 +422,12 @@ export function analyzePotentialCard(
     simulatedRarityLabel: profile.simulatedRarityLabel?.trim() || undefined,
     createdAt: new Date().toISOString(),
   }
+  const analysisData = withProBonusEnabled(data)
   const potentialData = {
-    ...data,
-    cards: [...data.cards, potentialCard],
+    ...analysisData,
+    cards: [...analysisData.cards, potentialCard],
     performances: [
-      ...data.performances,
+      ...analysisData.performances,
       ...rows.map((row, index) => {
         const baseRax = row.baseRaxEarned ?? row.raxEarned
         return {
@@ -384,8 +442,8 @@ export function analyzePotentialCard(
       }),
     ],
   }
-  const baseClaimableByKey = buildClaimableByKey(data)
-  const baseResults = computeClaimDayResults(data)
+  const baseClaimableByKey = buildClaimableByKey(analysisData)
+  const baseResults = computeClaimDayResults(analysisData)
   const results = computeClaimDayResults(potentialData)
   const potentialCandidates = results.flatMap((day) =>
     day.sports.flatMap((sport) =>
@@ -414,6 +472,26 @@ export function analyzePotentialCard(
     (sum, { candidate }) => sum + candidate.performance.raxEarned,
     0,
   )
+  const displacedGuaranteedExisting = displacedExisting.filter(
+    ({ previousStatus }) => previousStatus === 'guaranteed',
+  )
+  const displacedProBonusExisting = displacedExisting.filter(
+    ({ previousStatus }) => previousStatus === 'pro-bonus',
+  )
+  const displacedGuaranteedRax = displacedGuaranteedExisting.reduce(
+    (sum, { candidate }) => sum + candidate.performance.raxEarned,
+    0,
+  )
+  const displacedProBonusRax = displacedProBonusExisting.reduce(
+    (sum, { candidate }) => sum + candidate.performance.raxEarned,
+    0,
+  )
+  const guaranteedCandidates = potentialCandidates.filter(
+    ({ candidate }) => candidate.status === 'guaranteed',
+  )
+  const proBonusCandidates = potentialCandidates.filter(
+    ({ candidate }) => candidate.status === 'pro-bonus',
+  )
 
   const claimDayBreakdowns = buildPotentialClaimDayBreakdowns(
     baseResults,
@@ -427,12 +505,23 @@ export function analyzePotentialCard(
     claimableRax: potentialCandidates
       .filter(({ candidate }) => candidate.status !== 'overlap')
       .reduce((sum, { candidate }) => sum + candidate.performance.raxEarned, 0),
+    guaranteedRax: guaranteedCandidates.reduce(
+      (sum, { candidate }) => sum + candidate.performance.raxEarned,
+      0,
+    ),
+    proBonusRax: proBonusCandidates.reduce(
+      (sum, { candidate }) => sum + candidate.performance.raxEarned,
+      0,
+    ),
     overlapRax: potentialCandidates
       .filter(({ candidate }) => candidate.status === 'overlap')
       .reduce((sum, { candidate }) => sum + candidate.performance.raxEarned, 0),
     displacedExisting,
     displacedRax,
+    displacedGuaranteedRax,
+    displacedProBonusRax,
     displacedByCard: summarizeDisplacedByCard(displacedExisting),
+    displacedByCardGuaranteed: summarizeDisplacedByCard(displacedGuaranteedExisting),
     monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting),
     claimDayBreakdowns,
   }

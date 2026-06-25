@@ -702,6 +702,38 @@ label.button input.sr-only {
   margin: 0 0 0.55rem;
 }
 
+.net-gain-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.net-gain-tab {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.42rem 0.85rem;
+}
+
+.net-gain-tab:hover {
+  border-color: rgba(228, 160, 36, 0.35);
+  color: var(--text);
+}
+
+.net-gain-tab.active {
+  border-color: rgba(228, 160, 36, 0.55);
+  background: var(--accent-muted);
+  color: var(--accent-soft);
+}
+
 .potential-summary-grid {
   margin-bottom: 1rem;
 }

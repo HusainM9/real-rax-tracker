@@ -19,6 +19,8 @@ import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax } from '../lib/format'
 import {
   analyzePotentialCard,
+  netGuaranteedDelta,
+  netWithProDelta,
   type PotentialAnalysisResult,
   type PotentialClaimDayBreakdown,
   type PotentialClaimLadderEntry,
@@ -373,6 +375,98 @@ function PotentialClaimDayBreakdownPanel({
   )
 }
 
+function signedRaxClass(value: number): string {
+  if (value > 0) return 'sale-positive'
+  if (value < 0) return 'sale-negative'
+  return ''
+}
+
+type NetGainMode = 'guaranteed' | 'with-pro'
+
+function NetGainTabBar({
+  mode,
+  onChange,
+}: {
+  mode: NetGainMode
+  onChange: (mode: NetGainMode) => void
+}) {
+  return (
+    <div className="net-gain-tabs" role="tablist" aria-label="Net gain view">
+      <button
+        type="button"
+        role="tab"
+        className={`net-gain-tab${mode === 'guaranteed' ? ' active' : ''}`}
+        aria-selected={mode === 'guaranteed'}
+        onClick={() => onChange('guaranteed')}
+      >
+        Guaranteed net gain
+      </button>
+      <button
+        type="button"
+        role="tab"
+        className={`net-gain-tab${mode === 'with-pro' ? ' active' : ''}`}
+        aria-selected={mode === 'with-pro'}
+        onClick={() => onChange('with-pro')}
+      >
+        + Pro bonus
+      </button>
+    </div>
+  )
+}
+
+function CheckerNetGainMetrics({
+  baselineGuaranteed,
+  baselineWithPro,
+  combinedGuaranteedNetDelta,
+  combinedWithProNetDelta,
+  baselineLabel = 'Baseline collection',
+  afterLabel = 'After simulation',
+  netGainDetail = 'total',
+}: {
+  baselineGuaranteed: number
+  baselineWithPro: number
+  combinedGuaranteedNetDelta: number
+  combinedWithProNetDelta: number
+  baselineLabel?: string
+  afterLabel?: string
+  netGainDetail?: string
+}) {
+  const [netGainMode, setNetGainMode] = useState<NetGainMode>('guaranteed')
+  const includeProBonus = netGainMode === 'with-pro'
+  const baseline = includeProBonus ? baselineWithPro : baselineGuaranteed
+  const netDelta = includeProBonus ? combinedWithProNetDelta : combinedGuaranteedNetDelta
+
+  return (
+    <>
+      <NetGainTabBar mode={netGainMode} onChange={setNetGainMode} />
+      <p className="import-hint">
+        {includeProBonus
+          ? 'Net gain including Pro bonus slots (always simulated).'
+          : 'Net gain from guaranteed top-2 slots only.'}
+      </p>
+      <div className="owned-upgrade-analysis-metrics">
+        <div className="metric-card">
+          <span>{baselineLabel}</span>
+          <strong>{formatRax(displayRaxValue(baseline))}</strong>
+          <small>{includeProBonus ? 'guaranteed + Pro bonus' : 'guaranteed only'}</small>
+        </div>
+        <div className="metric-card">
+          <span>{afterLabel}</span>
+          <strong>{formatRax(displayRaxValue(baseline + netDelta))}</strong>
+          <small>{includeProBonus ? 'guaranteed + Pro bonus' : 'guaranteed only'}</small>
+        </div>
+        <div className="metric-card highlight">
+          <span>{includeProBonus ? 'Net gain (+ Pro bonus)' : 'Guaranteed net gain'}</span>
+          <strong className={signedRaxClass(netDelta)}>
+            {formatSignedRax(displayRaxValue(netDelta))}
+          </strong>
+          <small>{netGainDetail}</small>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function PotentialAnalysisResults({
   analysis,
   previewAs,
@@ -382,14 +476,32 @@ function PotentialAnalysisResults({
   previewAs: string
   baselineAdjustmentCount?: number
 }) {
-  const netCollectionDelta = analysis.claimableRax - analysis.displacedRax
-  const displacedCardCount = analysis.displacedByCard.length
+  const [netGainMode, setNetGainMode] = useState<NetGainMode>('guaranteed')
+  const includeProBonus = netGainMode === 'with-pro'
+  const netCollectionDelta = includeProBonus
+    ? netWithProDelta(analysis)
+    : netGuaranteedDelta(analysis)
+  const newCardClaimable = includeProBonus ? analysis.claimableRax : analysis.guaranteedRax
+  const displacedRax = includeProBonus ? analysis.displacedRax : analysis.displacedGuaranteedRax
+  const displacedByCard = includeProBonus
+    ? analysis.displacedByCard
+    : analysis.displacedByCardGuaranteed
+  const displacedCardCount = displacedByCard.length
 
   return (
     <>
+      <NetGainTabBar mode={netGainMode} onChange={setNetGainMode} />
       <p className="import-hint">
-        How this pass would affect your collection&apos;s claimable RAX (top 2 per sport + Pro bonus
-        rules).
+        {includeProBonus ? (
+          <>
+            Net gain from top 2 per sport <strong>plus</strong> any Pro bonus slots this pass would
+            earn. Pro bonus is always simulated here.
+          </>
+        ) : (
+          <>
+            Net gain from top 2 guaranteed slots per sport only — Pro bonus RAX is excluded.
+          </>
+        )}
         {previewAs ? (
           <>
             {' '}
@@ -412,9 +524,15 @@ function PotentialAnalysisResults({
 
       <div className="stats-grid potential-summary-grid">
         <article className="stat-card panel">
-          <span>New card — claimable</span>
-          <strong>{formatRax(displayRaxValue(analysis.claimableRax))}</strong>
-          <small className="table-sub">Would count in your collection</small>
+          <span>New card — {includeProBonus ? 'claimable' : 'guaranteed'}</span>
+          <strong>{formatRax(displayRaxValue(newCardClaimable))}</strong>
+          <small className="table-sub">
+            {includeProBonus && analysis.proBonusRax > 0
+              ? `Includes ${formatRax(displayRaxValue(analysis.proBonusRax))} from Pro bonus`
+              : includeProBonus
+                ? 'Would count in your collection'
+                : 'Top 2 per sport only'}
+          </small>
         </article>
         <article className="stat-card panel">
           <span>New card — overlap only</span>
@@ -423,27 +541,18 @@ function PotentialAnalysisResults({
         </article>
         <article className="stat-card panel">
           <span>Existing cards lost</span>
-          <strong className="sale-negative">
-            −{formatRax(displayRaxValue(analysis.displacedRax))}
-          </strong>
+          <strong className="sale-negative">−{formatRax(displayRaxValue(displacedRax))}</strong>
           <small className="table-sub">
             {displacedCardCount} card{displacedCardCount === 1 ? '' : 's'} pushed to overlap
+            {includeProBonus ? '' : ' from guaranteed slots'}
           </small>
         </article>
-        <article className="stat-card panel">
-          <span>Net collection change</span>
-          <strong
-            className={
-              netCollectionDelta > 0
-                ? 'sale-positive'
-                : netCollectionDelta < 0
-                  ? 'sale-negative'
-                  : ''
-            }
-          >
+        <article className="stat-card panel highlight">
+          <span>{includeProBonus ? 'Net gain (+ Pro bonus)' : 'Guaranteed net gain'}</span>
+          <strong className={signedRaxClass(netCollectionDelta)}>
             {formatSignedRax(displayRaxValue(netCollectionDelta))}
           </strong>
-          <small className="table-sub">Claimable added − displaced</small>
+          <small className="table-sub">New claimable − displaced</small>
         </article>
       </div>
 
@@ -451,15 +560,21 @@ function PotentialAnalysisResults({
         defaultOpen
         label={
           displacedCardCount === 0
-            ? 'Most displaced existing cards (none)'
-            : `Most displaced existing cards (${displacedCardCount}) · −${formatRax(displayRaxValue(analysis.displacedRax))} RAX lost`
+            ? `Most displaced existing cards (none)${includeProBonus ? '' : ' — guaranteed only'}`
+            : `Most displaced existing cards (${displacedCardCount}) · −${formatRax(displayRaxValue(displacedRax))} RAX lost`
         }
       >
         {displacedCardCount === 0 ? (
-          <p className="empty overlap-empty">No currently claimable cards would be pushed to overlap.</p>
+          <p className="empty overlap-empty">
+            No currently claimable cards would be pushed to overlap
+            {includeProBonus ? '' : ' from guaranteed slots'}.
+          </p>
         ) : (
           <>
-            <p className="import-hint">Ranked by total claimable RAX lost across OTD days.</p>
+            <p className="import-hint">
+              Ranked by total RAX lost across OTD days
+              {includeProBonus ? ' (guaranteed + Pro bonus).' : ' (guaranteed slots only).'}
+            </p>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -472,7 +587,7 @@ function PotentialAnalysisResults({
                   </tr>
                 </thead>
                 <tbody>
-                  {analysis.displacedByCard.map((row, index) => (
+                  {displacedByCard.map((row, index) => (
                     <tr key={row.cardId}>
                       <td>{index + 1}</td>
                       <td>
@@ -500,11 +615,11 @@ function PotentialAnalysisResults({
                       <strong>Total</strong>
                     </td>
                     <td>
-                      {analysis.displacedByCard.reduce((sum, row) => sum + row.daysDisplaced, 0)}
+                      {displacedByCard.reduce((sum, row) => sum + row.daysDisplaced, 0)}
                     </td>
                     <td>
                       <strong className="sale-negative">
-                        −{formatRax(displayRaxValue(analysis.displacedRax))}
+                        −{formatRax(displayRaxValue(displacedRax))}
                       </strong>
                     </td>
                   </tr>
@@ -521,7 +636,8 @@ function PotentialAnalysisResults({
           label={`Net claimable by month (${analysis.monthlyNet.length}) · ${formatSignedRax(displayRaxValue(netCollectionDelta))} total`}
         >
           <p className="import-hint">
-            Per calendar month: claimable from the new card minus existing cards pushed to overlap.
+            Per calendar month: claimable from the new card minus existing cards pushed to overlap
+            {includeProBonus ? ' (guaranteed + Pro bonus).' : ' (guaranteed only).'}.
           </p>
           <div className="table-wrap">
             <table>
@@ -534,34 +650,34 @@ function PotentialAnalysisResults({
                 </tr>
               </thead>
               <tbody>
-                {analysis.monthlyNet.map((row) => (
+                {analysis.monthlyNet.map((row) => {
+                  const monthNet = includeProBonus ? row.netDelta : row.guaranteedNetDelta
+                  const monthGain = includeProBonus ? row.potentialGain : row.guaranteedGain
+                  const monthLoss = includeProBonus
+                    ? row.displacedLoss
+                    : row.guaranteedDisplacedLoss
+
+                  return (
                   <tr key={row.monthIdx}>
                     <td>{row.month}</td>
                     <td>
-                      <strong
-                        className={
-                          row.netDelta > 0
-                            ? 'sale-positive'
-                            : row.netDelta < 0
-                              ? 'sale-negative'
-                              : ''
-                        }
-                      >
-                        {formatSignedRax(displayRaxValue(row.netDelta))} RAX
+                      <strong className={signedRaxClass(monthNet)}>
+                        {formatSignedRax(displayRaxValue(monthNet))} RAX
                       </strong>
                     </td>
                     <td>
-                      {row.potentialGain > 0
-                        ? `+${formatRax(displayRaxValue(row.potentialGain))}`
+                      {monthGain > 0
+                        ? `+${formatRax(displayRaxValue(monthGain))}`
                         : '—'}
                     </td>
                     <td>
-                      {row.displacedLoss > 0
-                        ? `−${formatRax(displayRaxValue(row.displacedLoss))}`
+                      {monthLoss > 0
+                        ? `−${formatRax(displayRaxValue(monthLoss))}`
                         : '—'}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -841,9 +957,23 @@ export default function PotentialPage() {
     [baselineProfilesByKey, rankAdjustments],
   )
 
-  const potentialCollectionClaimable = useMemo(
-    () => computeYearRollup(potentialBaselineData).totalClaimableRax,
+
+  const potentialBaselineWithPro = useMemo(
+    () => ({
+      ...potentialBaselineData,
+      settings: { ...potentialBaselineData.settings, proBonusEnabled: true },
+    }),
     [potentialBaselineData],
+  )
+
+  const potentialCollectionGuaranteed = useMemo(
+    () => computeYearRollup(potentialBaselineWithPro).totalGuaranteedRax,
+    [potentialBaselineWithPro],
+  )
+
+  const potentialCollectionWithPro = useMemo(
+    () => computeYearRollup(potentialBaselineWithPro).totalClaimableRax,
+    [potentialBaselineWithPro],
   )
 
   const potentialBundleProfiles = useMemo(
@@ -1451,9 +1581,22 @@ export default function PotentialPage() {
     [data, quickAddAnalysisCandidates],
   )
 
-  const collectionClaimableNow = useMemo(
-    () => computeYearRollup(data).totalClaimableRax,
+  const collectionDataWithPro = useMemo(
+    () => ({
+      ...data,
+      settings: { ...data.settings, proBonusEnabled: true },
+    }),
     [data],
+  )
+
+  const collectionGuaranteedNow = useMemo(
+    () => computeYearRollup(collectionDataWithPro).totalGuaranteedRax,
+    [collectionDataWithPro],
+  )
+
+  const collectionWithProNow = useMemo(
+    () => computeYearRollup(collectionDataWithPro).totalClaimableRax,
+    [collectionDataWithPro],
   )
 
   const selectedUpgradePassLabels = useMemo(
@@ -2217,35 +2360,19 @@ export default function PotentialPage() {
                       Clear selection
                     </button>
                   </div>
-                  <div className="owned-upgrade-analysis-metrics">
-                    <div className="metric-card">
-                      <span>Your collection now</span>
-                      <strong>{formatRax(displayRaxValue(collectionClaimableNow))}</strong>
-                      <small>total claimable RAX</small>
-                    </div>
-                    <div className="metric-card">
-                      <span>After upgrade</span>
-                      <strong>
-                        {formatRax(
-                          displayRaxValue(
-                            collectionClaimableNow + quickAddAnalysis.combinedNetDelta,
-                          ),
-                        )}
-                      </strong>
-                      <small>total claimable RAX</small>
-                    </div>
-                    <div className="metric-card highlight">
-                      <span>Net gain</span>
-                      <strong>
-                        {formatSignedRax(displayRaxValue(quickAddAnalysis.combinedNetDelta))}
-                      </strong>
-                      <small>
-                        {quickAddAnalysisSelection.size === 1
-                          ? 'from this pass alone'
-                          : 'bundle after same-sport overlap'}
-                      </small>
-                    </div>
-                  </div>
+                  <CheckerNetGainMetrics
+                    baselineGuaranteed={collectionGuaranteedNow}
+                    baselineWithPro={collectionWithProNow}
+                    combinedGuaranteedNetDelta={quickAddAnalysis.combinedGuaranteedNetDelta}
+                    combinedWithProNetDelta={quickAddAnalysis.combinedNetDelta}
+                    baselineLabel="Your collection now"
+                    afterLabel="After upgrade"
+                    netGainDetail={
+                      quickAddAnalysisSelection.size === 1
+                        ? 'from this pass alone'
+                        : 'bundle after same-sport overlap'
+                    }
+                  />
                   {quickAddAnalysis.rows.length > 1 ? (
                     <>
                       <p className="import-hint">Per-pass contribution inside this bundle:</p>
@@ -3266,31 +3393,15 @@ export default function PotentialPage() {
                     </p>
                   </div>
                 </div>
-                <div className="owned-upgrade-analysis-metrics">
-                  <div className="metric-card">
-                    <span>Baseline collection</span>
-                    <strong>{formatRax(displayRaxValue(potentialCollectionClaimable))}</strong>
-                    <small>claimable RAX now</small>
-                  </div>
-                  <div className="metric-card">
-                    <span>After bundle</span>
-                    <strong>
-                      {formatRax(
-                        displayRaxValue(
-                          potentialCollectionClaimable + potentialBundleAnalysis.combinedNetDelta,
-                        ),
-                      )}
-                    </strong>
-                    <small>claimable RAX</small>
-                  </div>
-                  <div className="metric-card highlight">
-                    <span>Net gain</span>
-                    <strong>
-                      {formatSignedRax(displayRaxValue(potentialBundleAnalysis.combinedNetDelta))}
-                    </strong>
-                    <small>bundle total</small>
-                  </div>
-                </div>
+                <CheckerNetGainMetrics
+                  baselineGuaranteed={potentialCollectionGuaranteed}
+                  baselineWithPro={potentialCollectionWithPro}
+                  combinedGuaranteedNetDelta={potentialBundleAnalysis.combinedGuaranteedNetDelta}
+                  combinedWithProNetDelta={potentialBundleAnalysis.combinedNetDelta}
+                  baselineLabel="Baseline collection"
+                  afterLabel="After bundle"
+                  netGainDetail="bundle total"
+                />
                 {potentialBundleAnalysis.rows.length > 1 ? (
                   <>
                     <p className="import-hint">Per-pass contribution inside this bundle:</p>
@@ -3597,33 +3708,19 @@ export default function PotentialPage() {
             </div>
             {iconic20AnalysisCandidates.length > 0 ? (
               <>
-                <div className="owned-upgrade-analysis-metrics">
-                  <div className="metric-card">
-                    <span>Your collection now</span>
-                    <strong>{formatRax(displayRaxValue(collectionClaimableNow))}</strong>
-                    <small>total claimable RAX</small>
-                  </div>
-                  <div className="metric-card">
-                    <span>After simulation</span>
-                    <strong>
-                      {formatRax(
-                        displayRaxValue(collectionClaimableNow + iconic20Analysis.combinedNetDelta),
-                      )}
-                    </strong>
-                    <small>total claimable RAX</small>
-                  </div>
-                  <div className="metric-card highlight">
-                    <span>Net gain</span>
-                    <strong>
-                      {formatSignedRax(displayRaxValue(iconic20Analysis.combinedNetDelta))}
-                    </strong>
-                    <small>
-                      {iconic20Selection.size === 1
-                        ? 'solo pass'
-                        : 'bundle after same-sport overlap'}
-                    </small>
-                  </div>
-                </div>
+                <CheckerNetGainMetrics
+                  baselineGuaranteed={collectionGuaranteedNow}
+                  baselineWithPro={collectionWithProNow}
+                  combinedGuaranteedNetDelta={iconic20Analysis.combinedGuaranteedNetDelta}
+                  combinedWithProNetDelta={iconic20Analysis.combinedNetDelta}
+                  baselineLabel="Your collection now"
+                  afterLabel="After simulation"
+                  netGainDetail={
+                    iconic20Selection.size === 1
+                      ? 'solo pass'
+                      : 'bundle after same-sport overlap'
+                  }
+                />
                 {iconic20Analysis.rows.length > 1 ? (
                   <>
                     <p className="import-hint">Per-pass contribution inside this bundle:</p>
