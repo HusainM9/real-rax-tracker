@@ -100,6 +100,7 @@ describe('sportOpportunityAnalysis', () => {
           displacedRax: 10,
           overlapRax: 0,
           netClaimableDelta: 80,
+          netGuaranteedDelta: 70,
         },
       ],
     }

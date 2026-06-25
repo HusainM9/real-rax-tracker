@@ -291,7 +291,7 @@ export default function CalendarPage() {
                       {weekday}
                     </div>
                   ))}
-                  {weeks.map((week, weekIndex) =>
+                  {weeks.map((week) =>
                     week.map((cell, dayIndex) => {
                       const weekTotal =
                         dayIndex === 6 && weekHasMonthDays(week) ? weekCellsTotal(week) : 0
