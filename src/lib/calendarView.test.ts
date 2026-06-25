@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { computeClaimDayResults } from './claimOptimizer'
-import { buildCalendarCells, findClaimDayResult, groupClaimDaysByMonth } from './calendarView'
+import {
+  buildCalendarCells,
+  chunkCalendarWeeks,
+  findClaimDayResult,
+  groupClaimDaysByMonth,
+  weekCellsTotal,
+  weekHasMonthDays,
+} from './calendarView'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
 
 function card(id: string): PlayerCard {
@@ -52,5 +59,15 @@ describe('calendarView', () => {
     const day15 = cells.find((cell) => cell.dayNumber === 15)
     expect(day15?.result?.totalClaimableRax).toBe(300)
     expect(findClaimDayResult(results, '01-15')?.totalClaimableRax).toBe(300)
+  })
+
+  it('sums claimable RAX per calendar week', () => {
+    const january = groupClaimDaysByMonth(results)[0]!
+    const cells = buildCalendarCells(january.days, january.monthIdx, 2026)
+    const weeks = chunkCalendarWeeks(cells)
+    const weekWithClaim = weeks.find((week) => week.some((cell) => cell.dayNumber === 15))
+    expect(weekWithClaim).toBeDefined()
+    expect(weekHasMonthDays(weekWithClaim!)).toBe(true)
+    expect(weekCellsTotal(weekWithClaim!)).toBe(300)
   })
 })

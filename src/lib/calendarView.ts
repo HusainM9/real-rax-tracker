@@ -116,6 +116,22 @@ export function monthGroupTotals(days: ClaimDayResult[]): {
   }
 }
 
+export function chunkCalendarWeeks(cells: CalendarCell[]): CalendarCell[][] {
+  const weeks: CalendarCell[][] = []
+  for (let index = 0; index < cells.length; index += 7) {
+    weeks.push(cells.slice(index, index + 7))
+  }
+  return weeks
+}
+
+export function weekCellsTotal(week: CalendarCell[]): number {
+  return week.reduce((sum, cell) => sum + (cell.result?.totalClaimableRax ?? 0), 0)
+}
+
+export function weekHasMonthDays(week: CalendarCell[]): boolean {
+  return week.some((cell) => cell.dayNumber != null)
+}
+
 export function findClaimDayResult(
   results: ClaimDayResult[],
   monthDay: string,

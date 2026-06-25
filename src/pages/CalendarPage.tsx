@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   buildCalendarCells,
+  chunkCalendarWeeks,
   findClaimDayResult,
   groupClaimDaysByMonth,
   monthGroupTotals,
+  weekCellsTotal,
+  weekHasMonthDays,
 } from '../lib/calendarView'
 import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from '../lib/claimDayKey'
 import { computeClaimDayResults } from '../lib/claimOptimizer'
@@ -270,6 +273,7 @@ export default function CalendarPage() {
         monthGroups.map((group) => {
           const totals = monthGroupTotals(group.days)
           const cells = buildCalendarCells(group.days, group.monthIdx, layoutYear)
+          const weeks = chunkCalendarWeeks(cells)
 
           return (
             <section className="month-section" key={group.monthIdx} id={`calendar-month-${group.monthIdx}`}>
@@ -287,38 +291,62 @@ export default function CalendarPage() {
                       {weekday}
                     </div>
                   ))}
-                  {cells.map((cell) =>
-                    cell.result ? (
-                      <button
-                        className={`calendar-day has-rax${
-                          cell.monthDay === selectedMonthDay ? ' selected' : ''
-                        }${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
-                        key={cell.key}
-                        id={cell.monthDay ? `calendar-day-${cell.monthDay}` : undefined}
-                        type="button"
-                        onClick={() => openDay(cell.monthDay!)}
-                      >
-                        <span>{cell.dayNumber}</span>
-                        <strong>{formatRax(displayRaxValue(cell.result.totalClaimableRax))}</strong>
-                        {cell.result.totalOverlapRax > 0 ? (
-                          <small>
-                            overlap {formatRax(displayRaxValue(cell.result.totalOverlapRax))}
+                  {weeks.map((week, weekIndex) =>
+                    week.map((cell, dayIndex) => {
+                      const weekTotal =
+                        dayIndex === 6 && weekHasMonthDays(week) ? weekCellsTotal(week) : 0
+                      const weekSum =
+                        weekTotal > 0 ? (
+                          <small className="calendar-week-sum" title="Week total">
+                            Wk {formatRax(displayRaxValue(weekTotal))}
                           </small>
-                        ) : null}
-                      </button>
-                    ) : cell.monthDay ? (
-                      <div
-                        className={`calendar-day${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
-                        key={cell.key}
-                        id={`calendar-day-${cell.monthDay}`}
-                      >
-                        <span>{cell.dayNumber}</span>
-                      </div>
-                    ) : (
-                      <div className="calendar-day" key={cell.key}>
-                        {cell.dayNumber ? <span>{cell.dayNumber}</span> : null}
-                      </div>
-                    ),
+                        ) : null
+
+                      if (cell.result) {
+                        return (
+                          <button
+                            className={`calendar-day has-rax${
+                              cell.monthDay === selectedMonthDay ? ' selected' : ''
+                            }${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
+                            key={cell.key}
+                            id={cell.monthDay ? `calendar-day-${cell.monthDay}` : undefined}
+                            type="button"
+                            onClick={() => openDay(cell.monthDay!)}
+                          >
+                            <span>{cell.dayNumber}</span>
+                            <strong>
+                              {formatRax(displayRaxValue(cell.result.totalClaimableRax))}
+                            </strong>
+                            {cell.result.totalOverlapRax > 0 ? (
+                              <small>
+                                overlap {formatRax(displayRaxValue(cell.result.totalOverlapRax))}
+                              </small>
+                            ) : null}
+                            {weekSum}
+                          </button>
+                        )
+                      }
+
+                      if (cell.monthDay) {
+                        return (
+                          <div
+                            className={`calendar-day${cell.monthDay === todayMonthDay ? ' is-today' : ''}`}
+                            key={cell.key}
+                            id={`calendar-day-${cell.monthDay}`}
+                          >
+                            <span>{cell.dayNumber}</span>
+                            {weekSum}
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <div className="calendar-day" key={cell.key}>
+                          {cell.dayNumber ? <span>{cell.dayNumber}</span> : null}
+                          {weekSum}
+                        </div>
+                      )
+                    }),
                   )}
                 </div>
               </div>
