@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
-import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImportEnabled } from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
@@ -12,6 +11,7 @@ import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearc
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
+import { CARD_RARITY_OPTIONS } from '../lib/cardRarity'
 import {
   getFailedPlayerPasses,
   type FailedPlayerPassImport,
@@ -48,7 +48,18 @@ function pageCount(count: number, pageSize: number): number {
   return Math.max(1, Math.ceil(count / pageSize))
 }
 
-const CARD_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+const DEFAULT_CATALOG_ADD_RARITY = 'Iconic 1'
+
+function resolveCatalogAddRarity(
+  result: CatalogSearchResult,
+  defaultRarity: string,
+  overrides: Record<string, string>,
+): string {
+  const override = overrides[result.externalKey]?.trim()
+  if (override) return override
+  if (result.rarityLabel?.trim()) return result.rarityLabel.trim()
+  return defaultRarity
+}
 
 type CardEntryMode = 'new' | 'existing'
 type EarningsInputMode = 'paste' | 'single'
@@ -139,6 +150,10 @@ export default function EntryPage() {
   const [existingCardQuery, setExistingCardQuery] = useState('')
   const [catalogImportingKey, setCatalogImportingKey] = useState('')
   const [catalogStatus, setCatalogStatus] = useState('')
+  const [catalogAddDefaultRarity, setCatalogAddDefaultRarity] = useState(DEFAULT_CATALOG_ADD_RARITY)
+  const [catalogAddRarityOverrides, setCatalogAddRarityOverrides] = useState<Record<string, string>>(
+    {},
+  )
   const importAbortRef = useRef<AbortController | null>(null)
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
@@ -177,7 +192,7 @@ export default function EntryPage() {
         ? `${filteredExistingCards.length} match${filteredExistingCards.length === 1 ? '' : 'es'}`
         : `Showing first ${Math.min(sortedExistingCards.length, EXISTING_CARD_SEARCH_LIMIT)} of ${sortedExistingCards.length} — search to narrow`
 
-  const importFromCatalog = async (result: CatalogSearchResult) => {
+  const importFromCatalog = async (result: CatalogSearchResult, rarityLabel: string) => {
     setCatalogImportingKey(result.externalKey)
     setCatalogStatus('')
     try {
@@ -191,28 +206,36 @@ export default function EntryPage() {
         return
       }
 
-      const imported = importCatalogProfile(profile)
+      const resolvedRarity = rarityLabel.trim() || profile.rarityLabel
+      const profileWithRarity: CatalogImportProfile = {
+        ...profile,
+        rarityLabel: resolvedRarity,
+      }
+
+      const imported = importCatalogProfile(profileWithRarity)
       const cardIndex = imported.cardCreated
         ? data.cards.length
         : data.cards.findIndex((card) => card.id === imported.cardId)
       setCardsPage(pageForCardIndex(cardIndex, ENTRY_PAGE_SIZE))
       setPerformancesPage(1)
-      setCardEntry(cardEntryFromCatalogProfile(data.cards, profile, imported.cardId))
+      setCardEntry(cardEntryFromCatalogProfile(data.cards, profileWithRarity, imported.cardId))
       setCardEntryStatus('')
 
       if (profile.rows.length > 0) {
-        saveCardProfile(imported.cardId, catalogProfileToFilteredJson(profile))
+        saveCardProfile(imported.cardId, catalogProfileToFilteredJson(profileWithRarity))
       }
+
+      const rarityNote = resolvedRarity ? ` at ${resolvedRarity}` : ''
 
       if (profile.rows.length === 0) {
         setCatalogStatus(
-          `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name} in your collection. This pass has no catalog earnings yet — add RAX in the form below.`,
+          `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name}${rarityNote}. This pass has no catalog earnings yet — paste JSON in Manual add below if needed.`,
         )
-        cardEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        document.getElementById('manual-card-entry')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         return
       }
 
-      const earningsNote = `${profile.rows.length} RAX row${profile.rows.length === 1 ? '' : 's'}`
+      const earningsNote = `${profile.rows.length} daily RAX row${profile.rows.length === 1 ? '' : 's'}`
       const changeNote =
         imported.rowsImported > 0 || imported.rowsUpdated > 0
           ? ` (${imported.rowsImported} new${
@@ -223,7 +246,7 @@ export default function EntryPage() {
           : ' (already up to date)'
 
       setCatalogStatus(
-        `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name} to your collection with ${earningsNote}${changeNote}.`,
+        `${imported.cardCreated ? 'Added' : 'Updated'} ${profile.name}${rarityNote} with ${earningsNote}${changeNote}.`,
       )
       document.getElementById('player-cards')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     } catch (error) {
@@ -413,7 +436,7 @@ export default function EntryPage() {
     if (!username) return
     if (importDisabled) {
       setUsernameImportStatus(
-        'Automatic username import is closed because realapp.tools / Meowbot has shut down. Use Add card & earnings below for future entries.',
+        'Automatic username import is closed because realapp.tools / Meowbot has shut down. Use catalog quick add or Manual add below for future entries.',
       )
       return
     }
@@ -589,16 +612,36 @@ export default function EntryPage() {
     <div className="page-stack">
       <CatalogSearchPanel
         sectionId="catalog-search"
-        title="Search player passes"
-        description="One click adds the pass to your collection and imports its daily RAX from the shared catalog. No separate card entry step when earnings exist."
+        title="Quick add from catalog"
+        description="The fastest way to add a pass — search the shared Meowbot database, choose rarity, and import daily earnings in one step. No JSON paste required when catalog rows exist."
+        badge="Recommended"
         actionLabel="Add to collection"
-        loadingLabel="Adding to collection…"
+        loadingLabel="Adding…"
         loadingKey={catalogImportingKey}
         disabled={Boolean(catalogImportingKey)}
+        collectionAdd={{
+          defaultRarity: catalogAddDefaultRarity,
+          onDefaultRarityChange: setCatalogAddDefaultRarity,
+          rarityOptions: CARD_RARITY_OPTIONS,
+          rarityForResult: (result) =>
+            resolveCatalogAddRarity(result, catalogAddDefaultRarity, catalogAddRarityOverrides),
+          onRarityForResultChange: (externalKey, rarity) =>
+            setCatalogAddRarityOverrides((current) => ({ ...current, [externalKey]: rarity })),
+        }}
         onSelect={importFromCatalog}
       />
       {catalogStatus ? (
-        <p className="import-status panel form-panel">{catalogStatus}</p>
+        <section className="panel catalog-add-success">
+          <p className="import-status">{catalogStatus}</p>
+          <div className="button-row">
+            <a className="button primary" href="#player-cards">
+              View your cards
+            </a>
+            <button className="button" type="button" onClick={() => setCatalogStatus('')}>
+              Dismiss
+            </button>
+          </div>
+        </section>
       ) : null}
 
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
@@ -722,7 +765,7 @@ export default function EntryPage() {
                 {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
               </strong>{' '}
               Use <a href="#catalog-search">shared catalog search</a> or{' '}
-              <a href="#add-card-earnings">Add card &amp; earnings</a> below to finish these passes
+              <a href="#manual-card-entry">Manual add</a> below to finish these passes
               {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings') ? (
                 <>
                   {' '}
@@ -803,21 +846,26 @@ export default function EntryPage() {
         ) : null}
       </form>
 
+      <CollapsiblePanel
+        id="manual-card-entry"
+        title="Manual add (paste JSON)"
+        description="Only needed when a pass isn't in the catalog or you want to paste earnings directly from realapp.com."
+        badge={`${data.cards.length} cards`}
+        defaultOpen={data.cards.length === 0}
+      >
       <form
-        className="panel form-panel"
+        className="form-panel-inner"
         ref={cardEntryRef}
-        id="add-card-earnings"
         onSubmit={submitCardEntry}
       >
         <div className="section-heading">
           <div>
-            <h2>Add card & earnings</h2>
+            <h2>Add card &amp; earnings manually</h2>
             <p>
-              Set up the player pass and paste daily RAX manually — or use{' '}
-              <a href="#catalog-search">shared catalog search</a> above to import from the database.
+              Prefer the <a href="#catalog-search">catalog quick add</a> above when the pass is in
+              the shared database — it imports daily RAX automatically.
             </p>
           </div>
-          <span className="badge">{data.cards.length} cards saved</span>
         </div>
 
         <div className="entry-mode-toggle" role="group" aria-label="Card entry mode">
@@ -1097,6 +1145,7 @@ export default function EntryPage() {
           {cardEntryStatus ? <p className="import-status">{cardEntryStatus}</p> : null}
         </div>
       </form>
+      </CollapsiblePanel>
 
       <CollapsiblePanel
         className="saved-earnings-profiles-panel"
@@ -1222,7 +1271,7 @@ export default function EntryPage() {
               {data.cards.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="empty-cell">
-                    Import while available above or use Add card & earnings below.
+                    Import while available above or use Manual add below.
                   </td>
                 </tr>
               ) : (
@@ -1338,7 +1387,7 @@ export default function EntryPage() {
               {sortedPerformances.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="empty-cell">
-                    Import while available or add earnings in Add card & earnings above.
+                    Import while available or add earnings in Manual add above.
                   </td>
                 </tr>
               ) : (

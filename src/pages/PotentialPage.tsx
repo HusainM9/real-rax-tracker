@@ -1113,7 +1113,7 @@ export default function PotentialPage() {
     )
   }
 
-  const loadFromCatalog = async (result: CatalogSearchResult) => {
+  const loadFromCatalog = async (result: CatalogSearchResult, _rarityLabel = '') => {
     const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
     setCatalogLoadingKey(result.externalKey)
     setStatus('')

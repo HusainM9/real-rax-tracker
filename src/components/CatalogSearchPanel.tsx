@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { searchCatalog, type CatalogPassKind, type CatalogSearchResult } from '../lib/catalogApi'
 
+export type CatalogCollectionAddOptions = {
+  defaultRarity: string
+  onDefaultRarityChange: (rarity: string) => void
+  rarityOptions: readonly string[]
+  rarityForResult: (result: CatalogSearchResult) => string
+  onRarityForResultChange: (externalKey: string, rarity: string) => void
+}
+
 export type CatalogSearchPanelProps = {
   sectionId?: string
   title?: string
@@ -14,7 +22,8 @@ export type CatalogSearchPanelProps = {
   disabled?: boolean
   emptyHint?: string
   embedded?: boolean
-  onSelect: (result: CatalogSearchResult) => void | Promise<void>
+  collectionAdd?: CatalogCollectionAddOptions
+  onSelect: (result: CatalogSearchResult, rarityLabel: string) => void | Promise<void>
   bundleExternalKeys?: Set<string>
   onToggleBundle?: (result: CatalogSearchResult) => void
   bundleActionLabel?: string
@@ -32,6 +41,7 @@ export function CatalogSearchPanel({
   disabled = false,
   emptyHint,
   embedded = false,
+  collectionAdd,
   onSelect,
   bundleExternalKeys,
   onToggleBundle,
@@ -42,6 +52,7 @@ export function CatalogSearchPanel({
   const [searching, setSearching] = useState(false)
   const [status, setStatus] = useState('')
   const bundleEnabled = Boolean(onToggleBundle)
+  const collectionAddEnabled = Boolean(collectionAdd)
 
   const visibleResults = useMemo(
     () => (passKind === 'all' ? results : results.filter((result) => result.passKind === passKind)),
@@ -118,6 +129,35 @@ export function CatalogSearchPanel({
           .
         </p>
       )}
+      {collectionAddEnabled ? (
+        <ol className="entry-quick-add-steps">
+          <li>
+            <strong>Search</strong> for a player pass by name
+          </li>
+          <li>
+            <strong>Pick rarity</strong> — defaults below; change per pass if needed
+          </li>
+          <li>
+            <strong>Add to collection</strong> — earnings import automatically when available
+          </li>
+        </ol>
+      ) : null}
+      {collectionAddEnabled && collectionAdd ? (
+        <label className="field entry-default-rarity-field">
+          <span>Default rarity for new passes</span>
+          <select
+            value={collectionAdd.defaultRarity}
+            disabled={disabled}
+            onChange={(event) => collectionAdd.onDefaultRarityChange(event.target.value)}
+          >
+            {collectionAdd.rarityOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="field">
         <span>Search by name, sport, or season</span>
         <input
@@ -131,18 +171,76 @@ export function CatalogSearchPanel({
       {!query.trim() ? (
         <p className="card-picker-empty">
           {emptyHint ??
-            'Start typing to search the shared Meowbot catalog. Results include daily RAX row counts and total base RAX.'}
+            (collectionAddEnabled
+              ? 'Type a player name to search the shared catalog — then click Add to collection. No JSON paste needed when daily earnings are available.'
+              : 'Start typing to search the shared Meowbot catalog. Results include daily RAX row counts and total base RAX.')}
         </p>
       ) : searching ? (
         <p className="import-progress">Searching shared catalog…</p>
       ) : visibleResults.length > 0 ? (
         <div
-          className={bundleEnabled ? 'list catalog-search-result-list' : 'cached-profile-list'}
+          className={
+            bundleEnabled || collectionAddEnabled
+              ? 'list catalog-search-result-list'
+              : 'cached-profile-list'
+          }
           role="listbox"
           aria-label="Shared catalog results"
         >
           {visibleResults.map((profile) => {
             const inBundle = bundleExternalKeys?.has(profile.externalKey) ?? false
+            const rowRarity = collectionAdd?.rarityForResult(profile) ?? ''
+            if (collectionAddEnabled && collectionAdd) {
+              return (
+                <div className="list-row catalog-search-result-row catalog-add-result-row" key={profile.externalKey}>
+                  <span>
+                    <strong>{profile.name}</strong>
+                    <small>
+                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {profile.seasonLabel || profile.seasonYear}
+                      {profile.rarityLabel ? ` · catalog ${profile.rarityLabel}` : ''} ·{' '}
+                      {profile.rowCount} row{profile.rowCount === 1 ? '' : 's'}
+                      {profile.totalBaseRax > 0
+                        ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
+                        : profile.hasEarnings === false
+                          ? ' · no earnings yet'
+                          : ''}
+                      {profile.latestClaimDay
+                        ? ` · latest ${formatClaimDay(profile.latestClaimDay)}`
+                        : ''}
+                    </small>
+                  </span>
+                  <span className="button-row compact-actions catalog-add-result-actions">
+                    <label className="field inline-field catalog-add-rarity-field">
+                      <span className="sr-only">Rarity for {profile.name}</span>
+                      <select
+                        value={rowRarity}
+                        disabled={disabled || loadingKey === profile.externalKey}
+                        aria-label={`Rarity for ${profile.name}`}
+                        onChange={(event) =>
+                          collectionAdd.onRarityForResultChange(profile.externalKey, event.target.value)
+                        }
+                      >
+                        {collectionAdd.rarityOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="button primary compact"
+                      type="button"
+                      disabled={disabled || loadingKey === profile.externalKey}
+                      onClick={() => void onSelect(profile, rowRarity)}
+                    >
+                      {loadingKey === profile.externalKey ? loadingLabel : actionLabel}
+                    </button>
+                  </span>
+                </div>
+              )
+            }
+
             if (bundleEnabled) {
               return (
                 <div className="list-row catalog-search-result-row" key={profile.externalKey}>
@@ -168,7 +266,7 @@ export function CatalogSearchPanel({
                       className="button compact"
                       type="button"
                       disabled={disabled || loadingKey === profile.externalKey}
-                      onClick={() => void onSelect(profile)}
+                      onClick={() => void onSelect(profile, profile.rarityLabel ?? '')}
                     >
                       {loadingKey === profile.externalKey ? loadingLabel : actionLabel}
                     </button>
@@ -191,7 +289,7 @@ export function CatalogSearchPanel({
                 type="button"
                 className="cached-profile-item"
                 disabled={disabled || Boolean(loadingKey)}
-                onClick={() => void onSelect(profile)}
+                onClick={() => void onSelect(profile, profile.rarityLabel ?? '')}
               >
                 <strong>{profile.name}</strong>
                 <small>
@@ -221,7 +319,10 @@ export function CatalogSearchPanel({
   }
 
   return (
-    <section className="panel form-panel" id={sectionId}>
+    <section
+      className={`panel form-panel${collectionAddEnabled ? ' entry-catalog-hero' : ''}`}
+      id={sectionId}
+    >
       {body}
     </section>
   )

@@ -606,7 +606,7 @@ export default function AdminPage() {
     }
   }
 
-  const loadManualUpsertPass = async (result: CatalogSearchResult) => {
+  const loadManualUpsertPass = async (result: CatalogSearchResult, _rarityLabel = '') => {
     setManualUpsertLoadingKey(result.externalKey)
     setManualUpsertStatus('Loading pass from shared catalog…')
     try {
