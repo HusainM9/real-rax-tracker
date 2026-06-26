@@ -9,6 +9,7 @@ import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
+import { CALENDAR_MONTH_NAMES } from './calendarView'
 import { applyCardRarityChange } from './cardRarity'
 import {
   analyzePotentialCard,
@@ -105,6 +106,26 @@ export type PassRecommendationRow = {
   overlapRax: number
   netClaimableDelta: number
   netGuaranteedDelta: number
+}
+
+export type MonthPassRecommendationRow = PassRecommendationRow & {
+  monthIdx: number
+  month: string
+  monthNetDelta: number
+  monthGuaranteedNetDelta: number
+  monthGain: number
+  monthDisplaced: number
+}
+
+export type MonthPassRecommendationResult = {
+  rows: MonthPassRecommendationRow[]
+  skippedOwnedIconic: number
+  skippedNoRows: number
+  skippedAdjusted: number
+  analyzedCount: number
+  prefilterTrimmed: number
+  monthIdx: number
+  month: string
 }
 
 export type PassRecommendationProgress = {
@@ -484,13 +505,22 @@ export function analyzeCatalogCandidate(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
 ): PassRecommendationRow | null {
+  const analysis = analyzeCatalogProfilePotential(data, profile)
+  if (!analysis) return null
+  return buildPassRecommendationRow(profile, analysis)
+}
+
+function analyzeCatalogProfilePotential(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+): PotentialAnalysisResult | null {
   if (profile.rows.length === 0) return null
 
   const rows = catalogProfileToParsedRows(profile)
   if (rows.length === 0) return null
 
   const sport = sportFromCatalog(profile.sport)
-  const analysis = analyzePotentialCard(
+  return analyzePotentialCard(
     data,
     {
       name: profile.name,
@@ -501,8 +531,13 @@ export function analyzeCatalogCandidate(
     },
     rows,
   )
-  if (!analysis) return null
+}
 
+function buildPassRecommendationRow(
+  profile: CatalogImportProfile,
+  analysis: PotentialAnalysisResult,
+): PassRecommendationRow {
+  const sport = sportFromCatalog(profile.sport)
   return {
     externalKey: profile.externalKey,
     name: profile.name,
@@ -520,6 +555,39 @@ export function analyzeCatalogCandidate(
     netClaimableDelta: netClaimableDelta(analysis),
     netGuaranteedDelta: netGuaranteedDelta(analysis),
   }
+}
+
+export function analyzeCatalogCandidateForMonth(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  monthIdx: number,
+): MonthPassRecommendationRow | null {
+  const analysis = analyzeCatalogProfilePotential(data, profile)
+  if (!analysis) return null
+
+  const monthly = analysis.monthlyNet.find((row) => row.monthIdx === monthIdx)
+  const base = buildPassRecommendationRow(profile, analysis)
+
+  return {
+    ...base,
+    monthIdx,
+    month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
+    monthNetDelta: monthly?.netDelta ?? 0,
+    monthGuaranteedNetDelta: monthly?.guaranteedNetDelta ?? 0,
+    monthGain: monthly?.potentialGain ?? 0,
+    monthDisplaced: monthly?.displacedLoss ?? 0,
+  }
+}
+
+function sortMonthRecommendationRows(rows: MonthPassRecommendationRow[]): MonthPassRecommendationRow[] {
+  const sorted = [...rows].sort(
+    (a, b) =>
+      b.monthNetDelta - a.monthNetDelta ||
+      b.netClaimableDelta - a.netClaimableDelta ||
+      b.monthGain - a.monthGain ||
+      a.name.localeCompare(b.name),
+  )
+  return dedupeCatalogPassSummaries(sorted).items as MonthPassRecommendationRow[]
 }
 
 function sortRecommendationRows(rows: PassRecommendationRow[]): PassRecommendationRow[] {
@@ -578,6 +646,10 @@ export type OwnedIconicUpgradeImpactRow = {
   season: string
   isolatedNetDelta: number
   marginalNetDelta: number
+  /** Full claimable RAX from this pass alone after upgrade (guaranteed + Pro bonus). */
+  passClaimableRax: number
+  /** Guaranteed-only claimable RAX from this pass alone after upgrade. */
+  passGuaranteedRax: number
 }
 
 export type OwnedIconicUpgradeImpactResult = {
@@ -615,6 +687,36 @@ function collectionNetDeltas(
     guaranteed:
       collectionGuaranteedTotal(afterPro) - collectionGuaranteedTotal(beforePro),
     withPro: collectionClaimableTotal(afterPro) - collectionClaimableTotal(beforePro),
+  }
+}
+
+function resolveCandidateExternalKey(candidate: {
+  key: string
+  card?: PlayerCard
+  profile?: CatalogImportProfile
+}): string | undefined {
+  return candidate.card?.externalKey ?? candidate.profile?.externalKey
+}
+
+function findCardIdForCandidate(
+  data: RaxTrackerData,
+  candidate: { key: string; card?: PlayerCard; profile?: CatalogImportProfile },
+): string | null {
+  if (candidate.card) return candidate.card.id
+  const externalKey = resolveCandidateExternalKey(candidate)
+  if (!externalKey) return null
+  return data.cards.find((card) => card.externalKey === externalKey)?.id ?? null
+}
+
+function cardClaimableTotals(
+  data: RaxTrackerData,
+  cardId: string,
+): { claimable: number; guaranteed: number } {
+  const rollup = computeYearRollup(withProBonusAnalysisData(data))
+  const row = rollup.cards.find((entry) => entry.card.id === cardId)
+  return {
+    claimable: row?.totalClaimableRax ?? 0,
+    guaranteed: row?.guaranteedRax ?? 0,
   }
 }
 
@@ -671,10 +773,16 @@ export function analyzeOwnedIconicUpgradeImpacts(
   }
 
   const isolatedByKey = new Map<string, number>()
+  const passClaimableByKey = new Map<string, { claimable: number; guaranteed: number }>()
   for (const candidate of eligible) {
+    const upgraded = applyIconicUpgradeCandidate(data, candidate)
     const before = collectionClaimableTotal(data)
-    const after = collectionClaimableTotal(applyIconicUpgradeCandidate(data, candidate))
+    const after = collectionClaimableTotal(upgraded)
     isolatedByKey.set(candidate.key, after - before)
+    const cardId = findCardIdForCandidate(upgraded, candidate)
+    if (cardId) {
+      passClaimableByKey.set(candidate.key, cardClaimableTotals(upgraded, cardId))
+    }
   }
 
   const bySport = new Map<Sport, OwnedIconicUpgradeCandidate[]>()
@@ -701,6 +809,8 @@ export function analyzeOwnedIconicUpgradeImpacts(
         season: candidate.season,
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
         marginalNetDelta: after - before,
+        passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,
+        passGuaranteedRax: passClaimableByKey.get(candidate.key)?.guaranteed ?? 0,
       })
     }
   }
@@ -806,12 +916,16 @@ export function analyzeSimulatedRarityCheckerImpacts(
   }
 
   const isolatedByKey = new Map<string, number>()
+  const passClaimableByKey = new Map<string, { claimable: number; guaranteed: number }>()
   for (const candidate of eligible) {
+    const upgraded = applySimulatedRarityCheckerCandidate(data, candidate, simulatedRarity)
     const before = collectionClaimableTotal(data)
-    const after = collectionClaimableTotal(
-      applySimulatedRarityCheckerCandidate(data, candidate, simulatedRarity),
-    )
+    const after = collectionClaimableTotal(upgraded)
     isolatedByKey.set(candidate.key, after - before)
+    const cardId = findCardIdForCandidate(upgraded, candidate)
+    if (cardId) {
+      passClaimableByKey.set(candidate.key, cardClaimableTotals(upgraded, cardId))
+    }
   }
 
   const bySport = new Map<Sport, Iconic20CheckerCandidate[]>()
@@ -838,6 +952,8 @@ export function analyzeSimulatedRarityCheckerImpacts(
         season: candidate.season,
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
         marginalNetDelta: after - before,
+        passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,
+        passGuaranteedRax: passClaimableByKey.get(candidate.key)?.guaranteed ?? 0,
       })
     }
   }
@@ -882,6 +998,19 @@ function rankCandidatesSync(
   return sortRecommendationRows(rows)
 }
 
+function rankMonthCandidatesSync(
+  data: RaxTrackerData,
+  candidates: CatalogImportProfile[],
+  monthIdx: number,
+): MonthPassRecommendationRow[] {
+  const rows: MonthPassRecommendationRow[] = []
+  for (const profile of candidates) {
+    const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx)
+    if (row) rows.push(row)
+  }
+  return sortMonthRecommendationRows(rows)
+}
+
 async function rankCandidatesAsync(
   data: RaxTrackerData,
   candidates: CatalogImportProfile[],
@@ -918,6 +1047,45 @@ async function rankCandidatesAsync(
   }
 
   return sortRecommendationRows(rows)
+}
+
+async function rankMonthCandidatesAsync(
+  data: RaxTrackerData,
+  candidates: CatalogImportProfile[],
+  monthIdx: number,
+  options?: {
+    onProgress?: (progress: PassRecommendationProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+    progressLabel?: string
+  },
+): Promise<MonthPassRecommendationRow[]> {
+  const rows: MonthPassRecommendationRow[] = []
+  const batchSize = Math.max(options?.batchSize ?? 24, 1)
+
+  for (let index = 0; index < candidates.length; index += batchSize) {
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
+    const batch = candidates.slice(index, index + batchSize)
+    for (const profile of batch) {
+      const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx)
+      if (row) rows.push(row)
+    }
+
+    const current = Math.min(index + batch.length, candidates.length)
+    options?.onProgress?.({
+      current,
+      total: candidates.length,
+      label: options.progressLabel
+        ? `${options.progressLabel}: ${batch[batch.length - 1]?.name || 'Finishing…'}`
+        : batch[batch.length - 1]?.name || 'Finishing…',
+    })
+    await yieldToMain()
+  }
+
+  return sortMonthRecommendationRows(rows)
 }
 
 function pickGreedyBundle(
@@ -1051,6 +1219,69 @@ export async function rankCatalogRecommendationsAsync(
     skippedAdjusted,
     analyzedCount: rows.length,
     prefilterTrimmed: trimmed,
+  }
+}
+
+export function rankCatalogRecommendationsForMonth(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+  monthIdx: number,
+  options?: RecommendationFilterOptions & { analysisCap?: number },
+): MonthPassRecommendationResult {
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
+    data,
+    profiles,
+    options,
+  )
+  const { profiles: analysisPool, trimmed } = prefilterRecommendationProfiles(
+    candidates,
+    options?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP,
+  )
+  const rows = rankMonthCandidatesSync(data, analysisPool, monthIdx)
+
+  return {
+    rows,
+    skippedOwnedIconic,
+    skippedNoRows,
+    skippedAdjusted,
+    analyzedCount: rows.length,
+    prefilterTrimmed: trimmed,
+    monthIdx,
+    month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
+  }
+}
+
+export async function rankCatalogRecommendationsForMonthAsync(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+  monthIdx: number,
+  options?: RecommendationFilterOptions & {
+    analysisCap?: number
+    onProgress?: (progress: PassRecommendationProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+  },
+): Promise<MonthPassRecommendationResult> {
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
+    data,
+    profiles,
+    options,
+  )
+  const { profiles: analysisPool, trimmed } = prefilterRecommendationProfiles(
+    candidates,
+    options?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP,
+  )
+  const rows = await rankMonthCandidatesAsync(data, analysisPool, monthIdx, options)
+
+  return {
+    rows,
+    skippedOwnedIconic,
+    skippedNoRows,
+    skippedAdjusted,
+    analyzedCount: rows.length,
+    prefilterTrimmed: trimmed,
+    monthIdx,
+    month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
   }
 }
 

@@ -16,7 +16,7 @@ import {
 import { computeYearRollup } from '../lib/claimOptimizer'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
-import { formatClaimDay, formatRax } from '../lib/format'
+import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import {
   analyzePotentialCard,
   netGuaranteedDelta,
@@ -44,6 +44,7 @@ import {
   ownedCardToIconicUpgradeCandidate,
   type OwnedIconicUpgradeCandidate,
   rankAndRecommendAsync,
+  rankCatalogRecommendationsForMonthAsync,
   RECOMMENDATION_GREEDY_RERANK_CAP,
   RECOMMENDATION_MAX_BUNDLE_SIZE,
   RECOMMENDATION_SIMULATED_RARITY,
@@ -56,7 +57,10 @@ import {
   sportSeasonFilterKey,
   type PassRecommendationProgress,
   type PassRecommendationRow,
+  type MonthPassRecommendationRow,
 } from '../lib/passRecommendation'
+import { CALENDAR_MONTH_NAMES } from '../lib/calendarView'
+import { monthIndexFromClaimDay } from '../lib/claimDayKey'
 import {
   buildSportOpportunityRow,
   computeSportCollectionStats,
@@ -76,6 +80,7 @@ import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
+const MONTH_BOOST_PAGE_SIZE = 10
 const RANKING_PAGE_SIZE = 25
 const DEFAULT_BUNDLE_SIZE = 3
 const ALL_SPORTS_RANK = 'ALL' as const
@@ -422,6 +427,8 @@ function CheckerNetGainMetrics({
   baselineLabel = 'Baseline collection',
   afterLabel = 'After simulation',
   netGainDetail = 'total',
+  passClaimable,
+  passClaimableLabel = 'Pass claimable after upgrade',
 }: {
   baselineGuaranteed: number
   baselineWithPro: number
@@ -430,11 +437,18 @@ function CheckerNetGainMetrics({
   baselineLabel?: string
   afterLabel?: string
   netGainDetail?: string
+  passClaimable?: { guaranteed: number; withPro: number }
+  passClaimableLabel?: string
 }) {
   const [netGainMode, setNetGainMode] = useState<NetGainMode>('guaranteed')
   const includeProBonus = netGainMode === 'with-pro'
   const baseline = includeProBonus ? baselineWithPro : baselineGuaranteed
   const netDelta = includeProBonus ? combinedWithProNetDelta : combinedGuaranteedNetDelta
+  const passTotal = passClaimable
+    ? includeProBonus
+      ? passClaimable.withPro
+      : passClaimable.guaranteed
+    : null
 
   return (
     <>
@@ -455,6 +469,13 @@ function CheckerNetGainMetrics({
           <strong>{formatRax(displayRaxValue(baseline + netDelta))}</strong>
           <small>{includeProBonus ? 'guaranteed + Pro bonus' : 'guaranteed only'}</small>
         </div>
+        {passTotal != null ? (
+          <div className="metric-card">
+            <span>{passClaimableLabel}</span>
+            <strong>{formatRax(displayRaxValue(passTotal))}</strong>
+            <small>{includeProBonus ? 'this pass · guaranteed + Pro' : 'this pass · guaranteed only'}</small>
+          </div>
+        ) : null}
         <div className="metric-card highlight">
           <span>{includeProBonus ? 'Net gain (+ Pro bonus)' : 'Guaranteed net gain'}</span>
           <strong className={signedRaxClass(netDelta)}>
@@ -821,6 +842,32 @@ export default function PotentialPage() {
   const [potentialBundleProfilesLoading, setPotentialBundleProfilesLoading] = useState(false)
   const [potentialBundleRarity, setPotentialBundleRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [catalogRankOpen, setCatalogRankOpen] = useState(false)
+  const [monthBoostOpen, setMonthBoostOpen] = useState(false)
+  const [monthBoostSport, setMonthBoostSport] = useState<RankSportChoice>('FC')
+  const [monthBoostExcludedSports, setMonthBoostExcludedSports] = useState<Sport[]>([])
+  const [monthBoostMonthIdx, setMonthBoostMonthIdx] = useState(() => {
+    const idx = monthIndexFromClaimDay(todayIsoLocal())
+    return idx >= 0 ? idx : 0
+  })
+  const [monthBoostInProgress, setMonthBoostInProgress] = useState(false)
+  const [monthBoostProgress, setMonthBoostProgress] = useState<PassRecommendationProgress | null>(
+    null,
+  )
+  const [monthBoostStatus, setMonthBoostStatus] = useState('')
+  const [monthBoostAllRows, setMonthBoostAllRows] = useState<MonthPassRecommendationRow[]>([])
+  const [monthBoostVisibleCount, setMonthBoostVisibleCount] = useState(MONTH_BOOST_PAGE_SIZE)
+  const [monthBoostMeta, setMonthBoostMeta] = useState<{
+    calculatedAt: string
+    skippedOwnedIconic: number
+    skippedAdjusted: number
+    skippedNoRows: number
+    catalogCount: number
+    fetchTrimmed: number
+    prefilterTrimmed: number
+    baselineAdjustmentCount: number
+    monthIdx: number
+    month: string
+  } | null>(null)
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
@@ -877,6 +924,7 @@ export default function PotentialPage() {
     Map<string, CatalogImportProfile>
   >(new Map())
   const rankAbortRef = useRef<AbortController | null>(null)
+  const monthBoostAbortRef = useRef<AbortController | null>(null)
   const sportOpportunityAbortRef = useRef<AbortController | null>(null)
   const [sportOpportunityInProgress, setSportOpportunityInProgress] = useState(false)
   const [sportOpportunityStatus, setSportOpportunityStatus] = useState('')
@@ -893,6 +941,7 @@ export default function PotentialPage() {
 
   const catalogAnalysisBusy =
     rankingInProgress ||
+    monthBoostInProgress ||
     sportOpportunityInProgress ||
     bundleClaimInProgress ||
     iconic20ProfilesLoading
@@ -1181,6 +1230,14 @@ export default function PotentialPage() {
     setRankStatus('Ranking cancelled.')
   }
 
+  const cancelMonthBoostRanking = () => {
+    monthBoostAbortRef.current?.abort()
+    monthBoostAbortRef.current = null
+    setMonthBoostInProgress(false)
+    setMonthBoostProgress(null)
+    setMonthBoostStatus('Month boost ranking cancelled.')
+  }
+
   const cancelSportOpportunityScan = () => {
     sportOpportunityAbortRef.current?.abort()
     sportOpportunityAbortRef.current = null
@@ -1196,6 +1253,7 @@ export default function PotentialPage() {
   const runSportOpportunityScan = async () => {
     sportOpportunityAbortRef.current?.abort()
     rankAbortRef.current?.abort()
+    monthBoostAbortRef.current?.abort()
     const controller = new AbortController()
     sportOpportunityAbortRef.current = controller
     setSportOpportunityInProgress(true)
@@ -1918,6 +1976,18 @@ export default function PotentialPage() {
     [excludedRankSports, rankSportOptions],
   )
 
+  const monthBoostAllSports = monthBoostSport === ALL_SPORTS_RANK
+
+  const includedMonthBoostSports = useMemo(
+    () => SPORTS.filter((sport) => !monthBoostExcludedSports.includes(sport)),
+    [monthBoostExcludedSports],
+  )
+
+  const excludedMonthBoostSportOptions = useMemo(
+    () => rankSportOptions.filter((option) => monthBoostExcludedSports.includes(option.value as Sport)),
+    [monthBoostExcludedSports, rankSportOptions],
+  )
+
   const isBundlePickClaimable = (row: PassRecommendationRow) =>
     profileByKey.has(row.externalKey) &&
     !isPassInRecommendationAdjustments(row, rankAdjustments) &&
@@ -2067,6 +2137,7 @@ export default function PotentialPage() {
 
   const runCatalogRanking = async () => {
     rankAbortRef.current?.abort()
+    monthBoostAbortRef.current?.abort()
     sportOpportunityAbortRef.current?.abort()
     const controller = new AbortController()
     rankAbortRef.current = controller
@@ -2236,6 +2307,179 @@ export default function PotentialPage() {
     }
   }
 
+  const runMonthBoostRanking = async () => {
+    monthBoostAbortRef.current?.abort()
+    rankAbortRef.current?.abort()
+    sportOpportunityAbortRef.current?.abort()
+    const controller = new AbortController()
+    monthBoostAbortRef.current = controller
+    setMonthBoostInProgress(true)
+    setMonthBoostProgress(null)
+    setMonthBoostStatus('')
+    setMonthBoostAllRows([])
+    setMonthBoostVisibleCount(MONTH_BOOST_PAGE_SIZE)
+    setMonthBoostMeta(null)
+
+    const seasonFilter = {
+      excludedSportSeasonKeys,
+      adjustments: rankAdjustments,
+    }
+    const monthBoostSports: Sport[] = monthBoostAllSports
+      ? includedMonthBoostSports
+      : [monthBoostSport as Sport]
+    const caps = monthBoostAllSports
+      ? recommendationCapsForSports(monthBoostSports)
+      : recommendationCapsForSport(monthBoostSport as Sport)
+    const monthLabel = CALENDAR_MONTH_NAMES[monthBoostMonthIdx] ?? 'Other'
+
+    try {
+      if (monthBoostAllSports && monthBoostSports.length === 0) {
+        setMonthBoostStatus('Select at least one sport to rank.')
+        return
+      }
+
+      let catalogCount = 0
+      let skippedOwnedIconic = 0
+      let skippedAdjusted = 0
+      let fetchTrimmed = 0
+      const candidateKeys: string[] = []
+      const seenCandidateKeys = new Set<string>()
+
+      const { bySport, storageConfigured: summariesConfigured } = await loadSportCatalogSummaries(
+        monthBoostSports,
+        (sport) => {
+          const sportCaps = recommendationCapsForSport(sport)
+          return Math.min(sportCaps.bulkFetchCap + 250, 1500)
+        },
+        controller.signal,
+        (sport, sportIndex, total) => {
+          setMonthBoostStatus(
+            monthBoostAllSports
+              ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${total})`
+              : `Loading ${sport} catalog passes…`,
+          )
+        },
+      )
+      if (!summariesConfigured) {
+        setMonthBoostStatus('Shared catalog is not configured yet.')
+        return
+      }
+
+      for (const sport of monthBoostSports) {
+        const results = bySport.get(sport) ?? []
+        catalogCount += results.length
+
+        const selected = selectSummariesForBulkFetch(data, results, { ...seasonFilter, sport })
+        skippedOwnedIconic += selected.skippedOwnedIconic
+        skippedAdjusted += selected.skippedAdjusted
+        fetchTrimmed += selected.fetchTrimmed
+        for (const key of selected.keys) {
+          if (!seenCandidateKeys.has(key)) {
+            seenCandidateKeys.add(key)
+            candidateKeys.push(key)
+          }
+        }
+      }
+
+      if (candidateKeys.length === 0) {
+        setMonthBoostStatus(
+          skippedOwnedIconic > 0
+            ? monthBoostAllSports
+              ? `All eligible catalog passes across every sport are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+              : `All eligible ${monthBoostSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+            : monthBoostAllSports
+              ? 'No player passes with earnings found across any sport.'
+              : `No player passes with earnings found for ${monthBoostSport}.`,
+        )
+        return
+      }
+
+      const assumeIconicKeys = rankAdjustments
+        .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
+        .map((adjustment) => adjustment.externalKey)
+      const allProfileKeys = [...new Set([...candidateKeys, ...assumeIconicKeys])]
+
+      setMonthBoostStatus(
+        monthBoostAllSports
+          ? `Fetching earnings for ${allProfileKeys.length} passes across ${monthBoostSports.length} sport${
+              monthBoostSports.length === 1 ? '' : 's'
+            } (cap ${caps.bulkFetchCap} total)…`
+          : `Fetching earnings for ${allProfileKeys.length} passes${
+              fetchTrimmed > 0
+                ? ` (top ${candidateKeys.length} by base RAX · cap ${caps.bulkFetchCap})`
+                : ''
+            }…`,
+      )
+      const reportBulkProgress = (loaded: number, total: number) => {
+        setMonthBoostStatus(`Fetching earnings ${loaded}/${total} passes…`)
+      }
+      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
+        allProfileKeys,
+        controller.signal,
+        { onBatch: reportBulkProgress },
+      )
+      if (!bulkConfigured) {
+        setMonthBoostStatus('Shared catalog is not configured yet.')
+        return
+      }
+
+      const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+      const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
+      const baselineAdjustmentCount = countAppliedBaselineAdjustments(profileMap, rankAdjustments)
+
+      setMonthBoostStatus(
+        `Analyzing top candidates for ${monthLabel} at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`,
+      )
+      const ranked = await rankCatalogRecommendationsForMonthAsync(
+        baselineData,
+        profiles,
+        monthBoostMonthIdx,
+        {
+          ...seasonFilter,
+          ...(monthBoostAllSports ? { analysisCap: caps.analysisCap } : {}),
+          signal: controller.signal,
+          batchSize: 24,
+          onProgress: setMonthBoostProgress,
+        },
+      )
+
+      setMonthBoostAllRows(ranked.rows)
+      setMonthBoostMeta({
+        calculatedAt: new Date().toISOString(),
+        skippedOwnedIconic: ranked.skippedOwnedIconic + skippedOwnedIconic,
+        skippedAdjusted: skippedAdjusted + ranked.skippedAdjusted,
+        skippedNoRows: ranked.skippedNoRows,
+        catalogCount,
+        fetchTrimmed,
+        prefilterTrimmed: ranked.prefilterTrimmed,
+        baselineAdjustmentCount,
+        monthIdx: monthBoostMonthIdx,
+        month: monthLabel,
+      })
+      const sportLabel = monthBoostAllSports
+        ? monthBoostSports.length === SPORTS.length
+          ? 'all sports'
+          : monthBoostSports.join(', ')
+        : monthBoostSport
+      setMonthBoostStatus(
+        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} for ${monthLabel} (${sportLabel}) · showing top ${Math.min(MONTH_BOOST_PAGE_SIZE, ranked.rows.length)}${
+          excludedSportSeasons.length > 0
+            ? ` · excluding ${excludedSportSeasons.map(formatExcludedSportSeason).join(', ')}`
+            : ''
+        }.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setMonthBoostStatus(error instanceof Error ? error.message : 'Could not rank passes for month.')
+    } finally {
+      if (monthBoostAbortRef.current === controller) {
+        monthBoostAbortRef.current = null
+      }
+      setMonthBoostInProgress(false)
+      setMonthBoostProgress(null)
+    }
+  }
+
   const rankResultsPageTotal = pageCount(recommendationRows.length, RANKING_PAGE_SIZE)
   const paginatedRecommendationRows = useMemo(
     () => paginate(recommendationRows, rankResultsPage, RANKING_PAGE_SIZE),
@@ -2247,6 +2491,14 @@ export default function PotentialPage() {
       setRankResultsPage(rankResultsPageTotal)
     }
   }, [rankResultsPage, rankResultsPageTotal])
+
+  const visibleMonthBoostRows = useMemo(
+    () => monthBoostAllRows.slice(0, monthBoostVisibleCount),
+    [monthBoostAllRows, monthBoostVisibleCount],
+  )
+
+  const monthBoostHasMore =
+    monthBoostVisibleCount < monthBoostAllRows.length
 
   return (
     <div className="page-stack">
@@ -2372,6 +2624,15 @@ export default function PotentialPage() {
                         ? 'from this pass alone'
                         : 'bundle after same-sport overlap'
                     }
+                    passClaimable={
+                      quickAddAnalysis.rows.length === 1
+                        ? {
+                            guaranteed: quickAddAnalysis.rows[0]!.passGuaranteedRax,
+                            withPro: quickAddAnalysis.rows[0]!.passClaimableRax,
+                          }
+                        : undefined
+                    }
+                    passClaimableLabel={`Pass claimable at ${RECOMMENDATION_SIMULATED_RARITY}`}
                   />
                   {quickAddAnalysis.rows.length > 1 ? (
                     <>
@@ -2381,7 +2642,9 @@ export default function PotentialPage() {
                           <li key={row.key}>
                             <strong>{row.name}</strong>
                             <small>
-                              {row.sport} · {row.season} · adds{' '}
+                              {row.sport} · {row.season} ·{' '}
+                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable at{' '}
+                              {RECOMMENDATION_SIMULATED_RARITY} · adds{' '}
                               {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
                             </small>
                           </li>
@@ -2417,6 +2680,257 @@ export default function PotentialPage() {
           )}
         </CollapsiblePanel>
       ) : null}
+
+      <CollapsiblePanel
+        id="month-boost-passes"
+        title="Best passes for a month"
+        description={`Find catalog passes that would add the most net claimable RAX in a specific calendar month. Every candidate is simulated at ${RECOMMENDATION_SIMULATED_RARITY} OTD.`}
+        open={monthBoostOpen}
+        onOpenChange={setMonthBoostOpen}
+        defaultOpen={false}
+      >
+        <p className="import-hint">
+          Ranks player passes from the shared catalog by how much they would increase your net
+          claimable RAX in the selected month (includes Pro bonus claims). Uses the same ranking
+          baseline adjustments and season exclusions as{' '}
+          <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
+            Rank catalog passes
+          </button>
+          . Only the top catalog passes by base RAX are fetched and analyzed.
+          {monthBoostAllSports ? (
+            <>
+              {' '}
+              <strong>All sports</strong> loads every sport&apos;s catalog and ranks across the
+              combined pool — expect long runtimes.
+            </>
+          ) : null}
+        </p>
+
+        <div className="sort-controls">
+          <label className="field inline-field">
+            <span>Month</span>
+            <select
+              value={monthBoostMonthIdx}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => setMonthBoostMonthIdx(Number(event.target.value))}
+            >
+              {CALENDAR_MONTH_NAMES.map((month, index) => (
+                <option key={month} value={index}>
+                  {month}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field inline-field">
+            <span>Sport</span>
+            <select
+              value={monthBoostSport}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => {
+                const next = event.target.value
+                setMonthBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+                if (next !== ALL_SPORTS_RANK) {
+                  setMonthBoostExcludedSports([])
+                }
+              }}
+            >
+              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
+              {SPORTS.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+          </label>
+          {monthBoostAllSports ? (
+            <div className="field inline-field season-multi-select-field">
+              <SeasonMultiSelect
+                options={rankSportOptions}
+                excludedValues={monthBoostExcludedSports}
+                onExcludedValuesChange={(values) => setMonthBoostExcludedSports(values as Sport[])}
+                disabled={catalogAnalysisBusy}
+                label="Sports"
+                menuTitle="Sports"
+                allOptionLabel="All sports"
+                emptyTriggerLabel="No sports"
+                countUnit="sports"
+              />
+              {excludedMonthBoostSportOptions.length > 0 ? (
+                <p className="season-filter-summary">
+                  <span>
+                    Including:{' '}
+                    {includedMonthBoostSports.length > 0
+                      ? includedMonthBoostSports.join(', ')
+                      : 'none'}
+                  </span>
+                  {' · '}
+                  <span>
+                    Excluding: {excludedMonthBoostSportOptions.map((option) => option.label).join(', ')}
+                  </span>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={
+              catalogAnalysisBusy ||
+              (monthBoostAllSports && includedMonthBoostSports.length === 0)
+            }
+            onClick={() => void runMonthBoostRanking()}
+          >
+            {monthBoostInProgress ? 'Ranking…' : `Rank for ${CALENDAR_MONTH_NAMES[monthBoostMonthIdx]}`}
+          </button>
+          {monthBoostInProgress ? (
+            <button className="button" type="button" onClick={cancelMonthBoostRanking}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {monthBoostProgress ? (
+          <p className="import-progress">
+            Analyzing pass {monthBoostProgress.current}/{monthBoostProgress.total} —{' '}
+            {monthBoostProgress.label}
+          </p>
+        ) : null}
+        {monthBoostStatus ? <p className="import-status">{monthBoostStatus}</p> : null}
+
+        {monthBoostAllRows.length > 0 ? (
+          <>
+            {monthBoostMeta ? (
+              <p className="import-hint">
+                Saved {new Date(monthBoostMeta.calculatedAt).toLocaleString()} ·{' '}
+                {monthBoostMeta.catalogCount} catalog pass
+                {monthBoostMeta.catalogCount === 1 ? '' : 'es'} · target {monthBoostMeta.month}
+                {monthBoostMeta.skippedOwnedIconic > 0
+                  ? ` · ${monthBoostMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
+                  : ''}
+                {monthBoostMeta.skippedAdjusted > 0
+                  ? ` · ${monthBoostMeta.skippedAdjusted} skipped by your adjustments`
+                  : ''}
+                {monthBoostMeta.baselineAdjustmentCount > 0
+                  ? ` · ${monthBoostMeta.baselineAdjustmentCount} assumed at ${RECOMMENDATION_SIMULATED_RARITY} in baseline`
+                  : ''}
+                {monthBoostMeta.fetchTrimmed > 0
+                  ? ` · ${monthBoostMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
+                  : ''}
+                {monthBoostMeta.prefilterTrimmed > 0
+                  ? ` · ${monthBoostMeta.prefilterTrimmed} not fully simulated (Iconic 1 pre-filter)`
+                  : ''}
+                . Net Δ includes Pro bonus; guaranteed-only shown for comparison. Click a pass to
+                open detailed analysis below.
+              </p>
+            ) : null}
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Pass</th>
+                    <th>{monthBoostMeta?.month ?? 'Month'} net Δ</th>
+                    <th>Pro bonus</th>
+                    <th>Year-round net Δ</th>
+                    <th>Month gain</th>
+                    <th>Month displaced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleMonthBoostRows.map((row, index) => {
+                    const rankNumber = index + 1
+                    const monthProBonus = row.monthNetDelta - row.monthGuaranteedNetDelta
+                    const yearRoundProBonus = row.netClaimableDelta - row.netGuaranteedDelta
+                    return (
+                      <tr key={row.externalKey}>
+                        <td>{rankNumber}</td>
+                        <td>
+                          <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => loadRecommendationRow(row)}
+                          >
+                            {row.name}
+                          </button>
+                          <br />
+                          <small className="table-sub">
+                            {row.sport} · {row.season}
+                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                          </small>
+                        </td>
+                        <td>
+                          <strong
+                            className={
+                              row.monthNetDelta > 0
+                                ? 'sale-positive'
+                                : row.monthNetDelta < 0
+                                  ? 'sale-negative'
+                                  : ''
+                            }
+                          >
+                            {formatSignedRax(displayRaxValue(row.monthNetDelta))}
+                          </strong>
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.monthGuaranteedNetDelta))}{' '}
+                            guaranteed
+                          </small>
+                        </td>
+                        <td>
+                          {monthProBonus > 0 ? (
+                            <>+{formatRax(displayRaxValue(monthProBonus))}</>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.netGuaranteedDelta))} guaranteed
+                            {yearRoundProBonus > 0
+                              ? ` · +${formatRax(displayRaxValue(yearRoundProBonus))} Pro`
+                              : ''}
+                          </small>
+                        </td>
+                        <td>{formatRax(displayRaxValue(row.monthGain))}</td>
+                        <td>
+                          {row.monthDisplaced > 0
+                            ? `−${formatRax(displayRaxValue(row.monthDisplaced))}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {monthBoostHasMore ? (
+              <div className="button-row">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={catalogAnalysisBusy}
+                  onClick={() =>
+                    setMonthBoostVisibleCount((count) =>
+                      Math.min(count + MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length),
+                    )
+                  }
+                >
+                  Show next {Math.min(MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length - monthBoostVisibleCount)} (
+                  {monthBoostVisibleCount} of {monthBoostAllRows.length})
+                </button>
+              </div>
+            ) : monthBoostAllRows.length > MONTH_BOOST_PAGE_SIZE ? (
+              <p className="import-hint">
+                Showing all {monthBoostAllRows.length} ranked passes.
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </CollapsiblePanel>
 
       <CollapsiblePanel
         id="catalog-recommendations"

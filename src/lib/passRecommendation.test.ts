@@ -18,6 +18,7 @@ import {
   passSeasonIncluded,
   prefilterRecommendationProfiles,
   rankCatalogRecommendations,
+  rankCatalogRecommendationsForMonth,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForAllSports,
   recommendationCapsForSport,
@@ -342,6 +343,38 @@ describe('passRecommendation', () => {
     expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
   })
 
+  it('ranks candidates by net gain in a specific month', () => {
+    const spreadData: RaxTrackerData = {
+      ...data,
+      performances: [
+        perf('p1', 'c1', 30, '2026-03-01'),
+        perf('p2', 'c2', 25, '2026-03-01'),
+        perf('p3', 'c3', 10, '2026-04-15'),
+        perf('p4', 'c1', 40, '2026-04-15'),
+        perf('p5', 'c2', 35, '2026-04-15'),
+      ],
+    }
+
+    const marchStar = catalogProfile('march|2025|NBA', 'March star', [
+      { claimDay: '2026-03-01', baseRaxEarned: 50 },
+    ])
+    const aprilStar = catalogProfile('april|2025|NBA', 'April star', [
+      { claimDay: '2026-04-15', baseRaxEarned: 50 },
+    ])
+
+    const marchRanked = rankCatalogRecommendationsForMonth(spreadData, [marchStar, aprilStar], 2)
+    expect(marchRanked.rows[0]?.name).toBe('March star')
+    expect(marchRanked.rows[0]?.monthNetDelta).toBeGreaterThan(
+      marchRanked.rows[1]?.monthNetDelta ?? 0,
+    )
+
+    const aprilRanked = rankCatalogRecommendationsForMonth(spreadData, [marchStar, aprilStar], 3)
+    expect(aprilRanked.rows[0]?.name).toBe('April star')
+    expect(aprilRanked.rows[0]?.monthNetDelta).toBeGreaterThan(
+      aprilRanked.rows[1]?.monthNetDelta ?? 0,
+    )
+  })
+
   it('greedy bundle re-evaluates after each pick', () => {
     const spreadData: RaxTrackerData = {
       ...data,
@@ -568,6 +601,7 @@ describe('passRecommendation', () => {
     const highImpact = impacts.rows.find((row) => row.key === '101|2026|NBA')
     const lowImpact = impacts.rows.find((row) => row.key === '100|2026|NBA')
     expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
+    expect(highImpact?.passClaimableRax).toBeGreaterThan(0)
     expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
   })
 
