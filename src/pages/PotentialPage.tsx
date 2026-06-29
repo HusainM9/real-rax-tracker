@@ -19,7 +19,6 @@ import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import {
   analyzePotentialCard,
-  netGuaranteedDelta,
   netWithProDelta,
   type PotentialAnalysisResult,
   type PotentialClaimDayBreakdown,
@@ -386,43 +385,15 @@ function signedRaxClass(value: number): string {
   return ''
 }
 
-type NetGainMode = 'guaranteed' | 'with-pro'
-
-function NetGainTabBar({
-  mode,
-  onChange,
-}: {
-  mode: NetGainMode
-  onChange: (mode: NetGainMode) => void
-}) {
-  return (
-    <div className="net-gain-tabs" role="tablist" aria-label="Net gain view">
-      <button
-        type="button"
-        role="tab"
-        className={`net-gain-tab${mode === 'guaranteed' ? ' active' : ''}`}
-        aria-selected={mode === 'guaranteed'}
-        onClick={() => onChange('guaranteed')}
-      >
-        Guaranteed net gain
-      </button>
-      <button
-        type="button"
-        role="tab"
-        className={`net-gain-tab${mode === 'with-pro' ? ' active' : ''}`}
-        aria-selected={mode === 'with-pro'}
-        onClick={() => onChange('with-pro')}
-      >
-        + Pro bonus
-      </button>
-    </div>
-  )
+function claimableProBonusShare(total: number, proBonus: number): string {
+  if (proBonus <= 0) return 'none from this pass'
+  if (total <= 0) return 'Pro bonus only'
+  return `${Math.round((proBonus / total) * 100)}% of claimable`
 }
 
 function CheckerNetGainMetrics({
   baselineGuaranteed,
   baselineWithPro,
-  combinedGuaranteedNetDelta,
   combinedWithProNetDelta,
   baselineLabel = 'Baseline collection',
   afterLabel = 'After simulation',
@@ -440,44 +411,52 @@ function CheckerNetGainMetrics({
   passClaimable?: { guaranteed: number; withPro: number }
   passClaimableLabel?: string
 }) {
-  const [netGainMode, setNetGainMode] = useState<NetGainMode>('guaranteed')
-  const includeProBonus = netGainMode === 'with-pro'
-  const baseline = includeProBonus ? baselineWithPro : baselineGuaranteed
-  const netDelta = includeProBonus ? combinedWithProNetDelta : combinedGuaranteedNetDelta
-  const passTotal = passClaimable
-    ? includeProBonus
-      ? passClaimable.withPro
-      : passClaimable.guaranteed
-    : null
+  const netDelta = combinedWithProNetDelta
+  const passTotal = passClaimable?.withPro ?? null
+  const passGuaranteed = passClaimable?.guaranteed ?? null
+  const passProBonus =
+    passClaimable != null ? Math.max(0, passClaimable.withPro - passClaimable.guaranteed) : null
 
   return (
     <>
-      <NetGainTabBar mode={netGainMode} onChange={setNetGainMode} />
       <p className="import-hint">
-        {includeProBonus
-          ? 'Net gain including Pro bonus slots (always simulated).'
-          : 'Net gain from guaranteed top-2 slots only.'}
+        Net gain includes top 2 guaranteed slots per sport plus any Pro bonus slots (always
+        simulated).
       </p>
       <div className="owned-upgrade-analysis-metrics">
         <div className="metric-card">
           <span>{baselineLabel}</span>
-          <strong>{formatRax(displayRaxValue(baseline))}</strong>
-          <small>{includeProBonus ? 'guaranteed + Pro bonus' : 'guaranteed only'}</small>
+          <strong>{formatRax(displayRaxValue(baselineWithPro))}</strong>
+          <small>
+            {formatRax(displayRaxValue(baselineGuaranteed))} guaranteed · rest Pro bonus
+          </small>
         </div>
         <div className="metric-card">
           <span>{afterLabel}</span>
-          <strong>{formatRax(displayRaxValue(baseline + netDelta))}</strong>
-          <small>{includeProBonus ? 'guaranteed + Pro bonus' : 'guaranteed only'}</small>
+          <strong>{formatRax(displayRaxValue(baselineWithPro + netDelta))}</strong>
+          <small>claimable after simulation</small>
         </div>
-        {passTotal != null ? (
-          <div className="metric-card">
-            <span>{passClaimableLabel}</span>
-            <strong>{formatRax(displayRaxValue(passTotal))}</strong>
-            <small>{includeProBonus ? 'this pass · guaranteed + Pro' : 'this pass · guaranteed only'}</small>
-          </div>
+        {passTotal != null && passGuaranteed != null && passProBonus != null ? (
+          <>
+            <div className="metric-card">
+              <span>{passClaimableLabel}</span>
+              <strong>{formatRax(displayRaxValue(passTotal))}</strong>
+              <small>guaranteed + Pro bonus</small>
+            </div>
+            <div className="metric-card">
+              <span>Pass — guaranteed</span>
+              <strong>{formatRax(displayRaxValue(passGuaranteed))}</strong>
+              <small>top 2 per sport</small>
+            </div>
+            <div className="metric-card">
+              <span>Pass — Pro bonus</span>
+              <strong>{formatRax(displayRaxValue(passProBonus))}</strong>
+              <small>{claimableProBonusShare(passTotal, passProBonus)}</small>
+            </div>
+          </>
         ) : null}
         <div className="metric-card highlight">
-          <span>{includeProBonus ? 'Net gain (+ Pro bonus)' : 'Guaranteed net gain'}</span>
+          <span>Net gain</span>
           <strong className={signedRaxClass(netDelta)}>
             {formatSignedRax(displayRaxValue(netDelta))}
           </strong>
@@ -497,32 +476,16 @@ function PotentialAnalysisResults({
   previewAs: string
   baselineAdjustmentCount?: number
 }) {
-  const [netGainMode, setNetGainMode] = useState<NetGainMode>('guaranteed')
-  const includeProBonus = netGainMode === 'with-pro'
-  const netCollectionDelta = includeProBonus
-    ? netWithProDelta(analysis)
-    : netGuaranteedDelta(analysis)
-  const newCardClaimable = includeProBonus ? analysis.claimableRax : analysis.guaranteedRax
-  const displacedRax = includeProBonus ? analysis.displacedRax : analysis.displacedGuaranteedRax
-  const displacedByCard = includeProBonus
-    ? analysis.displacedByCard
-    : analysis.displacedByCardGuaranteed
+  const netCollectionDelta = netWithProDelta(analysis)
+  const displacedRax = analysis.displacedRax
+  const displacedByCard = analysis.displacedByCard
   const displacedCardCount = displacedByCard.length
 
   return (
     <>
-      <NetGainTabBar mode={netGainMode} onChange={setNetGainMode} />
       <p className="import-hint">
-        {includeProBonus ? (
-          <>
-            Net gain from top 2 per sport <strong>plus</strong> any Pro bonus slots this pass would
-            earn. Pro bonus is always simulated here.
-          </>
-        ) : (
-          <>
-            Net gain from top 2 guaranteed slots per sport only — Pro bonus RAX is excluded.
-          </>
-        )}
+        Net gain from top 2 per sport plus any Pro bonus slots this pass would earn. Pro bonus is
+        always simulated here.
         {previewAs ? (
           <>
             {' '}
@@ -545,14 +508,20 @@ function PotentialAnalysisResults({
 
       <div className="stats-grid potential-summary-grid">
         <article className="stat-card panel">
-          <span>New card — {includeProBonus ? 'claimable' : 'guaranteed'}</span>
-          <strong>{formatRax(displayRaxValue(newCardClaimable))}</strong>
+          <span>New card — claimable</span>
+          <strong>{formatRax(displayRaxValue(analysis.claimableRax))}</strong>
+          <small className="table-sub">Guaranteed + Pro bonus</small>
+        </article>
+        <article className="stat-card panel">
+          <span>Guaranteed claims</span>
+          <strong>{formatRax(displayRaxValue(analysis.guaranteedRax))}</strong>
+          <small className="table-sub">Top 2 per sport</small>
+        </article>
+        <article className="stat-card panel">
+          <span>Pro bonus</span>
+          <strong>{formatRax(displayRaxValue(analysis.proBonusRax))}</strong>
           <small className="table-sub">
-            {includeProBonus && analysis.proBonusRax > 0
-              ? `Includes ${formatRax(displayRaxValue(analysis.proBonusRax))} from Pro bonus`
-              : includeProBonus
-                ? 'Would count in your collection'
-                : 'Top 2 per sport only'}
+            {claimableProBonusShare(analysis.claimableRax, analysis.proBonusRax)}
           </small>
         </article>
         <article className="stat-card panel">
@@ -565,11 +534,10 @@ function PotentialAnalysisResults({
           <strong className="sale-negative">−{formatRax(displayRaxValue(displacedRax))}</strong>
           <small className="table-sub">
             {displacedCardCount} card{displacedCardCount === 1 ? '' : 's'} pushed to overlap
-            {includeProBonus ? '' : ' from guaranteed slots'}
           </small>
         </article>
         <article className="stat-card panel highlight">
-          <span>{includeProBonus ? 'Net gain (+ Pro bonus)' : 'Guaranteed net gain'}</span>
+          <span>Net gain</span>
           <strong className={signedRaxClass(netCollectionDelta)}>
             {formatSignedRax(displayRaxValue(netCollectionDelta))}
           </strong>
@@ -581,20 +549,18 @@ function PotentialAnalysisResults({
         defaultOpen
         label={
           displacedCardCount === 0
-            ? `Most displaced existing cards (none)${includeProBonus ? '' : ' — guaranteed only'}`
+            ? 'Most displaced existing cards (none)'
             : `Most displaced existing cards (${displacedCardCount}) · −${formatRax(displayRaxValue(displacedRax))} RAX lost`
         }
       >
         {displacedCardCount === 0 ? (
           <p className="empty overlap-empty">
-            No currently claimable cards would be pushed to overlap
-            {includeProBonus ? '' : ' from guaranteed slots'}.
+            No currently claimable cards would be pushed to overlap.
           </p>
         ) : (
           <>
             <p className="import-hint">
-              Ranked by total RAX lost across OTD days
-              {includeProBonus ? ' (guaranteed + Pro bonus).' : ' (guaranteed slots only).'}
+              Ranked by total RAX lost across OTD days (guaranteed + Pro bonus).
             </p>
             <div className="table-wrap">
               <table>
@@ -658,7 +624,7 @@ function PotentialAnalysisResults({
         >
           <p className="import-hint">
             Per calendar month: claimable from the new card minus existing cards pushed to overlap
-            {includeProBonus ? ' (guaranteed + Pro bonus).' : ' (guaranteed only).'}.
+            (guaranteed + Pro bonus).
           </p>
           <div className="table-wrap">
             <table>
@@ -671,34 +637,26 @@ function PotentialAnalysisResults({
                 </tr>
               </thead>
               <tbody>
-                {analysis.monthlyNet.map((row) => {
-                  const monthNet = includeProBonus ? row.netDelta : row.guaranteedNetDelta
-                  const monthGain = includeProBonus ? row.potentialGain : row.guaranteedGain
-                  const monthLoss = includeProBonus
-                    ? row.displacedLoss
-                    : row.guaranteedDisplacedLoss
-
-                  return (
+                {analysis.monthlyNet.map((row) => (
                   <tr key={row.monthIdx}>
                     <td>{row.month}</td>
                     <td>
-                      <strong className={signedRaxClass(monthNet)}>
-                        {formatSignedRax(displayRaxValue(monthNet))} RAX
+                      <strong className={signedRaxClass(row.netDelta)}>
+                        {formatSignedRax(displayRaxValue(row.netDelta))} RAX
                       </strong>
                     </td>
                     <td>
-                      {monthGain > 0
-                        ? `+${formatRax(displayRaxValue(monthGain))}`
+                      {row.potentialGain > 0
+                        ? `+${formatRax(displayRaxValue(row.potentialGain))}`
                         : '—'}
                     </td>
                     <td>
-                      {monthLoss > 0
-                        ? `−${formatRax(displayRaxValue(monthLoss))}`
+                      {row.displacedLoss > 0
+                        ? `−${formatRax(displayRaxValue(row.displacedLoss))}`
                         : '—'}
                     </td>
                   </tr>
-                  )
-                })}
+                ))}
               </tbody>
             </table>
           </div>
