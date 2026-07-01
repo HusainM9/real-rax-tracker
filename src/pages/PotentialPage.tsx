@@ -31,7 +31,6 @@ import {
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
   countAppliedBaselineAdjustments,
-  greedyPickBundleAsync,
   iconic20CatalogSelectionKey,
   iconic20OwnedSelectionKey,
   ICONIC_20_SIMULATED_RARITY,
@@ -2048,7 +2047,7 @@ export default function PotentialPage() {
         ? 'Already in ranking baseline adjustments'
         : alreadyOwned
           ? `Already in your collection at ${RECOMMENDATION_SIMULATED_RARITY}+`
-          : `Assume ${RECOMMENDATION_SIMULATED_RARITY} for ranking and recalculate the next ${bundleSize} greedy picks`,
+          : `Assume ${RECOMMENDATION_SIMULATED_RARITY} for ranking, recalculate rankings and the next ${bundleSize} greedy picks`,
       label: alreadyAssumed
         ? 'In baseline'
         : alreadyOwned
@@ -2112,29 +2111,59 @@ export default function PotentialPage() {
       const caps = rankAllSports
         ? recommendationCapsForSports(includedRankSports)
         : recommendationCapsForSport(rankSport as Sport)
+      const baselineAdjustmentCount = countAppliedBaselineAdjustments(
+        profileByKey,
+        nextAdjustments,
+      )
+      const seasonFilter = {
+        excludedSportSeasonKeys,
+        adjustments: nextAdjustments,
+      }
 
-      setRankStatus('Recalculating greedy recommendations…')
-      const bundle = await greedyPickBundleAsync(
+      setRankProgress(null)
+      setRankStatus('Recalculating rankings and greedy recommendations…')
+      const { ranked, bundle } = await rankAndRecommendAsync(
         baselineAfterClaim,
         rankCatalogProfiles,
         bundleSize,
         {
-          excludedSportSeasonKeys,
-          adjustments: nextAdjustments,
+          ...seasonFilter,
           ...(rankAllSports ? { caps } : { sport: rankSport as Sport }),
           batchSize: 24,
+          onProgress: setRankProgress,
         },
       )
 
+      setRecommendationRows(ranked.rows.slice(0, TOP_RANKING_RESULTS))
+      setRankResultsPage(1)
       setRecommendationBundle(bundle)
+      setRecommendationMeta((prev) => ({
+        calculatedAt: new Date().toISOString(),
+        catalogCount: prev?.catalogCount ?? rankCatalogProfiles.length,
+        fetchTrimmed: prev?.fetchTrimmed ?? 0,
+        skippedOwnedIconic: prev?.skippedOwnedIconic ?? ranked.skippedOwnedIconic,
+        skippedAdjusted: prev
+          ? prev.skippedAdjusted + additions.length
+          : ranked.skippedAdjusted,
+        skippedNoRows: ranked.skippedNoRows,
+        prefilterTrimmed: ranked.prefilterTrimmed,
+        baselineAdjustmentCount,
+      }))
+      const rankSports: Sport[] = rankAllSports ? includedRankSports : [rankSport as Sport]
+      const sportLabel = rankAllSports
+        ? rankSports.length === SPORTS.length
+          ? 'all sports'
+          : rankSports.join(', ')
+        : rankSport
       setRankStatus(
-        `Assumed ${label} at ${RECOMMENDATION_SIMULATED_RARITY} (${formatSignedRax(displayRaxValue(combinedNet))} combined net) — ranking only. Showing next ${bundle.picks.length} greedy pick${bundle.picks.length === 1 ? '' : 's'}.`,
+        `Assumed ${label} at ${RECOMMENDATION_SIMULATED_RARITY} (${formatSignedRax(displayRaxValue(combinedNet))} combined net) — ranking only. Recalculated top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)} for ${sportLabel} · next ${bundle.picks.length} greedy pick${bundle.picks.length === 1 ? '' : 's'}.`,
       )
     } catch (error) {
       setRankAdjustments(prevAdjustments)
       setRankStatus(error instanceof Error ? error.message : 'Could not assume recommendations.')
     } finally {
       setBundleClaimInProgress(false)
+      setRankProgress(null)
     }
   }
 
