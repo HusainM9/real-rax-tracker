@@ -857,6 +857,7 @@ export default function PotentialPage() {
   const [rankCatalogProfiles, setRankCatalogProfiles] = useState<CatalogImportProfile[]>([])
   const [bundleClaimInProgress, setBundleClaimInProgress] = useState(false)
   const [bundleClaimSelection, setBundleClaimSelection] = useState<Set<string>>(new Set())
+  const [rankingClaimSelection, setRankingClaimSelection] = useState<Set<string>>(new Set())
   const [rankAdjustments, setRankAdjustments] = useState<RecommendationPassAdjustment[]>([])
   const [ownedQuickAddFilter, setOwnedQuickAddFilter] = useState('')
   const [quickAddAnalysisSelection, setQuickAddAnalysisSelection] = useState<Set<string>>(
@@ -1946,14 +1947,19 @@ export default function PotentialPage() {
     [monthBoostExcludedSports, rankSportOptions],
   )
 
-  const isBundlePickClaimable = (row: PassRecommendationRow) =>
+  const isRecommendationRowClaimable = (row: PassRecommendationRow) =>
     profileByKey.has(row.externalKey) &&
     !isPassInRecommendationAdjustments(row, rankAdjustments) &&
     !isRecommendationOwnedAtIconic(row.externalKey)
 
   const claimableBundlePicks = useMemo(
-    () => recommendationBundle?.picks.filter(isBundlePickClaimable) ?? [],
+    () => recommendationBundle?.picks.filter(isRecommendationRowClaimable) ?? [],
     [recommendationBundle, profileByKey, rankAdjustments, data.cards],
+  )
+
+  const claimableRankingRows = useMemo(
+    () => recommendationRows.filter(isRecommendationRowClaimable),
+    [recommendationRows, profileByKey, rankAdjustments, data.cards],
   )
 
   const visibleBundlePicks = useMemo(
@@ -1976,6 +1982,11 @@ export default function PotentialPage() {
     [bundleClaimSelection, claimableBundlePicks],
   )
 
+  const selectedClaimableRankingRows = useMemo(
+    () => claimableRankingRows.filter((row) => rankingClaimSelection.has(row.externalKey)),
+    [claimableRankingRows, rankingClaimSelection],
+  )
+
   useEffect(() => {
     if (!recommendationBundle) {
       setBundleClaimSelection(new Set())
@@ -1984,11 +1995,25 @@ export default function PotentialPage() {
     setBundleClaimSelection(
       new Set(
         recommendationBundle.picks
-          .filter(isBundlePickClaimable)
+          .filter(isRecommendationRowClaimable)
           .map((row) => row.externalKey),
       ),
     )
   }, [recommendationBundle, profileByKey, rankAdjustments, data.cards])
+
+  useEffect(() => {
+    if (recommendationRows.length === 0) {
+      setRankingClaimSelection(new Set())
+      return
+    }
+    setRankingClaimSelection(
+      new Set(
+        recommendationRows
+          .filter(isRecommendationRowClaimable)
+          .map((row) => row.externalKey),
+      ),
+    )
+  }, [recommendationRows, profileByKey, rankAdjustments, data.cards])
 
   const toggleBundleClaimSelection = (externalKey: string) => {
     setBundleClaimSelection((current) => {
@@ -2000,6 +2025,38 @@ export default function PotentialPage() {
       }
       return next
     })
+  }
+
+  const toggleRankingClaimSelection = (externalKey: string) => {
+    setRankingClaimSelection((current) => {
+      const next = new Set(current)
+      if (next.has(externalKey)) {
+        next.delete(externalKey)
+      } else {
+        next.add(externalKey)
+      }
+      return next
+    })
+  }
+
+  const recommendationClaimButtonProps = (row: PassRecommendationRow) => {
+    const alreadyOwned = isRecommendationOwnedAtIconic(row.externalKey)
+    const alreadyAssumed = isPassInRecommendationAdjustments(row, rankAdjustments)
+    return {
+      disabled: catalogAnalysisBusy || alreadyOwned || alreadyAssumed,
+      title: alreadyAssumed
+        ? 'Already in ranking baseline adjustments'
+        : alreadyOwned
+          ? `Already in your collection at ${RECOMMENDATION_SIMULATED_RARITY}+`
+          : `Assume ${RECOMMENDATION_SIMULATED_RARITY} for ranking and recalculate the next ${bundleSize} greedy picks`,
+      label: alreadyAssumed
+        ? 'In baseline'
+        : alreadyOwned
+          ? 'Owned'
+          : bundleClaimInProgress
+            ? 'Claiming…'
+            : 'Claim',
+    }
   }
 
   const assumeRecommendationPicks = async (rows: PassRecommendationRow[]) => {
@@ -2093,6 +2150,14 @@ export default function PotentialPage() {
     void assumeRecommendationPicks(claimableBundlePicks)
   }
 
+  const claimSelectedRankingRows = () => {
+    void assumeRecommendationPicks(selectedClaimableRankingRows)
+  }
+
+  const claimAllRankingRows = () => {
+    void assumeRecommendationPicks(claimableRankingRows)
+  }
+
   const runCatalogRanking = async () => {
     rankAbortRef.current?.abort()
     monthBoostAbortRef.current?.abort()
@@ -2109,6 +2174,7 @@ export default function PotentialPage() {
     setProfileByKey(new Map())
     setRankCatalogProfiles([])
     setBundleClaimSelection(new Set())
+    setRankingClaimSelection(new Set())
 
     const rankSports: Sport[] = rankAllSports ? includedRankSports : [rankSport]
 
@@ -3517,10 +3583,9 @@ export default function PotentialPage() {
             ) : null}
             <div className="list">
               {visibleBundlePicks.map((row, index) => {
-                const alreadyOwned = isRecommendationOwnedAtIconic(row.externalKey)
-                const alreadyAssumed = isPassInRecommendationAdjustments(row, rankAdjustments)
-                const claimable = isBundlePickClaimable(row)
+                const claimable = isRecommendationRowClaimable(row)
                 const selected = bundleClaimSelection.has(row.externalKey)
+                const claimButton = recommendationClaimButtonProps(row)
                 return (
                   <div className="list-row recommendation-bundle-row" key={row.externalKey}>
                     {claimable ? (
@@ -3555,23 +3620,11 @@ export default function PotentialPage() {
                     <button
                       className="button compact primary"
                       type="button"
-                      disabled={catalogAnalysisBusy || alreadyOwned || alreadyAssumed}
-                      title={
-                        alreadyAssumed
-                          ? 'Already in ranking baseline adjustments'
-                          : alreadyOwned
-                            ? `Already in your collection at ${RECOMMENDATION_SIMULATED_RARITY}+`
-                            : `Assume ${RECOMMENDATION_SIMULATED_RARITY} for ranking and recalculate the next ${bundleSize} greedy picks`
-                      }
+                      disabled={claimButton.disabled}
+                      title={claimButton.title}
                       onClick={() => void claimRecommendationPick(row)}
                     >
-                      {alreadyAssumed
-                        ? 'In baseline'
-                        : alreadyOwned
-                          ? 'Owned'
-                          : bundleClaimInProgress
-                            ? 'Claiming…'
-                            : 'Claim'}
+                      {claimButton.label}
                     </button>
                   </div>
                 )
@@ -3615,10 +3668,62 @@ export default function PotentialPage() {
                 . Click a row to open detailed analysis below.
               </p>
             ) : null}
+            {claimableRankingRows.length > 0 ? (
+              <>
+                <p className="import-hint">
+                  Claim assumes selected passes at {RECOMMENDATION_SIMULATED_RARITY} in your ranking
+                  baseline — nothing is saved to your real collection.
+                </p>
+                <div className="sort-controls bundle-claim-actions">
+                  <button
+                    className="button primary"
+                    type="button"
+                    disabled={
+                      catalogAnalysisBusy ||
+                      selectedClaimableRankingRows.length === 0
+                    }
+                    onClick={claimSelectedRankingRows}
+                  >
+                    {bundleClaimInProgress
+                      ? 'Claiming…'
+                      : `Claim selected (${selectedClaimableRankingRows.length})`}
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={catalogAnalysisBusy || claimableRankingRows.length === 0}
+                    onClick={claimAllRankingRows}
+                  >
+                    Claim all ({claimableRankingRows.length})
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={catalogAnalysisBusy || claimableRankingRows.length === 0}
+                    onClick={() =>
+                      setRankingClaimSelection(
+                        new Set(claimableRankingRows.map((row) => row.externalKey)),
+                      )
+                    }
+                  >
+                    Select all
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={catalogAnalysisBusy || rankingClaimSelection.size === 0}
+                    onClick={() => setRankingClaimSelection(new Set())}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            ) : null}
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
+                    <th className="ranking-claim-col" aria-label="Select for claim" />
                     <th>#</th>
                     <th>Pass</th>
                     <th>Net Δ</th>
@@ -3626,13 +3731,29 @@ export default function PotentialPage() {
                     <th>Displaced</th>
                     <th>Overlap</th>
                     <th>Base RAX</th>
+                    <th>Claim</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedRecommendationRows.map((row, index) => {
                     const rankNumber = (rankResultsPage - 1) * RANKING_PAGE_SIZE + index + 1
+                    const claimable = isRecommendationRowClaimable(row)
+                    const selected = rankingClaimSelection.has(row.externalKey)
+                    const claimButton = recommendationClaimButtonProps(row)
                     return (
                     <tr key={row.externalKey}>
+                      <td className="ranking-claim-col">
+                        {claimable ? (
+                          <label className="bundle-claim-check">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              disabled={catalogAnalysisBusy}
+                              onChange={() => toggleRankingClaimSelection(row.externalKey)}
+                            />
+                          </label>
+                        ) : null}
+                      </td>
                       <td>{rankNumber}</td>
                       <td>
                         <button
@@ -3669,6 +3790,17 @@ export default function PotentialPage() {
                       </td>
                       <td>{formatRax(displayRaxValue(row.overlapRax))}</td>
                       <td>{formatRax(displayRaxValue(row.totalBaseRax))}</td>
+                      <td>
+                        <button
+                          className="button compact primary"
+                          type="button"
+                          disabled={claimButton.disabled}
+                          title={claimButton.title}
+                          onClick={() => void claimRecommendationPick(row)}
+                        >
+                          {claimButton.label}
+                        </button>
+                      </td>
                     </tr>
                     )
                   })}

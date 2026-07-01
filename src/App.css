@@ -1641,6 +1641,14 @@ label.button input.sr-only {
   margin-bottom: 0.75rem;
 }
 
+.ranking-claim-col {
+  width: 2rem;
+}
+
+.ranking-claim-col .bundle-claim-check {
+  justify-content: center;
+}
+
 .list-row,
 .claim-row {
   align-items: center;
