@@ -125,6 +125,7 @@ export default function EntryPage() {
     restoreCardProfile,
     deleteCardProfile,
     importCatalogProfile,
+    addPlannedPassFromCatalog,
   } = useRaxData()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
@@ -154,7 +155,13 @@ export default function EntryPage() {
   const [catalogAddRarityOverrides, setCatalogAddRarityOverrides] = useState<Record<string, string>>(
     {},
   )
+  const [planStatus, setPlanStatus] = useState('')
   const importAbortRef = useRef<AbortController | null>(null)
+
+  const plannedExternalKeys = useMemo(
+    () => new Set((data.plannedPasses ?? []).map((pass) => pass.externalKey)),
+    [data.plannedPasses],
+  )
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
@@ -254,6 +261,16 @@ export default function EntryPage() {
     } finally {
       setCatalogImportingKey('')
     }
+  }
+
+  const addToPlan = (result: CatalogSearchResult, rarityLabel: string) => {
+    setPlanStatus('')
+    const id = addPlannedPassFromCatalog(result, rarityLabel, 'catalog')
+    if (!id) {
+      setPlanStatus(`${result.name} is already on your plan.`)
+      return
+    }
+    setPlanStatus(`Added ${result.name} to your plan. View it on the Plan page.`)
   }
 
   const sortedPerformances = useMemo(
@@ -629,7 +646,10 @@ export default function EntryPage() {
             setCatalogAddRarityOverrides((current) => ({ ...current, [externalKey]: rarity })),
         }}
         onSelect={importFromCatalog}
+        planAdd={{ plannedExternalKeys, onPlanLabel: 'On plan' }}
+        onAddToPlan={addToPlan}
       />
+      {planStatus ? <p className="import-status">{planStatus}</p> : null}
       {catalogStatus ? (
         <section className="panel catalog-add-success">
           <p className="import-status">{catalogStatus}</p>

@@ -12,6 +12,7 @@ const links = [
   { to: '/calendar', label: 'Calendar' },
   { to: '/overlaps', label: 'Overlaps' },
   { to: '/potential', label: 'Potential' },
+  { to: '/plan', label: 'Plan' },
   { to: '/cards', label: 'Cards' },
   { to: '/sell', label: 'If sold' },
   { to: '/help', label: 'Help' },

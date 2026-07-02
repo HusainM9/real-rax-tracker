@@ -10,6 +10,7 @@ import type {
   SavedSellRankings,
   SavedSellRankRow,
   SavedSkippedSellRankPass,
+  PlannedPass,
 } from '../types/rax'
 import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
@@ -30,6 +31,7 @@ export function createEmptyData(): RaxTrackerData {
     savedCardProfiles: [],
     cachedPlayerEarnings: [],
     savedSellRankings: null,
+    plannedPasses: [],
   }
 }
 
@@ -210,6 +212,34 @@ function hydrateSkippedSellRankPass(value: unknown): SavedSkippedSellRankPass | 
   }
 }
 
+function hydratePlannedPass(value: unknown): PlannedPass | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.externalKey !== 'string') {
+    return null
+  }
+  const sport =
+    typeof value.sport === 'string' ? (value.sport as PlannedPass['sport']) : 'Other'
+  const passKind = value.passKind === 'team' ? 'team' : 'player'
+  const source =
+    value.source === 'ranking' ? 'ranking' : value.source === 'manual' ? 'manual' : 'catalog'
+  return {
+    id: value.id,
+    externalKey: value.externalKey,
+    name: typeof value.name === 'string' ? value.name : '',
+    sport,
+    season: typeof value.season === 'string' ? value.season : '',
+    passKind,
+    simulatedRarityLabel:
+      typeof value.simulatedRarityLabel === 'string' && value.simulatedRarityLabel.trim()
+        ? value.simulatedRarityLabel.trim()
+        : 'Iconic 1',
+    totalBaseRax: Number(value.totalBaseRax) || 0,
+    rowCount: Number(value.rowCount) || 0,
+    notes: typeof value.notes === 'string' ? value.notes : '',
+    source,
+    addedAt: typeof value.addedAt === 'string' ? value.addedAt : new Date().toISOString(),
+  }
+}
+
 function hydrateSavedSellRankings(value: unknown): SavedSellRankings | null {
   if (!isRecord(value) || typeof value.calculatedAt !== 'string') return null
   return {
@@ -280,6 +310,11 @@ export function normalizeData(value: unknown): RaxTrackerData {
           )
       : [],
     savedSellRankings: hydrateSavedSellRankings(value.savedSellRankings),
+    plannedPasses: Array.isArray(value.plannedPasses)
+      ? value.plannedPasses
+          .map(hydratePlannedPass)
+          .filter((pass): pass is PlannedPass => pass !== null)
+      : [],
   }
 }
 

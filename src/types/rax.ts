@@ -123,6 +123,22 @@ export type SavedSellRankings = {
   rows: SavedSellRankRow[]
 }
 
+/** Catalog pass saved on the Plan page — lightweight ref, earnings fetched at analysis time. */
+export type PlannedPass = {
+  id: string
+  externalKey: string
+  name: string
+  sport: Sport
+  season: string
+  passKind: 'player' | 'team'
+  simulatedRarityLabel: string
+  totalBaseRax: number
+  rowCount: number
+  notes: string
+  source: 'catalog' | 'ranking' | 'manual'
+  addedAt: string
+}
+
 export type AppSettings = {
   proBonusEnabled: boolean
   savedUsername: string
@@ -139,6 +155,7 @@ export type RaxTrackerData = {
   savedCardProfiles: SavedCardProfile[]
   cachedPlayerEarnings?: CachedPlayerEarningsProfile[]
   savedSellRankings?: SavedSellRankings | null
+  plannedPasses?: PlannedPass[]
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

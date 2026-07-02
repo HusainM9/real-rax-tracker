@@ -1649,6 +1649,98 @@ label.button input.sr-only {
   justify-content: center;
 }
 
+.plan-page .plan-summary-grid {
+  margin-bottom: 0.5rem;
+}
+
+.plan-pass-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+}
+
+.plan-pass-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.plan-pass-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.plan-pass-card-header h3 {
+  margin: 0;
+}
+
+.plan-pass-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 0.2rem 0 0;
+}
+
+.plan-pass-metrics {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.plan-pass-metric {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.plan-pass-metric.highlight {
+  border-color: rgba(228, 160, 36, 0.35);
+  grid-column: 1 / -1;
+}
+
+.plan-pass-metric span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.plan-pass-metric strong {
+  font-size: 1.05rem;
+}
+
+.plan-pass-metric small {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.plan-pass-status.owned {
+  color: var(--accent-soft);
+}
+
+.plan-pass-status.warning {
+  color: #d9a066;
+}
+
+.plan-pass-footer {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin-top: auto;
+}
+
+.plan-empty {
+  text-align: center;
+}
+
+.recommendation-bundle-row {
+  gap: 0.55rem;
+}
+
 .list-row,
 .claim-row {
   align-items: center;

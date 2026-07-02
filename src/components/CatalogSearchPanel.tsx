@@ -23,6 +23,12 @@ export type CatalogSearchPanelProps = {
   emptyHint?: string
   embedded?: boolean
   collectionAdd?: CatalogCollectionAddOptions
+  planAdd?: {
+    plannedExternalKeys?: Set<string>
+    onPlanLabel?: string
+  }
+  onAddToPlan?: (result: CatalogSearchResult, rarityLabel: string) => void | Promise<void>
+  planActionLabel?: string
   onSelect: (result: CatalogSearchResult, rarityLabel: string) => void | Promise<void>
   bundleExternalKeys?: Set<string>
   onToggleBundle?: (result: CatalogSearchResult) => void
@@ -42,6 +48,9 @@ export function CatalogSearchPanel({
   emptyHint,
   embedded = false,
   collectionAdd,
+  planAdd,
+  onAddToPlan,
+  planActionLabel = 'Add to plan',
   onSelect,
   bundleExternalKeys,
   onToggleBundle,
@@ -53,6 +62,7 @@ export function CatalogSearchPanel({
   const [status, setStatus] = useState('')
   const bundleEnabled = Boolean(onToggleBundle)
   const collectionAddEnabled = Boolean(collectionAdd)
+  const planAddEnabled = Boolean(onAddToPlan)
 
   const visibleResults = useMemo(
     () => (passKind === 'all' ? results : results.filter((result) => result.passKind === passKind)),
@@ -190,6 +200,7 @@ export function CatalogSearchPanel({
           {visibleResults.map((profile) => {
             const inBundle = bundleExternalKeys?.has(profile.externalKey) ?? false
             const rowRarity = collectionAdd?.rarityForResult(profile) ?? ''
+            const onPlan = planAdd?.plannedExternalKeys?.has(profile.externalKey) ?? false
             if (collectionAddEnabled && collectionAdd) {
               return (
                 <div className="list-row catalog-search-result-row catalog-add-result-row" key={profile.externalKey}>
@@ -208,6 +219,7 @@ export function CatalogSearchPanel({
                       {profile.latestClaimDay
                         ? ` · latest ${formatClaimDay(profile.latestClaimDay)}`
                         : ''}
+                      {onPlan ? ` · ${planAdd?.onPlanLabel ?? 'On plan'}` : ''}
                     </small>
                   </span>
                   <span className="button-row compact-actions catalog-add-result-actions">
@@ -231,11 +243,25 @@ export function CatalogSearchPanel({
                     <button
                       className="button primary compact"
                       type="button"
-                      disabled={disabled || loadingKey === profile.externalKey}
+                      disabled={disabled || loadingKey === profile.externalKey || onPlan}
                       onClick={() => void onSelect(profile, rowRarity)}
                     >
-                      {loadingKey === profile.externalKey ? loadingLabel : actionLabel}
+                      {onPlan
+                        ? planAdd?.onPlanLabel ?? 'On plan'
+                        : loadingKey === profile.externalKey
+                          ? loadingLabel
+                          : actionLabel}
                     </button>
+                    {planAddEnabled ? (
+                      <button
+                        className={`button compact${onPlan ? ' primary' : ''}`}
+                        type="button"
+                        disabled={disabled || loadingKey === profile.externalKey || onPlan}
+                        onClick={() => void onAddToPlan?.(profile, rowRarity)}
+                      >
+                        {onPlan ? planAdd?.onPlanLabel ?? 'On plan' : planActionLabel}
+                      </button>
+                    ) : null}
                   </span>
                 </div>
               )
@@ -278,6 +304,16 @@ export function CatalogSearchPanel({
                     >
                       {inBundle ? 'In bundle' : bundleActionLabel}
                     </button>
+                    {planAddEnabled ? (
+                      <button
+                        className={`button compact${onPlan ? ' primary' : ''}`}
+                        type="button"
+                        disabled={disabled || onPlan}
+                        onClick={() => void onAddToPlan?.(profile, profile.rarityLabel ?? '')}
+                      >
+                        {onPlan ? planAdd?.onPlanLabel ?? 'On plan' : planActionLabel}
+                      </button>
+                    ) : null}
                   </span>
                 </div>
               )

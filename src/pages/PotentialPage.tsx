@@ -75,6 +75,7 @@ import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
+import { plannedPassFromRecommendationRow } from '../lib/plannedPasses'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
@@ -786,7 +787,7 @@ function applyCatalogProfileToForm(
 const POTENTIAL_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
 
 export default function PotentialPage() {
-  const { data, addPotentialCard, updatePotentialCard, deletePotentialCard } = useRaxData()
+  const { data, addPotentialCard, updatePotentialCard, deletePotentialCard, addPlannedPass, addPlannedPassFromCatalog } = useRaxData()
   const [form, setForm] = useState(EMPTY_FORM)
   const [potentialRows, setPotentialRows] = useState<ParsedRealAppToolsRow[]>([])
   const [status, setStatus] = useState('')
@@ -2056,6 +2057,22 @@ export default function PotentialPage() {
             ? 'Claiming…'
             : 'Claim',
     }
+  }
+
+  const recommendationPlanButtonProps = (row: PassRecommendationRow) => {
+    const onPlan = (data.plannedPasses ?? []).some((pass) => pass.externalKey === row.externalKey)
+    return {
+      disabled: catalogAnalysisBusy || onPlan,
+      title: onPlan ? 'Already on your plan' : 'Save to Plan page',
+      label: onPlan ? 'On plan' : 'Plan',
+    }
+  }
+
+  const addRecommendationToPlan = (row: PassRecommendationRow) => {
+    const id = addPlannedPass(plannedPassFromRecommendationRow(row, 'ranking'))
+    setRankStatus(
+      id ? `Added ${row.name} to your plan.` : `${row.name} is already on your plan.`,
+    )
   }
 
   const assumeRecommendationPicks = async (rows: PassRecommendationRow[]) => {
@@ -3615,6 +3632,7 @@ export default function PotentialPage() {
                 const claimable = isRecommendationRowClaimable(row)
                 const selected = bundleClaimSelection.has(row.externalKey)
                 const claimButton = recommendationClaimButtonProps(row)
+                const planButton = recommendationPlanButtonProps(row)
                 return (
                   <div className="list-row recommendation-bundle-row" key={row.externalKey}>
                     {claimable ? (
@@ -3654,6 +3672,15 @@ export default function PotentialPage() {
                       onClick={() => void claimRecommendationPick(row)}
                     >
                       {claimButton.label}
+                    </button>
+                    <button
+                      className="button compact"
+                      type="button"
+                      disabled={planButton.disabled}
+                      title={planButton.title}
+                      onClick={() => addRecommendationToPlan(row)}
+                    >
+                      {planButton.label}
                     </button>
                   </div>
                 )
@@ -3761,6 +3788,7 @@ export default function PotentialPage() {
                     <th>Overlap</th>
                     <th>Base RAX</th>
                     <th>Claim</th>
+                    <th>Plan</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3769,6 +3797,7 @@ export default function PotentialPage() {
                     const claimable = isRecommendationRowClaimable(row)
                     const selected = rankingClaimSelection.has(row.externalKey)
                     const claimButton = recommendationClaimButtonProps(row)
+                    const planButton = recommendationPlanButtonProps(row)
                     return (
                     <tr key={row.externalKey}>
                       <td className="ranking-claim-col">
@@ -3828,6 +3857,17 @@ export default function PotentialPage() {
                           onClick={() => void claimRecommendationPick(row)}
                         >
                           {claimButton.label}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="button compact"
+                          type="button"
+                          disabled={planButton.disabled}
+                          title={planButton.title}
+                          onClick={() => addRecommendationToPlan(row)}
+                        >
+                          {planButton.label}
                         </button>
                       </td>
                     </tr>
@@ -3974,7 +4014,7 @@ export default function PotentialPage() {
         <CatalogSearchPanel
           embedded
           sectionId="catalog-search-panel"
-          description="Analyze one pass at the solo preview rarity above, or add several to a bundle."
+          description="Analyze one pass at the solo preview rarity above, add several to a bundle, or save to your plan."
           passKind="player"
           actionLabel="Analyze solo"
           bundleActionLabel="Add to bundle"
@@ -3982,6 +4022,20 @@ export default function PotentialPage() {
           disabled={Boolean(catalogLoadingKey)}
           bundleExternalKeys={potentialBundleSelection}
           onToggleBundle={togglePotentialBundle}
+          planAdd={{
+            plannedExternalKeys: new Set((data.plannedPasses ?? []).map((pass) => pass.externalKey)),
+            onPlanLabel: 'On plan',
+          }}
+          onAddToPlan={(result, rarityLabel) => {
+            const id = addPlannedPassFromCatalog(
+              result,
+              rarityLabel || form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
+              'catalog',
+            )
+            setStatus(
+              id ? `Added ${result.name} to your plan.` : `${result.name} is already on your plan.`,
+            )
+          }}
           onSelect={loadFromCatalog}
         />
 

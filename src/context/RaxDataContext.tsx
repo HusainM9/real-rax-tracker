@@ -47,8 +47,12 @@ import type {
   RaxPerformance,
   RaxTrackerData,
   SavedPotentialCard,
+  PlannedPass,
   Sport,
 } from '../types/rax'
+import type { CatalogSearchResult } from '../lib/catalogApi'
+import { plannedPassFromCatalogResult, type PlannedPassInput } from '../lib/plannedPasses'
+import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 
 type CardInput = Pick<
   PlayerCard,
@@ -85,6 +89,14 @@ type RaxDataContextValue = {
   addPotentialCard: (input: PotentialCardInput) => string
   updatePotentialCard: (id: string, input: PotentialCardInput) => void
   deletePotentialCard: (id: string) => void
+  addPlannedPass: (input: PlannedPassInput) => string | null
+  removePlannedPass: (id: string) => void
+  updatePlannedPass: (id: string, patch: Partial<PlannedPassInput>) => void
+  addPlannedPassFromCatalog: (
+    result: CatalogSearchResult,
+    simulatedRarityLabel?: string,
+    source?: PlannedPass['source'],
+  ) => string | null
   saveCardProfile: (cardId: string, rawJson?: string) => void
   restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
   deleteCardProfile: (profileId: string) => void
@@ -341,6 +353,96 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           ...current,
           potentialCards: current.potentialCards.filter((card) => card.id !== id),
         }))
+      },
+      addPlannedPass: (input) => {
+        const externalKey = input.externalKey.trim()
+        if (!externalKey) return null
+        let createdId: string | null = null
+        setData((current) => {
+          if ((current.plannedPasses ?? []).some((pass) => pass.externalKey === externalKey)) {
+            return current
+          }
+          const id = createId('plan')
+          createdId = id
+          return {
+            ...current,
+            plannedPasses: [
+              ...(current.plannedPasses ?? []),
+              {
+                id,
+                externalKey,
+                name: input.name.trim() || 'Planned pass',
+                sport: input.sport,
+                season: input.season.trim(),
+                passKind: input.passKind,
+                simulatedRarityLabel:
+                  input.simulatedRarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
+                totalBaseRax: input.totalBaseRax ?? 0,
+                rowCount: input.rowCount ?? 0,
+                notes: input.notes?.trim() ?? '',
+                source: input.source ?? 'catalog',
+                addedAt: nowIso(),
+              },
+            ],
+          }
+        })
+        return createdId
+      },
+      removePlannedPass: (id) => {
+        setData((current) => ({
+          ...current,
+          plannedPasses: (current.plannedPasses ?? []).filter((pass) => pass.id !== id),
+        }))
+      },
+      updatePlannedPass: (id, patch) => {
+        setData((current) => ({
+          ...current,
+          plannedPasses: (current.plannedPasses ?? []).map((pass) =>
+            pass.id === id
+              ? {
+                  ...pass,
+                  ...patch,
+                  name: patch.name !== undefined ? patch.name.trim() || pass.name : pass.name,
+                  season: patch.season !== undefined ? patch.season.trim() : pass.season,
+                  notes: patch.notes !== undefined ? patch.notes.trim() : pass.notes,
+                  simulatedRarityLabel:
+                    patch.simulatedRarityLabel !== undefined
+                      ? patch.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
+                      : pass.simulatedRarityLabel,
+                }
+              : pass,
+          ),
+        }))
+      },
+      addPlannedPassFromCatalog: (result, simulatedRarityLabel, source) => {
+        const input = plannedPassFromCatalogResult(
+          result,
+          simulatedRarityLabel ?? RECOMMENDATION_SIMULATED_RARITY,
+          source ?? 'catalog',
+        )
+        let createdId: string | null = null
+        setData((current) => {
+          if ((current.plannedPasses ?? []).some((pass) => pass.externalKey === result.externalKey)) {
+            return current
+          }
+          const id = createId('plan')
+          createdId = id
+          return {
+            ...current,
+            plannedPasses: [
+              ...(current.plannedPasses ?? []),
+              {
+                id,
+                ...input,
+                name: input.name.trim() || 'Planned pass',
+                season: input.season.trim(),
+                notes: input.notes.trim(),
+                addedAt: nowIso(),
+              },
+            ],
+          }
+        })
+        return createdId
       },
       saveCardProfile: (cardId, rawJson) => {
         setData((current) => {
