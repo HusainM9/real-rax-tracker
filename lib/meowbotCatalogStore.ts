@@ -1,6 +1,8 @@
 import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
 import {
   canonicalCatalogPassMetadata,
+  claimDayInPassSeason,
+  filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
   resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'
@@ -258,23 +260,41 @@ function filterDailyEarningsForPasses(
   passes: CatalogPassInput[],
   rows: CatalogDailyEarningInput[],
 ): CatalogDailyEarningInput[] {
-  const passByKey = new Set(passes.map((pass) => pass.externalKey))
-  return rows.filter((row) => passByKey.has(row.externalKey))
+  const passByKey = new Map(passes.map((pass) => [pass.externalKey, pass]))
+  return rows.filter((row) => {
+    const pass = passByKey.get(row.externalKey)
+    if (!pass) return false
+    return claimDayInPassSeason(row.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)
+  })
 }
 
-/** Only replace stored earnings for passes that receive new daily rows in this import. */
+/**
+ * Replace stored earnings for passes that receive daily rows in this import (before season
+ * filtering). Keys are cleared even when every incoming day is out-of-season, so leaked
+ * prior-season rows cannot linger under the pass.
+ */
 export function catalogDailyEarningsReplaceKeys(
   passes: CatalogPassInput[],
   dailyEarnings: CatalogDailyEarningInput[],
 ): string[] {
-  const normalizedPasses = passes.map(normalizeCatalogPassInput)
-  const filteredEarnings = filterDailyEarningsForPasses(normalizedPasses, dailyEarnings)
-  return [...new Set(filteredEarnings.map((row) => row.externalKey))]
+  const passKeys = new Set(passes.map((pass) => normalizeCatalogPassInput(pass).externalKey))
+  const keys = new Set<string>()
+  for (const row of dailyEarnings) {
+    if (passKeys.has(row.externalKey)) keys.add(row.externalKey)
+  }
+  for (const pass of passes.map(normalizeCatalogPassInput)) {
+    if (pass.hasEarnings === false) keys.add(pass.externalKey)
+  }
+  return [...keys]
 }
 
-function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> {
+function toPassRow(
+  input: CatalogPassInput,
+): Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & { rarity_label?: string | null } {
   const pass = normalizeCatalogPassInput(input)
-  return {
+  const row: Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & {
+    rarity_label?: string | null
+  } = {
     external_key: pass.externalKey,
     entity_id: pass.entityId,
     pass_kind: pass.passKind,
@@ -282,11 +302,15 @@ function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> 
     season_year: pass.seasonYear,
     season_label: pass.seasonLabel,
     name: pass.name,
-    rarity_label: pass.rarityLabel ?? null,
     has_earnings: pass.hasEarnings !== false,
     total_base_rax: Math.max(0, Number(pass.totalBaseRax) || 0),
     source_updated_at: pass.sourceUpdatedAt ?? null,
   }
+  // Omit rarity on merge-upserts when unset so shop crawls / total-only updates keep existing labels.
+  if (pass.rarityLabel !== undefined) {
+    row.rarity_label = pass.rarityLabel.trim() ? pass.rarityLabel.trim() : null
+  }
+  return row
 }
 
 function toDailyRow(input: CatalogDailyEarningInput): Omit<SupabaseDailyRow, 'cached_at'> {
@@ -489,20 +513,35 @@ function buildImportProfileFromPass(
   pass: SupabasePassRow,
   dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const rows = dailyRowsForPass
+  const seasonYear = resolveCatalogPassSeasonYear(pass.season_year, pass.season_label, pass.sport)
+  const allMappedRows = dailyRowsForPass
     .map((row) => ({
       claimDay: row.claim_day,
       baseRaxEarned: Number(row.base_rax_earned),
       playerBoxScoreId: row.player_box_score_id ?? undefined,
     }))
     .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
-  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+  const mappedRows = filterDailyRowsToPassSeason(
+    allMappedRows,
+    seasonYear,
+    pass.sport,
+    pass.season_label,
+  )
+  const filteredOutOfSeason = mappedRows.length < allMappedRows.length
+  // Prefer season-trimmed rows when prior-season days leaked into the key (NFL end→start
+  // reclassification). Otherwise scale to stored total_base_rax if dailies still drift.
+  const { rows, totalBaseRax } = filteredOutOfSeason
+    ? {
+        rows: mappedRows,
+        totalBaseRax: mappedRows.reduce((sum, row) => sum + row.baseRaxEarned, 0),
+      }
+    : reconcileDailyRowsToPassTotal(Number(pass.total_base_rax) || 0, mappedRows)
   const base = fromPassRow(pass)
   const latestClaimDay = rows.length > 0 ? rows[rows.length - 1]?.claimDay : undefined
   return {
     ...base,
     rowCount: rows.length,
-    storedRowCount: rows.length,
+    storedRowCount: allMappedRows.length,
     totalBaseRax,
     latestClaimDay,
     rows,
@@ -791,11 +830,29 @@ export async function upsertCatalogPasses(passes: CatalogPassInput[]): Promise<n
   )
 }
 
-export async function upsertCatalogDailyEarnings(rows: CatalogDailyEarningInput[]): Promise<number> {
+/**
+ * Upsert daily earnings. When `replaceExternalKeys` is set, those keys are cleared first so
+ * prior-season days cannot accumulate across re-imports (merge-only upserts caused NFL totals
+ * like CMC 2022+2023 = 1033 under a 2023-24 key).
+ */
+export async function upsertCatalogDailyEarnings(
+  rows: CatalogDailyEarningInput[],
+  options?: { replaceExternalKeys?: string[] },
+): Promise<number> {
   const validRows = sortCatalogDailyEarnings(rows)
-  if (validRows.length === 0) return 0
-  return withCatalogWriteLock(() =>
-    upsertInBatches(validRows, DAILY_UPSERT_BATCH_SIZE, upsertCatalogDailyEarningBatch),
-  )
+  const replaceKeys = [
+    ...new Set([
+      ...(options?.replaceExternalKeys ?? []),
+      ...validRows.map((row) => row.externalKey),
+    ]),
+  ]
+  if (validRows.length === 0 && replaceKeys.length === 0) return 0
+  return withCatalogWriteLock(async () => {
+    if (replaceKeys.length > 0) {
+      await deleteDailyEarningsByExternalKeys(replaceKeys)
+    }
+    if (validRows.length === 0) return 0
+    return upsertInBatches(validRows, DAILY_UPSERT_BATCH_SIZE, upsertCatalogDailyEarningBatch)
+  })
 }
 

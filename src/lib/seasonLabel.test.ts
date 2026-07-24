@@ -2,15 +2,25 @@ import { describe, expect, it } from 'vitest'
 import { isCollegeSport, seasonLabelFromPass } from './seasonLabel'
 
 describe('seasonLabelFromPass', () => {
-  it('uses start-year labels for college sports', () => {
+  it('uses start-year labels for CFB and end-year labels for CBB', () => {
     expect(seasonLabelFromPass(2025, 'ncaaf')).toBe('2025-26')
     expect(seasonLabelFromPass(2024, 'cfb')).toBe('2024-25')
-    expect(seasonLabelFromPass(2026, 'ncaam')).toBe('2026-27')
+    expect(seasonLabelFromPass(2026, 'ncaam')).toBe('2025-26')
   })
 
-  it('uses prior-year labels for pro sports', () => {
+  it('uses start-year labels for NFL and NHL', () => {
+    expect(seasonLabelFromPass(2026, 'nfl')).toBe('2026-27')
+    expect(seasonLabelFromPass(2026, 'nhl')).toBe('2026-27')
+  })
+
+  it('uses prior-year labels for NBA', () => {
     expect(seasonLabelFromPass(2026, 'nba')).toBe('2025-26')
-    expect(seasonLabelFromPass(2026, 'nfl')).toBe('2025-26')
+  })
+
+  // Real reports FC passes as season 2025 with seasonDisplay "2025-26".
+  it('uses start-year labels for FC', () => {
+    expect(seasonLabelFromPass(2025, 'fc')).toBe('2025-26')
+    expect(seasonLabelFromPass(2025, 'soccer')).toBe('2025-26')
   })
 
   it('uses calendar year for UFC passes', () => {

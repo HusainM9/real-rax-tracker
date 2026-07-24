@@ -89,14 +89,15 @@ function isCalendarYearSport(raw) {
   return sport === 'ufc' || sport === 'golf' || sport === 'mlb' || sport === 'wnba'
 }
 
-function isCollegeSport(raw) {
+// Real reports the season's first year for these: FC season 2025 is the 2025-26 season.
+function isStartYearSport(raw) {
   const sport = normalizeSport(raw)
-  return sport === 'ncaaf' || sport === 'ncaam'
+  return sport === 'ncaaf' || sport === 'ncaam' || sport === 'fc' || sport === 'soccer'
 }
 
 function seasonLabelFromPass(seasonYear, sportRaw) {
   if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
-  if (isCollegeSport(sportRaw)) return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
+  if (isStartYearSport(sportRaw)) return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
   if (isCalendarYearSport(sportRaw)) return String(seasonYear)
   return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
 }

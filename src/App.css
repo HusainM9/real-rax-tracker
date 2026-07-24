@@ -546,6 +546,99 @@ label.button input.sr-only {
   border-top: 1px solid var(--border);
 }
 
+.admin-page .admin-primary-tools {
+  border-top: none;
+  padding-top: 0;
+  gap: 0.85rem;
+}
+
+.admin-page .admin-sport-toggles {
+  flex-wrap: wrap;
+  gap: 0.65rem 0.85rem;
+}
+
+.admin-page .admin-advanced {
+  margin-top: 0.15rem;
+}
+
+.admin-page .admin-advanced summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  width: fit-content;
+}
+
+.admin-page .admin-advanced .form-grid {
+  margin-top: 0.75rem;
+}
+
+.admin-page .nested-panel {
+  margin-top: 0.35rem;
+}
+
+.admin-page .shop-crawl-resume {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.admin-page .shop-crawl-cursor-grid {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.admin-page .shop-crawl-log {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-page .shop-crawl-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.admin-page .shop-crawl-log-panel {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.admin-page .shop-crawl-log-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.admin-page .shop-crawl-log-line {
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.admin-page .shop-crawl-log-line + .shop-crawl-log-line {
+  margin-top: 0.2rem;
+}
+
+.admin-page .shop-crawl-log-line.is-error {
+  color: var(--bad);
+}
+
+.admin-page .shop-crawl-log-line.is-warn {
+  color: var(--warn);
+}
+
+.admin-page .shop-crawl-log-line.is-ok {
+  color: var(--good);
+}
+
 .form-subsection h3 {
   margin: 0;
   font-size: 0.95rem;

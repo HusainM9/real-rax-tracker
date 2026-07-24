@@ -1,5 +1,30 @@
 export type ImportPassKind = 'player' | 'team'
 
+/** UFC is stored under Real's entity/team shop path but fighters are individual athletes. */
+export function isUfcCatalogSport(sport: string): boolean {
+  return sport.trim().toUpperCase() === 'UFC'
+}
+
+/**
+ * Player-like catalog rows for Potential / Entry search.
+ * Includes UFC fighters even when `pass_kind` is still `team` from shop crawls.
+ */
+export function isPlayerLikeCatalogPass(pass: {
+  passKind: ImportPassKind
+  sport: string
+}): boolean {
+  if (pass.passKind === 'player') return true
+  return pass.passKind === 'team' && isUfcCatalogSport(pass.sport)
+}
+
+/**
+ * Which `pass_kind` values to request when listing catalog candidates for a sport.
+ * UFC shop crawls write `team` (and may later write `player`); merge both.
+ */
+export function catalogCandidatePassKindsForSport(sport: string): ImportPassKind[] {
+  return isUfcCatalogSport(sport) ? ['team', 'player'] : ['player']
+}
+
 /** Real team OTD passes often use abbreviated names like "DEN Nuggets" or "Boise St". */
 export function looksLikeTeamPassName(name: string): boolean {
   const trimmed = name.trim()

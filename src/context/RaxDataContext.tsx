@@ -27,10 +27,12 @@ import {
 import {
   importFromAdminOwnership as runAdminOwnershipImport,
   importFromUsername as runUsernameImport,
+  retryFailedEarnings as runRetryFailedEarnings,
   type UsernameImportOptions,
   type UsernameImportProgress,
   type UsernameImportResult,
 } from '../lib/usernameImport'
+import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { createId } from '../lib/id'
 import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
@@ -107,6 +109,10 @@ type RaxDataContextValue = {
   replaceData: (next: RaxTrackerData) => void
   importFromUsername: (
     username: string,
+    options?: ImportFromUsernameOptions,
+  ) => Promise<UsernameImportResult>
+  retryFailedEarnings: (
+    passes: EarningsBackfillPass[],
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
   importFromAdminOwnership: (
@@ -490,6 +496,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           ...nextData,
           settings: { ...nextData.settings, savedUsername: trimmed },
         })
+        return result
+      },
+      retryFailedEarnings: async (passes, options) => {
+        const { data: nextData, result } = await runRetryFailedEarnings(data, passes, options)
+        setData(nextData)
         return result
       },
       importFromAdminOwnership: async (username, options) => {

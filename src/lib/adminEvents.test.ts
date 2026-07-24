@@ -19,6 +19,7 @@ function emptyResult(overrides: Partial<UsernameImportResult> = {}): UsernameImp
     errors: [],
     passesWithNoEarnings: [],
     passFetchErrors: [],
+    retryableEarningsPasses: [],
     ...overrides,
   }
 }

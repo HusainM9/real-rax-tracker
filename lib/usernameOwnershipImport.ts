@@ -1,4 +1,3 @@
-import { upsertImportOwnershipSnapshot } from './importOwnershipStore'
 import {
   normalizeRealUsername,
   trimOwnershipSnapshotEarnings,
@@ -6,13 +5,6 @@ import {
   type ImportOwnershipPass,
   type ImportOwnershipSnapshot,
 } from './importOwnershipTypes'
-import { importMeowbotUsernameToOwnershipSnapshot } from './meowbotServerImport'
-import {
-  displaySportFromRaw,
-  resolveUsernameImportSeasonLabel,
-  usernameImportExternalKey,
-} from './usernameImportShared'
-import { resolveImportPassKind } from './passKind'
 
 const ADMIN_CLIENT_ID = 'admin-username-ownership'
 
@@ -53,89 +45,4 @@ export function buildUsernameOwnershipSnapshot(
     passes,
     ...(rarities ? { rarities } : {}),
   })
-}
-
-export async function importUsernameOwnershipSnapshot(username: string): Promise<{
-  passesSaved: number
-  rowsSaved: number
-  passesWithNoEarnings: number
-  failures: string[]
-  snapshot: ImportOwnershipSnapshot
-}> {
-  const summary = await importMeowbotUsernameToOwnershipSnapshot(username)
-  const earningsByKey = new Map<string, ImportOwnershipEarningRow[]>()
-
-  for (const row of summary.dailyEarnings) {
-    const list = earningsByKey.get(row.externalKey) ?? []
-    list.push({
-      claimDay: row.claimDay,
-      baseRaxEarned: row.baseRaxEarned,
-      playerBoxScoreId: row.playerBoxScoreId,
-    })
-    earningsByKey.set(row.externalKey, list)
-  }
-
-  const passes: ImportOwnershipPass[] = summary.allPasses.map((pass) => {
-    const sport = displaySportFromRaw(pass.sportRaw)
-    const seasonLabel = resolveUsernameImportSeasonLabel({
-      sportRaw: pass.sportRaw,
-      seasonYear: pass.seasonYear,
-      passSeasonLabel: pass.seasonLabel,
-    })
-    const passKind = resolveImportPassKind({
-      passKind: pass.passKind,
-      name: pass.name,
-      sportRaw: pass.sportRaw,
-      sport,
-    })
-    const externalKey = usernameImportExternalKey(pass.entityId, pass.seasonYear, pass.sportRaw)
-    return meowbotPassToOwnershipPass({
-      name: pass.name,
-      sport,
-      seasonLabel,
-      seasonYear: pass.seasonYear,
-      entityId: pass.entityId,
-      rarityLabel: pass.rarityLabel,
-      externalKey,
-      passKind,
-      earnings: earningsByKey.get(externalKey),
-    })
-  })
-
-  const snapshot = buildUsernameOwnershipSnapshot(username, passes, summary.rarities)
-  if (snapshot.passes.length === 0) {
-    throw new Error(`No passes found for @${snapshot.realUsername}.`)
-  }
-
-  const rowsSaved = snapshot.passes.reduce((sum, pass) => sum + (pass.earnings?.length ?? 0), 0)
-
-  return {
-    passesSaved: snapshot.passes.length,
-    rowsSaved,
-    passesWithNoEarnings: summary.passesWithNoEarnings,
-    failures: summary.failures,
-    snapshot,
-  }
-}
-
-export async function persistUsernameOwnershipSnapshot(username: string): Promise<{
-  passesSaved: number
-  rowsSaved: number
-  passesWithNoEarnings: number
-  failures: string[]
-  realUsername: string
-}> {
-  const { passesSaved, rowsSaved, passesWithNoEarnings, failures, snapshot } =
-    await importUsernameOwnershipSnapshot(username)
-  const stored = await upsertImportOwnershipSnapshot(snapshot)
-  if (!stored) {
-    throw new Error('Ownership cache is not configured (link KV in Vercel).')
-  }
-  return {
-    passesSaved,
-    rowsSaved,
-    passesWithNoEarnings,
-    failures,
-    realUsername: snapshot.realUsername,
-  }
 }

@@ -4,6 +4,7 @@ import {
   dedupeCatalogPassSummaries,
   parseSeasonYearFromExternalKey,
 } from '../../lib/catalogPassIdentity'
+import { isUfcCatalogSport } from '../../lib/passKind'
 import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
@@ -333,11 +334,17 @@ export function netClaimableDelta(result: PotentialAnalysisResult): number {
 
 export { netGuaranteedDelta, netWithProDelta } from './potentialAnalysis'
 
+/** UFC shop rows may still be pass_kind=team; ranking/OTD treat them as players. */
+export function recommendationPassKind(profile: Pick<CatalogImportProfile, 'sport' | 'passKind'>): CatalogPassKind {
+  return isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
+}
+
 export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
   const sport = sportFromCatalog(profile.sport)
+  const passKind = recommendationPassKind(profile)
   return profile.rows.reduce(
     (sum, row) =>
-      sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, profile.passKind),
+      sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, passKind),
     0,
   )
 }
@@ -348,21 +355,30 @@ export function catalogProfileToParsedRows(profile: CatalogImportProfile): Parse
   const rawJson = catalogProfileToJson({ rows: filteredRows })
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
-    passKind: profile.passKind,
+    passKind: recommendationPassKind(profile),
     applyOtdMultiplier: false,
   })
   return parsed.rows
 }
 
+/** Always simulate buy-at Iconic 1 — ignore catalog rarity_label (shop/Meowbot leftovers). */
 export function profileAsIconic1(profile: CatalogImportProfile): CatalogImportProfile {
-  return { ...profile, rarityLabel: RECOMMENDATION_SIMULATED_RARITY }
+  return {
+    ...profile,
+    rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    passKind: recommendationPassKind(profile),
+  }
 }
 
 export function profileAtSimulatedRarity(
   profile: CatalogImportProfile,
   rarityLabel: string,
 ): CatalogImportProfile {
-  return { ...profile, rarityLabel }
+  return {
+    ...profile,
+    rarityLabel,
+    passKind: recommendationPassKind(profile),
+  }
 }
 
 export type RecommendationPassAdjustmentMode = 'assume-iconic-1' | 'exclude'
@@ -507,7 +523,7 @@ export function analyzeCatalogCandidate(
 ): PassRecommendationRow | null {
   const analysis = analyzeCatalogProfilePotential(data, profile)
   if (!analysis) return null
-  return buildPassRecommendationRow(profile, analysis)
+  return buildPassRecommendationRow(profileAsIconic1(profile), analysis)
 }
 
 function analyzeCatalogProfilePotential(
@@ -516,18 +532,20 @@ function analyzeCatalogProfilePotential(
 ): PotentialAnalysisResult | null {
   if (profile.rows.length === 0) return null
 
-  const rows = catalogProfileToParsedRows(profile)
+  // Rank/solo parity: always score at Iconic 1, never the catalog's stored rarity_label.
+  const simulated = profileAsIconic1(profile)
+  const rows = catalogProfileToParsedRows(simulated)
   if (rows.length === 0) return null
 
-  const sport = sportFromCatalog(profile.sport)
+  const sport = sportFromCatalog(simulated.sport)
   return analyzePotentialCard(
     data,
     {
-      name: profile.name,
+      name: simulated.name,
       sport,
-      season: profile.seasonLabel || String(profile.seasonYear),
-      simulatedRarityLabel: profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
-      passKind: profile.passKind,
+      season: simulated.seasonLabel || String(simulated.seasonYear),
+      simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      passKind: simulated.passKind,
     },
     rows,
   )
@@ -538,14 +556,15 @@ function buildPassRecommendationRow(
   analysis: PotentialAnalysisResult,
 ): PassRecommendationRow {
   const sport = sportFromCatalog(profile.sport)
+  const passKind = recommendationPassKind(profile)
   return {
     externalKey: profile.externalKey,
     name: profile.name,
     sport,
     season: profile.seasonLabel || String(profile.seasonYear),
     seasonYear: profile.seasonYear,
-    rarityLabel: profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
-    passKind: profile.passKind,
+    rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    passKind,
     totalBaseRax: profile.totalBaseRax,
     iconic1TotalRax: estimateIconic1TotalRax(profile),
     rowCount: profile.rows.length,

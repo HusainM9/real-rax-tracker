@@ -51,7 +51,7 @@ describe('manualCatalogUpsertPayload', () => {
   it('accepts rows-shaped JSON from the shared catalog editor', () => {
     const payload = manualCatalogUpsertPayload({
       entityId: 200,
-      seasonYear: 2026,
+      seasonYear: 2025,
       sport: 'NFL',
       passKind: 'player',
       name: 'Example',
@@ -62,11 +62,36 @@ describe('manualCatalogUpsertPayload', () => {
 
     expect(payload.dailyEarnings).toEqual([
       {
-        externalKey: '200|2026|NFL',
+        externalKey: '200|2025|NFL',
         claimDay: '2025-09-07',
         baseRaxEarned: 26,
         playerBoxScoreId: null,
       },
+    ])
+  })
+
+  it('drops prior-season NFL days so pasted totals match Real base (not 2022+2023 merge)', () => {
+    const payload = manualCatalogUpsertPayload({
+      entityId: 18877,
+      seasonYear: 2023,
+      sport: 'NFL',
+      passKind: 'player',
+      name: 'Christian McCaffrey',
+      seasonLabel: '2023-24',
+      rawJson: JSON.stringify({
+        earnings: [
+          { day: '2022-09-25', earnings: 409, playerBoxScoreIds: [1] },
+          { day: '2023-09-10', earnings: 300, playerBoxScoreIds: [2] },
+          { day: '2024-02-11', earnings: 324, playerBoxScoreIds: [3] },
+        ],
+        info: { total: 624 },
+      }),
+    })
+
+    expect(payload.pass.totalBaseRax).toBe(624)
+    expect(payload.dailyEarnings.map((row) => row.claimDay)).toEqual([
+      '2023-09-10',
+      '2024-02-11',
     ])
   })
 })

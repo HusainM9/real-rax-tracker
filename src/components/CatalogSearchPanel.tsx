@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { searchCatalog, type CatalogPassKind, type CatalogSearchResult } from '../lib/catalogApi'
+import { isPlayerLikeCatalogPass } from '../lib/passKind'
+
+function catalogPassKindLabel(profile: Pick<CatalogSearchResult, 'passKind' | 'sport'>): string {
+  if (isPlayerLikeCatalogPass(profile)) return 'Player'
+  return profile.passKind === 'team' ? 'Team' : 'Player'
+}
 
 export type CatalogCollectionAddOptions = {
   defaultRarity: string
@@ -64,10 +70,13 @@ export function CatalogSearchPanel({
   const collectionAddEnabled = Boolean(collectionAdd)
   const planAddEnabled = Boolean(onAddToPlan)
 
-  const visibleResults = useMemo(
-    () => (passKind === 'all' ? results : results.filter((result) => result.passKind === passKind)),
-    [passKind, results],
-  )
+  const visibleResults = useMemo(() => {
+    if (passKind === 'all') return results
+    if (passKind === 'player') {
+      return results.filter((result) => isPlayerLikeCatalogPass(result))
+    }
+    return results.filter((result) => result.passKind === passKind)
+  }, [passKind, results])
 
   useEffect(() => {
     const trimmed = query.trim()
@@ -92,7 +101,9 @@ export function CatalogSearchPanel({
           const filtered =
             passKind === 'all'
               ? result.results
-              : result.results.filter((item) => item.passKind === passKind)
+              : passKind === 'player'
+                ? result.results.filter((item) => isPlayerLikeCatalogPass(item))
+                : result.results.filter((item) => item.passKind === passKind)
           setStatus(filtered.length === 0 ? 'No passes match that search in the shared catalog.' : '')
         })
         .catch((error) => {
@@ -183,7 +194,7 @@ export function CatalogSearchPanel({
           {emptyHint ??
             (collectionAddEnabled
               ? 'Type a player name to search the shared catalog — then click Add to collection. No JSON paste needed when daily earnings are available.'
-              : 'Start typing to search the shared Meowbot catalog. Results include daily RAX row counts and total base RAX.')}
+              : 'Start typing to search the shared catalog. Results include daily RAX row counts and total base RAX.')}
         </p>
       ) : searching ? (
         <p className="import-progress">Searching shared catalog…</p>
@@ -207,7 +218,7 @@ export function CatalogSearchPanel({
                   <span>
                     <strong>{profile.name}</strong>
                     <small>
-                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                       {profile.seasonLabel || profile.seasonYear}
                       {profile.rarityLabel ? ` · catalog ${profile.rarityLabel}` : ''} ·{' '}
                       {profile.rowCount} row{profile.rowCount === 1 ? '' : 's'}
@@ -273,7 +284,7 @@ export function CatalogSearchPanel({
                   <span>
                     <strong>{profile.name}</strong>
                     <small>
-                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                       {profile.seasonLabel || profile.seasonYear}
                       {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
                       row{profile.rowCount === 1 ? '' : 's'}
@@ -329,7 +340,7 @@ export function CatalogSearchPanel({
               >
                 <strong>{profile.name}</strong>
                 <small>
-                  {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                  {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                   {profile.seasonLabel || profile.seasonYear}
                   {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
                   row{profile.rowCount === 1 ? '' : 's'}

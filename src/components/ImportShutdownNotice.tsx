@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { realappToolsShutdownLabel, usernameImportDisabled } from '../lib/importShutdown'
+import {
+  realProviderImportEnabled,
+  realappToolsShutdownLabel,
+  usernameImportDisabled,
+} from '../lib/importShutdown'
 
 const DISMISS_KEY = 'real-rax-tracker:import-shutdown-dismissed'
 
@@ -24,7 +28,46 @@ export default function ImportShutdownNotice() {
   const [visible, setVisible] = useState(() => !isDismissed())
   if (!visible) return null
 
+  const realImportActive = realProviderImportEnabled()
   const closed = usernameImportDisabled()
+
+  if (realImportActive) {
+    return (
+      <section className="shutdown-notice" aria-label="Username import notice">
+        <div>
+          <p className="eyebrow">Username import restored</p>
+          <h2>Pass lists now come from Real directly</h2>
+          <p>
+            realapp.tools / Meowbot has shut down, so username import now reads your owned passes
+            from Real itself. Pass names, rarities and seasons come back live.
+          </p>
+          <p>
+            Daily RAX history is not part of this import yet — add it through{' '}
+            <strong>Add card &amp; earnings</strong>, paste realapp.com earnings JSON, or restore
+            from an exported backup.
+          </p>
+        </div>
+        <div className="button-row shutdown-notice-actions">
+          <Link className="button primary" to="/entry">
+            Open Entry
+          </Link>
+          <Link className="button" to="/help">
+            Read guide
+          </Link>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              dismissNotice()
+              setVisible(false)
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="shutdown-notice" aria-label="Username import shutdown notice">

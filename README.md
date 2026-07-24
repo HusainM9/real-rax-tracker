@@ -83,6 +83,41 @@ MEOWBOT_GLOBAL_CATALOG_URL=
 MEOWBOT_GLOBAL_CATALOG_TOKEN=
 ```
 
+### Real pass import (replaces realapp.tools / Meowbot)
+
+Username import reads owned passes straight from Real's own API through the server-side route
+[`api/import/real-passes.ts`](api/import/real-passes.ts), using one shared "bot" account session.
+The browser cannot call Real directly (the CSP in [`vercel.json`](vercel.json) blocks it and preflight
+rejects Real's custom headers), so these are **server-only** variables:
+
+```
+REAL_IMPORT_ENABLED=true
+REAL_AUTH_INFO=          # <userId>!<token>!<deviceId> from the bot session
+REAL_SESSION_TOKEN=      # 16 hex chars
+REAL_DEVICE_UUID=
+REAL_DEVICE_NAME=        # optional
+REAL_DEVICE_TYPE=        # optional, defaults to desktop_web
+REAL_VERSION=            # optional, defaults to 35
+REAL_BASE_URL=           # optional, defaults to https://web.realapp.com
+REAL_IMPORT_TIMEOUT_MS=  # optional
+REAL_IMPORT_CONCURRENCY= # optional, default 2 (upstream Real calls per earnings batch)
+REAL_IMPORT_MAX_RETRIES= # optional, default 5 extra attempts after HTTP 429
+REAL_IMPORT_RETRY_BASE_MS= # optional, default 750
+REAL_IMPORT_RETRY_MAX_MS=  # optional, default 20000
+```
+
+`REAL_AUTH_INFO`, `REAL_SESSION_TOKEN` and `REAL_DEVICE_UUID` are live credentials: set them in the
+Vercel dashboard or `.env.local` only, never in `VITE_*` and never in a commit. The UI switch is
+separate and must be set alongside them:
+
+```
+VITE_REAL_IMPORT_ENABLED=true
+```
+
+When the bot session expires, the route answers `502` with `code: real_session_expired` and the app
+says the import session needs refreshing. Daily RAX is fetched in small batches after the pass list;
+rate limits are retried with backoff, and Entry offers **Retry failed earnings** for any misses.
+
 `ADMIN_PASSWORD` gates the unlisted `/admin` operator area (requires a normal site login first). `KV_*` vars come from linking a **Vercel KV** or **Redis** store to the project — used for central import events and minimal username/pass ownership snapshots. Without KV, the app works normally; admin logs and ownership cache stay empty.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` enable the shared Meowbot RAX catalog used by Entry page search. Create the catalog tables by running [`supabase/meowbot_catalog.sql`](supabase/meowbot_catalog.sql) in the Supabase SQL editor. Catalog imports save pass metadata even when Meowbot returns no daily earnings (`has_earnings = false` on `meowbot_passes`). Filter no-earnings passes in Supabase with `select * from meowbot_passes where has_earnings = false`. Each pass stores summed Meowbot base RAX in `total_base_rax` (for example `select name, total_base_rax from meowbot_passes where season_year = 2018 order by total_base_rax desc`). If you created the tables earlier, run the commented `alter table` statements at the bottom of [`supabase/meowbot_catalog.sql`](supabase/meowbot_catalog.sql) once, including the backfill `update` for `total_base_rax`. Successful username imports and existing browser cached profiles are uploaded into this shared catalog when Supabase is configured, so future users can search/import those RAX rows from the database. `MEOWBOT_GLOBAL_CATALOG_URL` points the admin sync route at a Meowbot export/global endpoint; `MEOWBOT_GLOBAL_CATALOG_TOKEN` is optional and is sent as a bearer token when set.

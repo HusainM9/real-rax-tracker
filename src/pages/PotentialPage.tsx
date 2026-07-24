@@ -70,12 +70,13 @@ import {
   topSportOpportunityFocus,
   type SportOpportunityRow,
 } from '../lib/sportOpportunityAnalysis'
-import { realappToolsShutdownLabel } from '../lib/importShutdown'
+import { realappToolsShutdownLabel, realProviderImportEnabled } from '../lib/importShutdown'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { plannedPassFromRecommendationRow } from '../lib/plannedPasses'
+import { isPlayerLikeCatalogPass, isPlayerPass, isUfcCatalogSport } from '../lib/passKind'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
@@ -111,7 +112,7 @@ async function loadSportCatalogSummaries(
         const sportIndex = waveStart + offset
         onSportStart?.(sport, sportIndex, sports.length)
         const result = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player', limit: summaryLimitForSport(sport) },
+          { sport, limit: summaryLimitForSport(sport) },
           signal,
         )
         return { sport, result }
@@ -759,10 +760,11 @@ function applyCatalogProfileToForm(
   }
 
   const sport = sportFromCatalog(profile.sport)
+  const passKind = isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
   const rawJson = catalogProfileToFilteredJson(profile)
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
-    passKind: profile.passKind,
+    passKind,
   })
   setters.setEditingId(null)
   setters.setPotentialRows(parsed.rows)
@@ -1010,6 +1012,7 @@ export default function PotentialPage() {
           sport: form.sport,
           season: form.season,
           simulatedRarityLabel: form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
+          passKind: 'player',
         },
         potentialRows,
       ),
@@ -1260,7 +1263,7 @@ export default function PotentialPage() {
           `Loading ${sport} catalog… (${sportIndex + 1}/${SPORTS.length})`,
         )
         const { results: summaries, storageConfigured } = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player', limit: SPORT_OPPORTUNITY_SUMMARY_LIMIT },
+          { sport, limit: SPORT_OPPORTUNITY_SUMMARY_LIMIT },
           controller.signal,
         )
         if (!storageConfigured) {
@@ -1391,7 +1394,7 @@ export default function PotentialPage() {
     let cancelled = false
     setExcludeFormSeasonsLoading(true)
 
-    fetchCatalogSeasonYears({ sport: excludeFormSport, passKind: 'player' })
+    fetchCatalogSeasonYears({ sport: excludeFormSport })
       .then(({ seasonYears, storageConfigured }) => {
         if (cancelled) return
         if (!storageConfigured) {
@@ -1428,7 +1431,7 @@ export default function PotentialPage() {
       [...data.cards]
         .filter(
           (card) =>
-            card.passKind !== 'team' &&
+            isPlayerPass(card) &&
             card.externalKey &&
             isIconicBelowLevel(card.rarityLabel, 20),
         )
@@ -1512,7 +1515,7 @@ export default function PotentialPage() {
     () =>
       [...data.cards]
         .filter(
-          (card) => card.passKind !== 'team' && !isAtLeastIconic1Rarity(card.rarityLabel),
+          (card) => isPlayerPass(card) && !isAtLeastIconic1Rarity(card.rarityLabel),
         )
         .sort(
           (a, b) =>
@@ -1795,7 +1798,7 @@ export default function PotentialPage() {
             setAdjustmentSearchResults([])
             return
           }
-          const playerResults = result.results.filter((item) => item.passKind === 'player')
+          const playerResults = result.results.filter((item) => isPlayerLikeCatalogPass(item))
           setAdjustmentSearchResults(playerResults)
           setAdjustmentSearchStatus(
             playerResults.length === 0 ? 'No player passes match that search.' : '',
@@ -1838,7 +1841,7 @@ export default function PotentialPage() {
           }
           const playerResults = result.results.filter(
             (item) =>
-              item.passKind === 'player' &&
+              isPlayerLikeCatalogPass(item) &&
               item.rowCount > 0 &&
               !ownedCollectionExternalKeys.has(item.externalKey),
           )
@@ -3908,7 +3911,11 @@ export default function PotentialPage() {
       <CollapsiblePanel
         className="help-section"
         title="Manual import walkthrough"
-        description={`Username import closes after ${realappToolsShutdownLabel()}. Use shared catalog search below for player passes and RAX, or paste one card at a time from realapp.com.`}
+        description={
+          realProviderImportEnabled()
+            ? 'Username import brings in your pass list, but not daily RAX. Use shared catalog search below for player RAX, or paste one card at a time from realapp.com.'
+            : `Username import closes after ${realappToolsShutdownLabel()}. Use shared catalog search below for player passes and RAX, or paste one card at a time from realapp.com.`
+        }
         defaultOpen={false}
       >
         <ol className="help-list ordered">

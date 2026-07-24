@@ -16,10 +16,23 @@
 -- -- selected — highlight only the repair block you need.
 -- -- ============================================================================
 -- --
--- -- Encoding reference:
--- --   NFL, NBA, NHL, FC  -> season_label '2023-24' means season_year 2024 (END year)
--- --   CBB, CFB           -> season_label '2024-25' means season_year 2024 (START year)
+-- -- Encoding reference (matches seasonYearKindForSport in lib/seasonClaimWindow.ts):
+-- --   NBA, CBB           -> season_label '2023-24' means season_year 2024 (END year)
+-- --   NFL, NHL, CFB, FC  -> season_label '2024-25' means season_year 2024 (START year)
 -- --   MLB, WNBA, Golf, UFC -> season_label '2024' means season_year 2024 (calendar)
+-- --
+-- -- FC moved from END to START on 2026-07-24, confirmed from a live Real pass
+-- -- (season 2025 with seasonDisplay "2025-26"). FC rows written before that date may sit on
+-- -- an external_key one year too high. See "FC encoding audit" at the bottom of this file.
+-- --
+-- -- 2026-07-24 (live Real probes): NFL/NHL moved END -> START; CBB/ncaam moved START -> END.
+-- -- Local username-import external keys use Real's raw `season` and stay stable.
+-- -- Catalog rows previously canonicalized under the old rules may need key rewrites:
+-- --   NFL/NHL old end-year keys (label '2024-25' on season_year 2025) -> start-year 2024
+-- --   CBB old start-year keys (label '2024-25' on season_year 2024) -> end-year 2025
+-- -- WARNING: Steps 1b / 2 / 2b / 2c below still assume the OLD NFL/NHL END-year model.
+-- -- Do not run those repair blocks until they are rewritten for start-year — use Step 1
+-- -- (updated CASE) and the FC-style audit pattern instead.
 
 -- -- Step 1: audit misaligned passes (sport-aware) — READ ONLY, safe to run anytime
 -- with parsed as (
@@ -52,20 +65,20 @@
 --     p.*,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year
---       when sport in ('CBB', 'CFB') then label_start_year
---       when sport in ('NFL', 'NBA', 'NHL', 'FC') then label_end_year
+--       when sport in ('NFL', 'NHL', 'CFB', 'FC') then label_start_year
+--       when sport in ('NBA', 'CBB') then label_end_year
 --       else season_year
 --     end as canonical_season_year,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year::text
---       when sport in ('CBB', 'CFB') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
---       when sport in ('NFL', 'NBA', 'NHL', 'FC') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
+--       when sport in ('NFL', 'NHL', 'CFB', 'FC') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NBA', 'CBB') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
 --       else season_label
 --     end as expected_label_from_year,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_label
---       when sport in ('CBB', 'CFB') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
---       when sport in ('NFL', 'NBA', 'NHL', 'FC') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
+--       when sport in ('NFL', 'NHL', 'CFB', 'FC') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NBA', 'CBB') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
 --       else season_label
 --     end as expected_label_from_label
 --   from parsed p
@@ -89,8 +102,11 @@
 --   )
 -- order by sport, name;
 
--- -- Step 1b: NHL/NFL only — end-year sports where wrong keys merge adjacent seasons
--- -- (e.g. Trocheck 23-24 showing 22-23 earnings on the same external_key)
+-- -- Step 1b: NHL/NFL only — OBSOLETE under start-year encoding (2026-07-24).
+-- -- This block still compares against label_end_year and would push keys the wrong way.
+-- -- Prefer Step 1 above (updated CASE) or an FC-style start-year audit until rewritten.
+-- -- Historical note: previously targeted end-year sports where wrong keys merged seasons
+-- -- (e.g. Trocheck 23-24 showing 22-23 earnings on the same external_key).
 -- with parsed as (
 --   select
 --     external_key,
@@ -604,3 +620,34 @@
 -- where d.external_key = w.external_key
 --   and (d.claim_day < w.window_start or d.claim_day > w.window_end);
 -- commit;
+
+-- -- ============================================================================
+-- -- FC encoding audit — READ ONLY. Run this first to decide whether FC needs a repair.
+-- -- FC is now START-year encoded in the app. Rows written under the old END-year rules
+-- -- sit one year too high (label '2025-26' stored on season_year 2026, key '<id>|2026|FC').
+-- -- If this returns 0 rows, no FC repair is needed and nothing else here applies.
+-- -- If it returns rows, decide before repairing: search results already dedupe by
+-- -- season_label, so the visible impact is duplicate FC rows rather than wrong labels.
+-- -- ============================================================================
+-- -- select
+-- --   external_key,
+-- --   entity_id,
+-- --   name,
+-- --   season_year as stored_season_year,
+-- --   season_label,
+-- --   substring(season_label from 1 for 4)::int as should_be_season_year,
+-- --   entity_id::text || '|' || substring(season_label from 1 for 4) || '|FC' as should_be_external_key,
+-- --   case
+-- --     when external_key = entity_id::text || '|' || substring(season_label from 1 for 4) || '|FC'
+-- --       then 'metadata_only'
+-- --     when exists (
+-- --       select 1 from public.meowbot_passes existing
+-- --       where existing.external_key = p.entity_id::text || '|' || substring(p.season_label from 1 for 4) || '|FC'
+-- --     ) then 'collision'
+-- --     else 'key_move'
+-- --   end as bucket
+-- -- from public.meowbot_passes p
+-- -- where sport = 'FC'
+-- --   and season_label ~ '^\d{4}-\d{2}$'
+-- --   and season_year is distinct from substring(season_label from 1 for 4)::int
+-- -- order by bucket, name;

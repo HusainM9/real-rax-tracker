@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyData } from './storage'
 import { getFailedPlayerPasses, importFromAdminOwnership, importFromUsername } from './usernameImport'
 
@@ -114,6 +114,16 @@ function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
 }
 
 describe('importFromUsername', () => {
+  // These cover the legacy Meowbot provider; pin the flag so a configured .env.local
+  // does not switch them onto the Real provider.
+  beforeEach(() => {
+    vi.stubEnv('VITE_REAL_IMPORT_ENABLED', 'false')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('creates cards and OTD-adjusted performances from mocked API responses', async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = mockFetch as typeof fetch

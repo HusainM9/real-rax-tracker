@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom'
-import { realappToolsShutdownLabel } from '../lib/importShutdown'
+import { realappToolsShutdownLabel, realProviderImportEnabled } from '../lib/importShutdown'
 
 export default function HelpPage() {
+  const realImportActive = realProviderImportEnabled()
+
   return (
     <div className="page-stack">
       <section className="hero-card">
@@ -44,15 +46,24 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>Getting your data in</h2>
         <ol className="help-list ordered">
-          <li>
-            <strong>Username import (until shutdown)</strong> — on Entry, enter your Real @username.
-            Legendary, Mystic, and Iconic player and team passes can be fetched via{' '}
-            <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-              realapp.tools
-            </a>{' '}
-            / Meowbot until {realappToolsShutdownLabel()}. Existing imported cards and earnings
-            remain saved locally after the service closes.
-          </li>
+          {realImportActive ? (
+            <li>
+              <strong>Username import</strong> — on Entry, enter your Real @username. Legendary,
+              Mystic, and Iconic player and team passes are read from Real, with names, rarities and
+              seasons as Real reports them. Daily RAX history is not included yet, so pair it with
+              Add card &amp; earnings below.
+            </li>
+          ) : (
+            <li>
+              <strong>Username import (until shutdown)</strong> — on Entry, enter your Real
+              @username. Legendary, Mystic, and Iconic player and team passes can be fetched via{' '}
+              <a href="https://realapp.tools" target="_blank" rel="noreferrer">
+                realapp.tools
+              </a>{' '}
+              / Meowbot until {realappToolsShutdownLabel()}. Existing imported cards and earnings
+              remain saved locally after the service closes.
+            </li>
+          )}
           <li>
             <strong>Add card &amp; earnings</strong> — on Entry, set up the pass and paste daily
             RAX JSON from realapp.com in one form. Cached player earnings from prior imports can
@@ -67,7 +78,10 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>realapp.tools shutdown</h2>
         <p>
-          realapp.tools / Meowbot is shutting down, so automatic username import will stop working.
+          realapp.tools / Meowbot has shut down.{' '}
+          {realImportActive
+            ? 'Username import now reads pass lists from Real directly, so it works again — but daily RAX history still has to be added manually.'
+            : 'Automatic username import stopped working with it.'}{' '}
           This does <strong>not</strong> delete cards or earnings already imported into this
           browser.
         </p>

@@ -343,6 +343,110 @@ describe('passRecommendation', () => {
     expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
   })
 
+  it('ignores catalog rarity_label and always scores at Iconic 1 (solo/rank parity)', () => {
+    // Shop/Meowbot leftovers: high-base fighter labeled General, lower-base labeled Iconic 1.
+    const silvaLike = {
+      ...catalogProfile('235|2023|UFC', 'Anderson Silva', [
+        { claimDay: '2023-06-01', baseRaxEarned: 100 },
+      ]),
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      passKind: 'team' as const,
+      rarityLabel: 'General',
+    }
+    const belfortLike = {
+      ...catalogProfile('295|2023|UFC', 'Vitor Belfort', [
+        { claimDay: '2023-06-01', baseRaxEarned: 60 },
+      ]),
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      passKind: 'team' as const,
+      rarityLabel: 'Iconic 1',
+    }
+
+    const emptyUfc: RaxTrackerData = {
+      ...data,
+      cards: [],
+      performances: [],
+    }
+
+    const ranked = rankCatalogRecommendations(emptyUfc, [silvaLike, belfortLike])
+    expect(ranked.rows[0]?.name).toBe('Anderson Silva')
+    expect(ranked.rows[0]?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(ranked.rows[1]?.name).toBe('Vitor Belfort')
+    expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
+
+    const solo = analyzePotentialCard(
+      emptyUfc,
+      {
+        name: silvaLike.name,
+        sport: 'UFC',
+        season: silvaLike.seasonLabel,
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        passKind: 'player',
+      },
+      [{ claimDay: '2023-06-01', raxEarned: 100, baseRaxEarned: 100, note: '' }],
+    )
+    const rankedSilva = analyzeCatalogCandidate(emptyUfc, silvaLike)
+    expect(solo).not.toBeNull()
+    expect(rankedSilva).not.toBeNull()
+    expect(rankedSilva!.netClaimableDelta).toBe(netClaimableDelta(solo!))
+  })
+
+  it('keeps unowned and below-Iconic owned passes; only Iconic 1+ owned are skipped', () => {
+    const profiles = [
+      catalogProfile('unowned|2025|NBA', 'Unowned', [
+        { claimDay: '2026-03-01', baseRaxEarned: 40 },
+      ]),
+      {
+        ...catalogProfile('null-rarity|2025|NBA', 'Null rarity catalog', [
+          { claimDay: '2026-03-01', baseRaxEarned: 30 },
+        ]),
+        rarityLabel: undefined,
+      },
+      catalogProfile('owned-common|2025|NBA', 'Owned common', [
+        { claimDay: '2026-03-01', baseRaxEarned: 25 },
+      ]),
+      catalogProfile('owned-iconic|2025|NBA', 'Owned iconic', [
+        { claimDay: '2026-03-01', baseRaxEarned: 50 },
+      ]),
+    ]
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [
+        ...data.cards,
+        card('owned-common', 'Owned common', 'owned-common|2025|NBA', 'Common'),
+        card('owned-iconic', 'Owned iconic', 'owned-iconic|2025|NBA', 'Iconic 2'),
+      ],
+    }
+
+    expect(shouldSkipRecommendationPass(ownedData, profiles[0]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[1]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[2]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[3]!)).toBe(true)
+
+    const filtered = filterRecommendationProfiles(ownedData, profiles)
+    expect(filtered.skippedOwnedIconic).toBe(1)
+    expect(filtered.candidates.map((item) => item.externalKey).sort()).toEqual([
+      'null-rarity|2025|NBA',
+      'owned-common|2025|NBA',
+      'unowned|2025|NBA',
+    ])
+
+    const selected = selectSummariesForBulkFetch(
+      ownedData,
+      profiles.map((profile) => summary(profile.externalKey, profile.name, profile.totalBaseRax)),
+    )
+    expect(selected.skippedOwnedIconic).toBe(1)
+    expect(selected.keys.sort()).toEqual([
+      'null-rarity|2025|NBA',
+      'owned-common|2025|NBA',
+      'unowned|2025|NBA',
+    ])
+  })
+
   it('ranks candidates by net gain in a specific month', () => {
     const spreadData: RaxTrackerData = {
       ...data,

@@ -27,13 +27,24 @@ function isCalendarYearSportNormalized(normalized: string): boolean {
   return upper === 'MLB' || upper === 'WNBA' || upper === 'GOLF' || upper === 'UFC'
 }
 
+/**
+ * Sports where Real's `season` is the season's first calendar year.
+ * Confirmed from live Real `season` + `seasonDisplay` probes:
+ * - NFL/NHL/CFB/FC: start-year (e.g. NFL `2024` + `"2024-25"`)
+ * - NBA/CBB: end-year (handled by the default below)
+ */
+function isStartYearSportNormalized(normalized: string): boolean {
+  const upper = normalized.toUpperCase()
+  return upper === 'NFL' || upper === 'NHL' || upper === 'CFB' || upper === 'FC'
+}
+
 /** How Real encodes `season_year` on a pass for each sport. */
 export function seasonYearKindForSport(sport: string): SeasonYearKind {
   const normalized = normalizeSportForSeasonWindow(sport)
   if (isCalendarYearSportNormalized(normalized)) {
     return 'calendar'
   }
-  if (normalized === 'CBB' || normalized === 'CFB') {
+  if (isStartYearSportNormalized(normalized)) {
     return 'start'
   }
   return 'end'
@@ -97,12 +108,15 @@ export function passSeasonDateWindow(seasonYear: number, sport: string): PassSea
   switch (seasonYearKindForSport(sport)) {
     case 'calendar':
       return { start: `${seasonYear}-01-01`, end: `${seasonYear}-12-31` }
-    case 'start':
+    case 'start': {
+      const normalized = normalizeSportForSeasonWindow(sport)
+      if (normalized === 'NFL') return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-04-30` }
+      if (normalized === 'NHL') return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-06-30` }
       return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-06-30` }
+    }
     case 'end': {
       const normalized = normalizeSportForSeasonWindow(sport)
-      if (normalized === 'NFL') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-04-30` }
-      if (normalized === 'NHL') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-06-30` }
+      if (normalized === 'CBB') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-06-30` }
       return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-07-31` }
     }
   }
@@ -136,18 +150,20 @@ export function resolveCatalogPassSeasonYear(
 /** Expected display label for a stored season_year (Real / Meowbot conventions). */
 export function expectedSeasonLabelFromYear(seasonYear: number, sport: string): string {
   if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
-  const normalized = normalizeSportForSeasonWindow(sport)
-  if (isCalendarYearSportNormalized(normalized)) {
-    return String(seasonYear)
+  switch (seasonYearKindForSport(sport)) {
+    case 'calendar':
+      return String(seasonYear)
+    case 'start':
+      return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
+    case 'end':
+      return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
   }
-  if (normalized === 'CBB' || normalized === 'CFB') {
-    return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
-  }
-  return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
 }
 
 export function sportSkipsClaimDaySeasonFilter(sport: string): boolean {
-  return normalizeSportForSeasonWindow(sport) === 'FC'
+  const normalized = normalizeSportForSeasonWindow(sport)
+  // FC spans competitions; UFC Real season 2023 is an All-time sentinel (not a calendar year).
+  return normalized === 'FC' || normalized === 'UFC'
 }
 
 /** Label used when fetching/importing earnings — aligned split labels are kept; others use canonical season_year. */

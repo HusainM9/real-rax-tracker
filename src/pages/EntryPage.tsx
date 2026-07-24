@@ -1,7 +1,12 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
-import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImportEnabled } from '../lib/importShutdown'
+import {
+  usernameImportDisabled,
+  realappToolsShutdownLabel,
+  realProviderImportEnabled,
+  testAdminCacheImportEnabled,
+} from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
@@ -17,6 +22,7 @@ import {
   type FailedPlayerPassImport,
   type UsernameImportProgress,
 } from '../lib/usernameImport'
+import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -120,6 +126,7 @@ export default function EntryPage() {
     updatePerformance,
     deletePerformance,
     importFromUsername,
+    retryFailedEarnings,
     importFromAdminOwnership,
     saveCardProfile,
     restoreCardProfile,
@@ -148,6 +155,8 @@ export default function EntryPage() {
   const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
     FailedPlayerPassImport[]
   >([])
+  const [retryableEarningsPasses, setRetryableEarningsPasses] = useState<EarningsBackfillPass[]>([])
+  const [retryingFailedEarnings, setRetryingFailedEarnings] = useState(false)
   const [existingCardQuery, setExistingCardQuery] = useState('')
   const [catalogImportingKey, setCatalogImportingKey] = useState('')
   const [catalogStatus, setCatalogStatus] = useState('')
@@ -166,6 +175,7 @@ export default function EntryPage() {
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
   const testingAdminCache = testAdminCacheImportEnabled()
+  const realImportActive = realProviderImportEnabled()
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -465,6 +475,7 @@ export default function EntryPage() {
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
     setUsernameImportFailedPasses([])
+    setRetryableEarningsPasses([])
 
     try {
       const result = await importFromUsername(username, {
@@ -489,6 +500,7 @@ export default function EntryPage() {
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
       setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
       void reportImportAdminEvents(username, result)
       if (result.errors.length > 0) {
         setCardEntry((current) => ({
@@ -529,6 +541,49 @@ export default function EntryPage() {
     importAbortRef.current?.abort()
   }
 
+  const retryFailedEarningsImport = async () => {
+    if (retryableEarningsPasses.length === 0) return
+
+    importAbortRef.current?.abort()
+    const controller = new AbortController()
+    importAbortRef.current = controller
+    setRetryingFailedEarnings(true)
+    setUsernameImportStatus('')
+    setUsernameImportProgress(null)
+
+    try {
+      const result = await retryFailedEarnings(retryableEarningsPasses, {
+        signal: controller.signal,
+        onProgress: setUsernameImportProgress,
+      })
+      const failedPlayerPasses = getFailedPlayerPasses(result)
+      setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
+      const remaining = result.retryableEarningsPasses.length
+      setUsernameImportStatus(
+        remaining > 0
+          ? `Retry imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'}; ${remaining} pass${remaining === 1 ? '' : 'es'} still need another try.`
+          : `Retry imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} — all failed earnings resolved.`,
+      )
+      if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
+        setShowHeavyTables(false)
+      }
+      setPerformancesPage(1)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setUsernameImportStatus('Retry cancelled.')
+      } else {
+        setUsernameImportStatus(
+          error instanceof Error ? error.message : 'Retry failed. Try again.',
+        )
+      }
+    } finally {
+      setRetryingFailedEarnings(false)
+      setUsernameImportProgress(null)
+      importAbortRef.current = null
+    }
+  }
+
   const importFromAdminSnapshot = async () => {
     const username = usernameImport.username.trim()
     if (!username) return
@@ -536,12 +591,14 @@ export default function EntryPage() {
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
     setUsernameImportFailedPasses([])
+    setRetryableEarningsPasses([])
     try {
       const result = await importFromAdminOwnership(username, {
         onProgress: setUsernameImportProgress,
       })
       const failedPlayerPasses = getFailedPlayerPasses(result)
       setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
       const skipNote =
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
@@ -668,18 +725,33 @@ export default function EntryPage() {
         <div className="section-heading">
           <div>
             <h2>Import from Real username</h2>
-            <p>
-              Enter your @username to fetch Legendary+ player and team passes while realapp.tools
-              is still online. Automatic import closes after {realappToolsShutdownLabel()}; existing
-              local data and backups keep working. Data via{' '}
-              <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-                realapp.tools
-              </a>{' '}
-              / Meowbot — no Real API key needed.
-            </p>
+            {realImportActive ? (
+              <p>
+                Enter your @username to fetch your Legendary+ player and team passes straight from
+                Real. Pass names, rarities and seasons come from Real itself — no API key of your
+                own is needed. Daily RAX is fetched afterward in small batches (cache-first); if a
+                few passes hit a rate limit, use Retry failed earnings without redoing the pass list.
+              </p>
+            ) : (
+              <p>
+                Enter your @username to fetch Legendary+ player and team passes while realapp.tools
+                is still online. Automatic import closes after {realappToolsShutdownLabel()}; existing
+                local data and backups keep working. Data via{' '}
+                <a href="https://realapp.tools" target="_blank" rel="noreferrer">
+                  realapp.tools
+                </a>{' '}
+                / Meowbot — no Real API key needed.
+              </p>
+            )}
           </div>
           <span className="badge">
-            {testingAdminCache ? 'Admin cache test' : importDisabled ? 'Closed' : 'Until shutdown'}
+            {testingAdminCache
+              ? 'Admin cache test'
+              : realImportActive
+                ? 'Live'
+                : importDisabled
+                  ? 'Closed'
+                  : 'Until shutdown'}
           </span>
         </div>
         <div className="form-grid">
@@ -688,7 +760,7 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting || adminSnapshotImporting}
+              disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
@@ -696,32 +768,34 @@ export default function EntryPage() {
           </label>
         </div>
         <p className="import-hint">
-          Imports Legendary, Mystic, and Iconic passes into your collection, and caches any player
-          earnings it can fetch to speed up future manual Entry and Potential checks. Your username
-          is saved in this browser after a successful import.
+          Imports Legendary, Mystic, and Iconic passes into your collection
+          {realImportActive
+            ? '. Multiple copies of the same pass collapse into one card at its best rarity'
+            : ', and caches any player earnings it can fetch to speed up future manual Entry and Potential checks'}
+          . Your username is saved in this browser after a successful import.
         </p>
         {importDisabled ? (
           <>
             <section className="panel import-hint" aria-labelledby="admin-cache-info-heading">
               <h3 id="admin-cache-info-heading">Recovering from admin cache</h3>
               <p>
-                If you never imported while Meowbot was online, use{' '}
+                If you never imported while Meowbot was online, try{' '}
                 <strong>Import from admin cached passes</strong> below with your Real @username.
-                Admin may have saved a full snapshot before shutdown.
+                Snapshots only exist when a prior import reported ownership to the operator cache.
               </p>
               <ul className="help-list">
                 <li>
-                  Data may <strong>not be up to date</strong> — it reflects what was saved when admin
-                  ran the import, not live Meowbot.
+                  Data may <strong>not be up to date</strong> — it reflects what was saved when the
+                  snapshot was reported, not a live Real fetch.
                 </li>
                 <li>
                   Some RAX or pass values <strong>could be wrong</strong>. Treat totals as estimates
                   until you verify against Real.
                 </li>
                 <li>
-                  Everything is tied to the <strong>Real @username</strong> admin used at import time
-                  (before Meowbot shut down). Use that exact username below — a different spelling
-                  will not find your snapshot.
+                  Everything is tied to the <strong>Real @username</strong> used when the snapshot
+                  was saved. Use that exact username below — a different spelling will not find your
+                  snapshot.
                 </li>
                 <li>
                   After importing, set up a <strong>cloud sync PIN</strong> on the{' '}
@@ -731,8 +805,9 @@ export default function EntryPage() {
               </ul>
             </section>
             <p className="import-status">
-              Automatic username import is closed. If admin did not import your username, search the{' '}
-              <a href="#catalog-search">shared catalog</a> above instead. Existing local data stays
+              Automatic username import is closed. If no ownership snapshot exists for your
+              username, search the <a href="#catalog-search">shared catalog</a> above instead.
+              Existing local data stays
               in this browser — use Export JSON on Dashboard for backups.
             </p>
           </>
@@ -743,6 +818,7 @@ export default function EntryPage() {
             type="submit"
             disabled={
               usernameImporting ||
+              retryingFailedEarnings ||
               adminSnapshotImporting ||
               importDisabled ||
               usernameImport.username.trim().length === 0
@@ -754,13 +830,18 @@ export default function EntryPage() {
             <button
               className="button"
               type="button"
-              disabled={usernameImporting || adminSnapshotImporting || usernameImport.username.trim().length === 0}
+              disabled={
+                usernameImporting ||
+                retryingFailedEarnings ||
+                adminSnapshotImporting ||
+                usernameImport.username.trim().length === 0
+              }
               onClick={() => void importFromAdminSnapshot()}
             >
               {adminSnapshotImporting ? 'Importing cached passes…' : 'Import from admin cached passes'}
             </button>
           ) : null}
-          {usernameImporting ? (
+          {usernameImporting || retryingFailedEarnings ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>
               Cancel
             </button>
@@ -773,49 +854,56 @@ export default function EntryPage() {
           <p className="import-progress">
             {usernameImportProgress.phase === 'resolving'
               ? usernameImportProgress.label
-              : `Fetching pass ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`}
+              : usernameImportProgress.phase === 'earnings'
+                ? `Daily RAX ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`
+                : `Fetching pass ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`}
           </p>
         ) : null}
         {usernameImportStatus ? <p className="import-status">{usernameImportStatus}</p> : null}
-        {usernameImportFailedPasses.length > 0 && !usernameImporting ? (
+        {usernameImportFailedPasses.length > 0 && !usernameImporting && !retryingFailedEarnings ? (
           <section className="import-failures">
             <p className="import-hint">
               <strong>
                 {usernameImportFailedPasses.length} player pass
                 {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
               </strong>{' '}
-              Use <a href="#catalog-search">shared catalog search</a> or{' '}
-              <a href="#manual-card-entry">Manual add</a> below to finish these passes
+              {retryableEarningsPasses.length > 0 ? (
+                <>
+                  Use <strong>Retry failed earnings</strong> to re-fetch only the misses (pass list
+                  stays put; already-cached passes return instantly).
+                </>
+              ) : (
+                <>
+                  Use <a href="#catalog-search">shared catalog search</a> or{' '}
+                  <a href="#manual-card-entry">Manual add</a> below to finish these passes.
+                </>
+              )}
               {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings') ? (
                 <>
                   {' '}
-                  (cards with <strong>no earnings</strong> were still created — select the card, paste
-                  JSON, or add RAX day by day)
-                </>
-              ) : null}
-              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
-                <>
-                  {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings')
-                    ? '; for fetch failures you can paste from'
-                    : ' — paste from'}
-                </>
-              ) : null}
-              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
-                <>
-                  {' '}
-                  <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                    realapp.com
-                  </a>{' '}
-                  or restore a{' '}
+                  Cards with <strong>no earnings</strong> were still created — select the card, paste
+                  JSON, or add RAX day by day via{' '}
                   <button className="link-button" type="button" onClick={openCardEntryForExisting}>
-                    saved profile
+                    Manual add
                   </button>
+                  .
                 </>
-              ) : (
-                <> — search the shared catalog above or paste from realapp.com if you have it</>
-              )}
-              .
+              ) : null}
             </p>
+            {retryableEarningsPasses.length > 0 ? (
+              <div className="button-row">
+                <button
+                  className="button primary"
+                  type="button"
+                  disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
+                  onClick={() => void retryFailedEarningsImport()}
+                >
+                  {retryingFailedEarnings
+                    ? 'Retrying…'
+                    : `Retry failed earnings (${retryableEarningsPasses.length})`}
+                </button>
+              </div>
+            ) : null}
             <div className="table-wrap">
               <table>
                 <thead>
@@ -843,7 +931,11 @@ export default function EntryPage() {
                       <td>{pass.sport}</td>
                       <td>{pass.season || '—'}</td>
                       <td>
-                        {pass.reason === 'no_earnings' ? 'No earnings (card added)' : 'Fetch failed'}
+                        {pass.reason === 'no_earnings'
+                          ? 'No earnings (card added)'
+                          : pass.retryable
+                            ? 'Fetch failed (retryable)'
+                            : 'Fetch failed'}
                         <br />
                         <small className="table-sub">{pass.detail}</small>
                       </td>
@@ -854,7 +946,7 @@ export default function EntryPage() {
             </div>
           </section>
         ) : null}
-        {usernameImportStatus && !usernameImporting ? (
+        {usernameImportStatus && !usernameImporting && !retryingFailedEarnings ? (
           <div className="button-row">
             <Link className="button primary" to="/">
               View Dashboard
