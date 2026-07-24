@@ -31,6 +31,7 @@ import {
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
   countAppliedBaselineAdjustments,
+  DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
   iconic20CatalogSelectionKey,
   iconic20OwnedSelectionKey,
   ICONIC_20_SIMULATED_RARITY,
@@ -155,6 +156,14 @@ type ExcludedSportSeason = {
 
 function formatExcludedSportSeason(entry: ExcludedSportSeason): string {
   return `${entry.sport} · ${entry.seasonLabel}`
+}
+
+function createDefaultExcludedSportSeasons(): ExcludedSportSeason[] {
+  return DEFAULT_RANK_EXCLUDED_SPORT_SEASONS.map((entry) => ({
+    key: sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+    sport: entry.sport,
+    seasonLabel: entry.seasonLabel,
+  }))
 }
 
 const EMPTY_FORM = {
@@ -880,7 +889,9 @@ export default function PotentialPage() {
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
-  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>([])
+  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>(
+    createDefaultExcludedSportSeasons,
+  )
   const [excludeFormSport, setExcludeFormSport] = useState<Sport>('NFL')
   const [excludeFormSeasonLabel, setExcludeFormSeasonLabel] = useState('')
   const [excludeFormSeasonOptions, setExcludeFormSeasonOptions] = useState<CatalogSportSeasonOption[]>([])
@@ -1604,6 +1615,21 @@ export default function PotentialPage() {
     })
   }, [ownedAdjustableCards, ownedQuickAddFilter])
 
+  const bundleEligibleFilteredOwnedCards = useMemo(
+    () =>
+      filteredOwnedQuickAddCards.filter(
+        (card): card is (typeof ownedAdjustableCards)[number] & { externalKey: string } =>
+          Boolean(card.externalKey),
+      ),
+    [filteredOwnedQuickAddCards],
+  )
+
+  const allFilteredOwnedInBundle =
+    bundleEligibleFilteredOwnedCards.length > 0 &&
+    bundleEligibleFilteredOwnedCards.every((card) =>
+      quickAddAnalysisSelection.has(card.externalKey),
+    )
+
   const addRankAdjustment = (
     result: Pick<CatalogSearchResult, 'externalKey' | 'name' | 'sport' | 'seasonLabel' | 'seasonYear'>,
     mode: RecommendationPassAdjustmentMode = 'assume-iconic-1',
@@ -1704,6 +1730,13 @@ export default function PotentialPage() {
       }
       return next
     })
+  }
+
+  const addAllFilteredOwnedToBundle = () => {
+    if (bundleEligibleFilteredOwnedCards.length === 0) return
+    setQuickAddAnalysisSelection(
+      new Set(bundleEligibleFilteredOwnedCards.map((card) => card.externalKey)),
+    )
   }
 
   const addOwnedCardToBaseline = (card: (typeof ownedAdjustableCards)[number]) => {
@@ -3590,13 +3623,13 @@ export default function PotentialPage() {
         <CollapsiblePanel
           className="nested-panel recommendation-exclusions"
           title="Exclude sport + season"
-          description="Skip catalog passes for a sport/season. Stays when you change the rank sport."
+          description="Skip catalog passes for a sport/season. NFL 2022-23 starts excluded by default; remove it below if you want it ranked."
           badge={
             excludedSportSeasons.length > 0
               ? `${excludedSportSeasons.length} excluded`
               : undefined
           }
-          defaultOpen={false}
+          defaultOpen={excludedSportSeasons.length > 0}
         >
           <div className="sort-controls">
             <label className="field inline-field">
@@ -4055,20 +4088,24 @@ export default function PotentialPage() {
           id="owned-iconic-upgrade"
           className="owned-iconic-upgrade-analyzer"
           title="Your collection"
-          description={`What-if owned passes upgraded to ${RECOMMENDATION_SIMULATED_RARITY}. Solo or bundle.`}
+          description={`Check owned passes as if upgraded to ${RECOMMENDATION_SIMULATED_RARITY}.`}
           badge={
             quickAddAnalysisSelection.size > 0
-              ? `${quickAddAnalysisSelection.size} selected`
-              : undefined
+              ? `${quickAddAnalysisSelection.size} in bundle`
+              : `${ownedAdjustableCards.length} eligible`
           }
           defaultOpen={false}
         >
-          <p className="import-hint">
-            Uses saved earnings at {RECOMMENDATION_SIMULATED_RARITY} OTD. Does not change saved cards.
-          </p>
-          <div className="sort-controls">
+          <div className="owned-collection-intro">
+            <p className="import-hint">
+              Tap passes to build a what-if bundle. Uses saved earnings — nothing in your collection
+              changes.
+            </p>
+          </div>
+
+          <div className="owned-collection-toolbar sort-controls">
             <label className="field inline-field recommendation-adjustment-owned-search">
-              <span>Filter your collection</span>
+              <span>Filter</span>
               <input
                 value={ownedQuickAddFilter}
                 disabled={catalogAnalysisBusy}
@@ -4076,17 +4113,58 @@ export default function PotentialPage() {
                 onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
               />
             </label>
-            {ownedQuickAddFilter.trim() ? (
-              <span className="badge">
-                {filteredOwnedQuickAddCards.length} match
-                {filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}
-              </span>
+            <button
+              className="button primary"
+              type="button"
+              disabled={
+                catalogAnalysisBusy ||
+                bundleEligibleFilteredOwnedCards.length === 0 ||
+                allFilteredOwnedInBundle
+              }
+              title={
+                bundleEligibleFilteredOwnedCards.length === 0
+                  ? 'No catalog-linked passes match the filter'
+                  : allFilteredOwnedInBundle
+                    ? 'All listed passes are already in the bundle'
+                    : `Check all ${bundleEligibleFilteredOwnedCards.length} listed pass${bundleEligibleFilteredOwnedCards.length === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY}`
+              }
+              onClick={addAllFilteredOwnedToBundle}
+            >
+              {allFilteredOwnedInBundle
+                ? 'All in bundle'
+                : `Add all to bundle${
+                    bundleEligibleFilteredOwnedCards.length > 0
+                      ? ` (${bundleEligibleFilteredOwnedCards.length})`
+                      : ''
+                  }`}
+            </button>
+            {quickAddAnalysisSelection.size > 0 ? (
+              <button
+                className="button"
+                type="button"
+                disabled={catalogAnalysisBusy}
+                onClick={() => setQuickAddAnalysisSelection(new Set())}
+              >
+                Clear bundle
+              </button>
             ) : null}
           </div>
+
+          <p className="owned-collection-count season-filter-summary">
+            {ownedQuickAddFilter.trim()
+              ? `${filteredOwnedQuickAddCards.length} match${filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}`
+              : `${filteredOwnedQuickAddCards.length} pass${filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}`}
+            {quickAddAnalysisSelection.size > 0
+              ? ` · ${quickAddAnalysisSelection.size} in bundle`
+              : ''}
+            {filteredOwnedQuickAddCards.length > bundleEligibleFilteredOwnedCards.length
+              ? ` · ${filteredOwnedQuickAddCards.length - bundleEligibleFilteredOwnedCards.length} missing catalog link`
+              : ''}
+          </p>
+
           {filteredOwnedQuickAddCards.length > 0 ? (
             <>
-              <p className="import-hint">Click passes to select them for analysis.</p>
-              <div className="recommendation-adjustment-owned-list button-row wrap-row">
+              <div className="recommendation-adjustment-owned-list owned-collection-pass-list button-row wrap-row">
                 {filteredOwnedQuickAddCards.map((card) => {
                   const missingCatalogLink = !card.externalKey
                   const selected = card.externalKey
@@ -4094,7 +4172,7 @@ export default function PotentialPage() {
                     : false
                   return (
                     <button
-                      className={`button compact${selected ? ' primary' : ''}`}
+                      className={`button compact owned-collection-pass${selected ? ' primary' : ''}`}
                       type="button"
                       key={card.id}
                       disabled={catalogAnalysisBusy || missingCatalogLink}
@@ -4102,17 +4180,18 @@ export default function PotentialPage() {
                         missingCatalogLink
                           ? 'No catalog link — re-import or use catalog search in baseline adjustments'
                           : selected
-                            ? 'Remove from analysis'
-                            : 'Add to analysis'
+                            ? 'Remove from bundle'
+                            : `Add to bundle (check at ${RECOMMENDATION_SIMULATED_RARITY})`
                       }
                       onClick={() => {
                         if (!card.externalKey) return
                         toggleQuickAddAnalysisSelection(card.externalKey)
                       }}
                     >
-                      {card.name}
-                      {card.season ? ` · ${card.season}` : ''}
-                      {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                      <span className="owned-collection-pass-name">{card.name}</span>
+                      <span className="owned-collection-pass-meta">
+                        {[card.sport, card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                      </span>
                     </button>
                   )
                 })}
@@ -4123,22 +4202,13 @@ export default function PotentialPage() {
                     <div>
                       <h3>
                         {quickAddAnalysisSelection.size === 1
-                          ? 'Analysis result'
-                          : `Bundle analysis (${quickAddAnalysisSelection.size} passes)`}
+                          ? `${RECOMMENDATION_SIMULATED_RARITY} result`
+                          : `Bundle at ${RECOMMENDATION_SIMULATED_RARITY} (${quickAddAnalysisSelection.size})`}
                       </h3>
-                      <p className="import-hint">
-                        Simulating upgrade to {RECOMMENDATION_SIMULATED_RARITY} for:{' '}
-                        {selectedUpgradePassLabels.join('; ')}
+                      <p className="import-hint owned-collection-selected-labels">
+                        {selectedUpgradePassLabels.join(' · ')}
                       </p>
                     </div>
-                    <button
-                      className="button compact"
-                      type="button"
-                      disabled={catalogAnalysisBusy}
-                      onClick={() => setQuickAddAnalysisSelection(new Set())}
-                    >
-                      Clear selection
-                    </button>
                   </div>
                   <CheckerNetGainMetrics
                     baselineGuaranteed={collectionGuaranteedNow}
@@ -4171,8 +4241,7 @@ export default function PotentialPage() {
                             <strong>{row.name}</strong>
                             <small>
                               {row.sport} · {row.season} ·{' '}
-                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable at{' '}
-                              {RECOMMENDATION_SIMULATED_RARITY} · adds{' '}
+                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable · adds{' '}
                               {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
                             </small>
                           </li>
@@ -4180,26 +4249,26 @@ export default function PotentialPage() {
                       </ul>
                     </>
                   ) : null}
-                  <p className="import-hint">
-                    Treat as already upgraded in ranking? Add under{' '}
-                    <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
-                      Baseline adjustments
-                    </button>{' '}
-                    in Rank catalog.
-                  </p>
-                  <div className="button-row">
+                  <div className="owned-collection-baseline-actions">
+                    <p className="import-hint">
+                      Keep this upgrade in Rank catalog? Add under{' '}
+                      <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                        Baseline adjustments
+                      </button>
+                      .
+                    </p>
                     <button
                       className="button"
                       type="button"
                       disabled={catalogAnalysisBusy}
                       onClick={addSelectedQuickAddToBaseline}
                     >
-                      Add analyzed passes to ranking baseline
+                      Add bundle to ranking baseline
                     </button>
                   </div>
                 </div>
               ) : (
-                <p className="empty">Select at least one pass to run the analysis.</p>
+                <p className="empty">Select a pass, or use Add all to bundle, to see the what-if.</p>
               )}
             </>
           ) : (

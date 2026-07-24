@@ -510,6 +510,16 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
   adjustments?: RecommendationPassAdjustment[]
 }
 
+/**
+ * Default Rank catalog sport+season exclusions.
+ * Keys use season labels (`2022-23`), not seasonYear — NFL is start-year encoded
+ * (`seasonYear` 2022 → label `2022-23` via `seasonYearKindForSport`).
+ */
+export const DEFAULT_RANK_EXCLUDED_SPORT_SEASONS: ReadonlyArray<{
+  sport: Sport
+  seasonLabel: string
+}> = [{ sport: 'NFL', seasonLabel: '2022-23' }]
+
 export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: number }): string {
   const label = item.seasonLabel.trim()
   return label || String(item.seasonYear)
@@ -517,6 +527,12 @@ export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: nu
 
 export function sportSeasonFilterKey(sport: Sport, seasonLabel: string): string {
   return `${sport}|${seasonLabel}`
+}
+
+export function defaultRankExcludedSportSeasonKeys(): string[] {
+  return DEFAULT_RANK_EXCLUDED_SPORT_SEASONS.map((entry) =>
+    sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+  )
 }
 
 export function passSeasonIncluded(
@@ -809,8 +825,9 @@ export type OwnedIconicUpgradeImpactRow = {
 }
 
 export type OwnedIconicUpgradeImpactResult = {
+  /** Per-pass rows sorted by marginal net RAX (highest first). */
   rows: OwnedIconicUpgradeImpactRow[]
-  /** Net claimable gain after all upgrades, same-sport picks ordered by isolated value. */
+  /** Net claimable gain after all upgrades (greedy same-sport order by isolated value). */
   combinedNetDelta: number
   /** Guaranteed-only net gain (top 2 per sport). */
   combinedGuaranteedNetDelta: number
@@ -972,6 +989,14 @@ export function analyzeOwnedIconicUpgradeImpacts(
   }
 
   const combined = collectionNetDeltas(data, workingData)
+
+  // Display order for per-pass contribution: highest net RAX first.
+  rows.sort(
+    (a, b) =>
+      b.marginalNetDelta - a.marginalNetDelta ||
+      b.passClaimableRax - a.passClaimableRax ||
+      a.name.localeCompare(b.name),
+  )
 
   return {
     rows,

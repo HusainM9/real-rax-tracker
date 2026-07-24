@@ -849,6 +849,64 @@ label.button input.sr-only {
   padding-right: 0.25rem;
 }
 
+.owned-iconic-upgrade-analyzer .owned-collection-intro {
+  margin-bottom: 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-intro .import-hint {
+  margin: 0;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-toolbar {
+  align-items: end;
+  gap: 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-count {
+  margin: 0.45rem 0 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-list {
+  gap: 0.45rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  max-width: min(100%, 16rem);
+  text-align: left;
+  white-space: normal;
+  line-height: 1.25;
+  min-height: 2.5rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-name {
+  font-weight: 600;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-meta {
+  font-size: 0.78rem;
+  opacity: 0.78;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-selected-labels {
+  margin: 0.2rem 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-baseline-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
 .iconic-20-checker .iconic-20-checker-owned,
 .iconic-20-checker .iconic-20-checker-catalog {
   margin-top: 0.75rem;
@@ -2764,6 +2822,27 @@ button.calendar-day {
   .inline-field,
   .sort-controls {
     grid-template-columns: 1fr;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-toolbar {
+    align-items: stretch;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-pass {
+    max-width: none;
+    width: 100%;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-pass-list {
+    max-height: 18rem;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-baseline-actions {
+    align-items: stretch;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-baseline-actions .button {
+    width: 100%;
   }
 
   .hero-card,

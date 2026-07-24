@@ -7,6 +7,8 @@ import {
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
   catalogProfileToParsedRows,
+  defaultRankExcludedSportSeasonKeys,
+  DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
@@ -262,6 +264,24 @@ describe('passRecommendation', () => {
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2023-24'])).toBe(true)
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2024-25'])).toBe(false)
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
+  })
+
+  it('defaults Rank catalog exclusion to NFL 2022-23 season label key', () => {
+    expect(DEFAULT_RANK_EXCLUDED_SPORT_SEASONS).toEqual([{ sport: 'NFL', seasonLabel: '2022-23' }])
+    expect(defaultRankExcludedSportSeasonKeys()).toEqual(['NFL|2022-23'])
+    expect(sportSeasonFilterKey('NFL', '2022-23')).toBe('NFL|2022-23')
+    expect(
+      passSeasonIncluded(
+        { sport: 'NFL', seasonLabel: '2022-23', seasonYear: 2022 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'NFL', seasonLabel: '2023-24', seasonYear: 2023 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(true)
   })
 
   it('filters NFL seasons independently when labels share a catalog year', () => {
@@ -764,6 +784,12 @@ describe('passRecommendation', () => {
     expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
     expect(highImpact?.passClaimableRax).toBeGreaterThan(0)
     expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
+    // Per-pass contribution list: highest net RAX first.
+    expect(impacts.rows.map((row) => row.key)).toEqual(
+      [...impacts.rows]
+        .sort((a, b) => b.marginalNetDelta - a.marginalNetDelta)
+        .map((row) => row.key),
+    )
   })
 
   it('isIconicBelowLevel identifies sub-20 Iconic passes', () => {
