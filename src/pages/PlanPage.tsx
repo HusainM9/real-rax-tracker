@@ -216,13 +216,10 @@ export default function PlanPage() {
       <section className="hero-card">
         <p className="eyebrow">Purchase plan</p>
         <h1>Plan</h1>
-        <p>
-          Save catalog passes you are considering and see how they would change your collection.
-          Analysis updates automatically when your collection or plan changes.
-        </p>
+        <p>Save catalog passes you are considering. Analysis updates with your collection or plan.</p>
         <div className="button-row">
           <Link className="button" to="/potential">
-            Rank catalog passes
+            Rank catalog
           </Link>
           <Link className="button" to="/entry">
             Add to collection
@@ -316,14 +313,14 @@ export default function PlanPage() {
         </>
       ) : (
         <section className="panel plan-empty">
-          <p className="empty">No passes on your plan yet. Search the catalog below or add from catalog rankings on the Potential page.</p>
+          <p className="empty">No passes yet. Search below or add from Rank catalog on Potential.</p>
         </section>
       )}
 
       <CatalogSearchPanel
         sectionId="plan-catalog-search"
         title="Add catalog passes to your plan"
-        description={`Search the shared catalog and add passes at your chosen OTD tier (default ${RECOMMENDATION_SIMULATED_RARITY}). Passes stay here until you remove them or add them to your real collection.`}
+        description={`Add at your OTD tier (default ${RECOMMENDATION_SIMULATED_RARITY}). Stays until you remove it or add to your collection.`}
         passKind="player"
         actionLabel="Add to plan"
         loadingKey={catalogLoadingKey}

@@ -13,6 +13,19 @@ describe('resolveUsernameImportSeasonLabel', () => {
     ).toBe('2024-25')
   })
 
+  it('derives start-year labels for FC when no upstream label is given', () => {
+    expect(
+      resolveUsernameImportSeasonLabel({ sportRaw: 'fc', seasonYear: 2025 }),
+    ).toBe('2025-26')
+    expect(
+      resolveUsernameImportSeasonLabel({
+        sportRaw: 'soccer',
+        seasonYear: 2025,
+        passSeasonLabel: '2025-26',
+      }),
+    ).toBe('2025-26')
+  })
+
   it('uses calendar year for golf', () => {
     expect(
       resolveUsernameImportSeasonLabel({

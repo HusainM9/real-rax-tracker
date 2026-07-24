@@ -8,9 +8,9 @@ import {
 import { resolveCatalogPassSeasonYear } from './seasonClaimWindow'
 
 describe('resolveCatalogPassSeasonYear', () => {
-  it('maps NFL split-season labels to Real end-year season_year values', () => {
-    expect(resolveCatalogPassSeasonYear(2024, '2023-24', 'NFL')).toBe(2024)
-    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'NFL')).toBe(2025)
+  it('maps NFL split-season labels to Real start-year season_year values', () => {
+    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'NFL')).toBe(2024)
+    expect(resolveCatalogPassSeasonYear(2025, '2024-25', 'NFL')).toBe(2024)
   })
 })
 
@@ -21,7 +21,7 @@ describe('catalogDailyEarningsReplaceKeys', () => {
     passKind: 'player',
     sport: 'NFL',
     seasonYear: 2024,
-    seasonLabel: '2023-24',
+    seasonLabel: '2024-25',
     name: 'Matthew Stafford',
   }
 
@@ -32,15 +32,15 @@ describe('catalogDailyEarningsReplaceKeys', () => {
 
   it('marks only passes that receive filtered daily rows', () => {
     const rows: CatalogDailyEarningInput[] = [
-      { externalKey: '100|2024|NFL', claimDay: '2023-09-10', baseRaxEarned: 21 },
-      { externalKey: '200|2025|NFL', claimDay: '2024-09-08', baseRaxEarned: 12 },
+      { externalKey: '100|2024|NFL', claimDay: '2024-09-10', baseRaxEarned: 21 },
+      { externalKey: '200|2025|NFL', claimDay: '2025-09-08', baseRaxEarned: 12 },
     ]
     const henryPass: CatalogPassInput = {
       ...staffordPass,
       externalKey: '200|2025|NFL',
       entityId: 200,
       seasonYear: 2025,
-      seasonLabel: '2024-25',
+      seasonLabel: '2025-26',
       name: 'Derrick Henry',
     }
     expect(catalogDailyEarningsReplaceKeys([staffordPass, henryPass], rows)).toEqual([

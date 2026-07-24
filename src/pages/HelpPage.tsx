@@ -1,17 +1,16 @@
 import { Link } from 'react-router-dom'
-import { realappToolsShutdownLabel } from '../lib/importShutdown'
+import { realProviderImportEnabled } from '../lib/importShutdown'
 
 export default function HelpPage() {
+  const realImportActive = realProviderImportEnabled()
+
   return (
     <div className="page-stack">
       <section className="hero-card">
         <div>
           <p className="eyebrow">Guide</p>
           <h2>How this tracker works</h2>
-          <p>
-            Plan Real Sports RAX On This Day claims before overlaps waste earnings. Everything
-            stays in your browser unless you export a backup.
-          </p>
+          <p>Plan OTD claims before overlaps waste RAX. Data stays in this browser unless you export or sync.</p>
         </div>
         <Link className="button primary" to="/entry">
           Import or add cards
@@ -21,22 +20,18 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>What is RAX On This Day?</h2>
         <p>
-          Each calendar day you can claim player cards for RAX based on historical performances
-          on that same month/day. This tracker helps you see which cards are worth claiming
-          before you spend RAX in the app.
+          Each calendar day you can claim player cards for RAX based on historical performances on
+          that same month/day.
         </p>
         <ul className="help-list">
           <li>
-            <strong>Guaranteed</strong> — up to two player cards per sport per day (highest RAX
-            wins; ties break by player name).
+            <strong>Guaranteed</strong> — top two player cards per sport per day.
           </li>
           <li>
-            <strong>Overlap</strong> — a third-or-later card in the same sport on the same day.
-            You entered the RAX, but only the top two count as claimable.
+            <strong>Overlap</strong> — third-or-later same sport/day; not claimable.
           </li>
           <li>
-            <strong>Pro bonus</strong> — optional third claim across all sports: the best
-            remaining overlapped card that day (toggle on Dashboard).
+            <strong>Pro bonus</strong> — optional third claim across sports (Dashboard toggle).
           </li>
         </ul>
       </section>
@@ -44,122 +39,75 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>Getting your data in</h2>
         <ol className="help-list ordered">
+          {realImportActive ? (
+            <li>
+              <strong>Username import</strong> (Entry, primary) — Real @username recovers Legendary+
+              passes; daily RAX may load in stages.
+            </li>
+          ) : (
+            <li>
+              <strong>Username import</strong> — closed. Use Quick add, Manual add, or a backup.
+            </li>
+          )}
           <li>
-            <strong>Username import (until shutdown)</strong> — on Entry, enter your Real @username.
-            Legendary, Mystic, and Iconic player and team passes can be fetched via{' '}
-            <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-              realapp.tools
-            </a>{' '}
-            / Meowbot until {realappToolsShutdownLabel()}. Existing imported cards and earnings
-            remain saved locally after the service closes.
+            <strong>Quick add</strong> — catalog search on Entry for one-off passes.
           </li>
           <li>
-            <strong>Add card &amp; earnings</strong> — on Entry, set up the pass and paste daily
-            RAX JSON from realapp.com in one form. Cached player earnings from prior imports can
-            be loaded when available.
-          </li>
-          <li>
-            <strong>Manual entry</strong> — use single-day mode in the same form for one-off rows.
+            <strong>Manual add</strong> — paste daily RAX JSON or enter a single day.
           </li>
         </ol>
       </section>
 
       <section className="panel help-section">
-        <h2>realapp.tools shutdown</h2>
+        <h2>Manual earnings JSON</h2>
         <p>
-          realapp.tools / Meowbot is shutting down, so automatic username import will stop working.
-          This does <strong>not</strong> delete cards or earnings already imported into this
-          browser.
-        </p>
-        <ul className="help-list">
-          <li>
-            <strong>Back up before and after big imports.</strong> Use Export JSON on Dashboard.
-            Backups include cards, earnings, saved profiles, potential profiles, sell rankings,
-            and cached player earnings.
-          </li>
-          <li>
-            <strong>Local player earnings cache.</strong> While username import still works, the
-            tracker caches player daily earnings it sees. Entry and Potential can load those cached
-            rows later to avoid another JSON paste.
-          </li>
-          <li>
-            <strong>Backend ownership cache.</strong> Successful username imports can report a
-            minimal pass list to the operator cache: username, pass name, sport, season, entity ID,
-            rarity, and pass kind. It does not upload your notes, claim math, or full backup.
-          </li>
-          <li>
-            <strong>After shutdown.</strong> New cards and earnings are manual: use Add card &amp;
-            earnings, paste realapp.com JSON, add single-day rows, or restore an exported backup.
-          </li>
-        </ul>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Manual realapp.com earnings JSON</h2>
-        <p>
-          After username import closes, or when a pass is missing daily rows, you can fill it in from{' '}
+          When daily rows are missing, paste JSON from{' '}
           <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
             realapp.com
           </a>{' '}
-          on a <strong>desktop</strong> browser with Real Pro — the mobile site redirects to the app
-          store.
+          (desktop, Real Pro).
         </p>
-        <ol className="help-list ordered">
-          <li>
-            Open{' '}
-            <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-              realapp.com
-            </a>{' '}
-            and log in (Real Pro, <strong>desktop</strong> browser — mobile redirects to the app
-            store).
-          </li>
-          <li>
-            Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
-            earnings.
-          </li>
-          <li>
-            Go to the player&apos;s season and click the <strong>RAX icon</strong> on a performance
-            to open the card earnings screen.
-          </li>
-          <li>
-            In Network, filter for the request whose URL
-            includes <code>playerBoxScoreId</code> (for example{' '}
-            <code>userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…</code>).
-          </li>
-          <li>
-            Copy the full Response JSON (an object with an <code>earnings</code> array).
-          </li>
-          <li>
-            On <Link to="/entry">Entry</Link>, use <strong>Add card &amp; earnings</strong> — select
-            the player card (or add a new one), paste the JSON, and save.
-          </li>
-        </ol>
-        <p className="import-hint">
-          realapp.com uses an <code>earnings</code> array. The tracker still accepts old
-          realapp.tools <code>rows</code> JSON while you have it. Earnings are also saved to{' '}
-          <strong>Saved earnings profiles</strong> on Entry — restore them after re-import or manual
-          card changes.
-        </p>
+        <details className="help-details">
+          <summary>How to copy earnings JSON</summary>
+          <ol className="help-list ordered">
+            <li>
+              Open{' '}
+              <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+                realapp.com
+              </a>{' '}
+              and log in.
+            </li>
+            <li>
+              DevTools (<kbd>F12</kbd>) → <strong>Network</strong> before loading earnings.
+            </li>
+            <li>
+              Open the player season and click the <strong>RAX icon</strong> on a performance.
+            </li>
+            <li>
+              Filter for <code>userpassearnings</code>, copy the Response JSON.
+            </li>
+            <li>
+              On <Link to="/entry">Entry</Link> → <strong>Manual add</strong>, paste and save.
+            </li>
+          </ol>
+          <p className="import-hint">
+            Older <code>rows</code> JSON still works. Pastes also save under Saved earnings profiles.
+          </p>
+        </details>
       </section>
 
       <section className="panel help-section">
         <h2>Saved earnings profiles</h2>
         <p>
-          When you paste or import earnings on Entry, the tracker automatically saves a profile for
-          that player (card details + all RAX rows + pasted JSON). Re-importing your username
-          replaces earnings on imported passes but does <strong>not</strong> delete saved profiles.
+          Pasted or imported earnings auto-save per player. Re-import replaces earnings on imported
+          passes but keeps saved profiles.
         </p>
         <ul className="help-list">
           <li>
-            <strong>Restore</strong> — re-applies saved RAX rows onto the matching pass (by import
-            ID when available, otherwise name + sport + season).
+            <strong>Restore</strong> — re-applies saved RAX onto the matching pass.
           </li>
           <li>
-            <strong>Load JSON</strong> — fills the paste box without importing yet.
-          </li>
-          <li>
-            Profiles are stored in this browser with your collection and included in JSON export
-            backups.
+            <strong>JSON</strong> — fills the paste box without importing yet.
           </li>
         </ul>
       </section>
@@ -169,86 +117,76 @@ export default function HelpPage() {
         <dl className="help-dl">
           <div>
             <dt>Dashboard</dt>
-            <dd>Totals, best claim days, export/import backup JSON.</dd>
+            <dd>Totals, best days, JSON backup; optional cloud sync for devices.</dd>
           </div>
           <div>
             <dt>Entry</dt>
-            <dd>Import collection, add cards with earnings, edit RAX rows.</dd>
+            <dd>Username import (primary), Quick add, Manual add, edit RAX.</dd>
           </div>
           <div>
             <dt>Calendar</dt>
-            <dd>Month/day OTD view — click a day to see all player passes for that date.</dd>
+            <dd>Month/day OTD view.</dd>
           </div>
           <div>
             <dt>Overlaps</dt>
-            <dd>Days and cards wasting RAX in your collection.</dd>
+            <dd>Days and cards wasting RAX.</dd>
           </div>
           <div>
             <dt>Potential</dt>
-            <dd>What-if checker for cards you do not own — load cached earnings or paste JSON.</dd>
+            <dd>Rank catalog, Check one pass, collection what-ifs.</dd>
+          </div>
+          <div>
+            <dt>Plan</dt>
+            <dd>Catalog passes you are considering before buying.</dd>
           </div>
           <div>
             <dt>Cards</dt>
-            <dd>Per-card totals, sorting, and rarity editing.</dd>
+            <dd>Per-card totals, sorting, rarity edits.</dd>
           </div>
           <div>
             <dt>If sold</dt>
-            <dd>
-              Simulate selling a pass — lost vs freed claimable RAX and optional sale price
-              comparison.
-            </dd>
+            <dd>Lost vs freed claimable RAX if you sell a pass.</dd>
           </div>
         </dl>
       </section>
 
       <section className="panel help-section">
-        <h2>OTD dates</h2>
+        <h2>OTD dates &amp; rarity</h2>
         <p>
-          Claim rules apply per month/day, not per calendar year. If you have entries on
-          01/15/2025 and 01/15/2026, they compete for the same two sport slots and one Pro
-          bonus on January 15. Each card only uses its best performance for that day.
-        </p>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Changing rarity (owned cards)</h2>
-        <p>
-          On the Cards or Entry page, use the rarity dropdown on a card after you merge or upgrade
-          in Real. This updates the stored rarity and recalculates all earnings rows for OTD
-          multipliers. Changes save with your collection — cloud sync, JSON export, and local storage
-          all include the updated rarity and earnings.
+          Rules apply per month/day across years. Each card uses its best performance that day.
+          Change rarity on Cards or Entry after a merge — earnings recalculate and save with your
+          collection.
         </p>
       </section>
 
       <section className="panel help-section">
         <h2>Backup and privacy</h2>
         <p>
-          Data is stored in your browser localStorage. Use Export JSON on the Dashboard to
-          back up or move to another device, then Import JSON there. Clearing site data
-          removes your tracker.
+          Data lives in browser localStorage. Export JSON on Dashboard, or use optional cloud sync
+          there. Collection recovery is username import on Entry. Clearing site data removes the
+          tracker.
         </p>
-        <ul className="help-list">
-          <li>
-            <strong>Export files are sensitive.</strong> Backups are plain JSON and include
-            your saved Real username, card list, and RAX history. Do not post them in public
-            chats, email, or cloud folders others can access.
-          </li>
-          <li>
-            <strong>Device access.</strong> Anyone with access to this browser or an unlocked
-            export file can read your tracker data. Sign out of shared computers when done.
-          </li>
-          <li>
-            <strong>Site password.</strong> The shared login password only controls who can open
-            the app URL. It does not sync or isolate data between people — each browser keeps
-            its own collection.
-          </li>
-          <li>
-            <strong>Operator logging and ownership cache.</strong> Production imports can report
-            import events plus a minimal username/pass snapshot to help restore known pass lists
-            later. This does not upload your local notes, manual edits, claim results, or backup
-            JSON.
-          </li>
-        </ul>
+        <details className="help-details">
+          <summary>Privacy notes</summary>
+          <ul className="help-list">
+            <li>
+              <strong>Exports</strong> — plain JSON with username, cards, and RAX. Do not share
+              publicly.
+            </li>
+            <li>
+              <strong>Device access</strong> — anyone with this browser or an unlocked export can
+              read your data.
+            </li>
+            <li>
+              <strong>Site password</strong> — gates the app URL only; each browser keeps its own
+              collection.
+            </li>
+            <li>
+              <strong>Operator cache</strong> — imports may report a minimal username/pass snapshot.
+              Notes and full backups are not uploaded.
+            </li>
+          </ul>
+        </details>
       </section>
     </div>
   )

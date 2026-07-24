@@ -4,13 +4,16 @@ import {
   dedupeCatalogPassSummaries,
   parseSeasonYearFromExternalKey,
 } from '../../lib/catalogPassIdentity'
+import { isUfcCatalogSport } from '../../lib/passKind'
 import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
 import { sportFromCatalog, importCatalogProfileIntoData } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
 import { CALENDAR_MONTH_NAMES } from './calendarView'
+import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from './claimDayKey'
 import { applyCardRarityChange } from './cardRarity'
+import { formatClaimDay } from './format'
 import {
   analyzePotentialCard,
   netGuaranteedDelta,
@@ -126,6 +129,8 @@ export type MonthPassRecommendationResult = {
   prefilterTrimmed: number
   monthIdx: number
   month: string
+  /** OTD month-day (MM-DD) when ranking a single claim day instead of a full month. */
+  claimDay?: string
 }
 
 export type PassRecommendationProgress = {
@@ -333,13 +338,125 @@ export function netClaimableDelta(result: PotentialAnalysisResult): number {
 
 export { netGuaranteedDelta, netWithProDelta } from './potentialAnalysis'
 
+/** UFC shop rows may still be pass_kind=team; ranking/OTD treat them as players. */
+export function recommendationPassKind(profile: Pick<CatalogImportProfile, 'sport' | 'passKind'>): CatalogPassKind {
+  return isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
+}
+
 export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
   const sport = sportFromCatalog(profile.sport)
+  const passKind = recommendationPassKind(profile)
   return profile.rows.reduce(
     (sum, row) =>
-      sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, profile.passKind),
+      sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, passKind),
     0,
   )
+}
+
+/** Normalize `bestDay` / `day` query values to an OTD month-day key (MM-DD). */
+export function normalizeBestDayParam(value: string | null | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  const monthDay = monthDayKeyFromClaimDay(trimmed)
+  if (!monthDay) return null
+  const monthIdx = monthIndexFromMonthDay(monthDay)
+  if (monthIdx < 0) return null
+  return monthDay
+}
+
+export function estimateIconic1DayRax(profile: CatalogImportProfile, monthDay: string): number {
+  const sport = sportFromCatalog(profile.sport)
+  const passKind = recommendationPassKind(profile)
+  return profile.rows.reduce((sum, row) => {
+    if (monthDayKeyFromClaimDay(row.claimDay) !== monthDay) return sum
+    return sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, passKind)
+  }, 0)
+}
+
+export function profileHasEarningsOnMonthDay(
+  profile: CatalogImportProfile,
+  monthDay: string,
+): boolean {
+  return profile.rows.some((row) => monthDayKeyFromClaimDay(row.claimDay) === monthDay)
+}
+
+export function prefilterRecommendationProfilesForDay(
+  profiles: CatalogImportProfile[],
+  monthDay: string,
+  cap: number = RECOMMENDATION_ANALYSIS_CAP,
+): { profiles: CatalogImportProfile[]; trimmed: number; skippedNoDayRows: number } {
+  const withDay = profiles.filter((profile) => profileHasEarningsOnMonthDay(profile, monthDay))
+  const skippedNoDayRows = profiles.length - withDay.length
+  if (withDay.length <= cap) {
+    return { profiles: withDay, trimmed: 0, skippedNoDayRows }
+  }
+
+  const sorted = [...withDay].sort(
+    (a, b) =>
+      estimateIconic1DayRax(b, monthDay) - estimateIconic1DayRax(a, monthDay) ||
+      a.name.localeCompare(b.name),
+  )
+  return {
+    profiles: sorted.slice(0, cap),
+    trimmed: withDay.length - cap,
+    skippedNoDayRows,
+  }
+}
+
+/** Keep the top N rows per sport (already sorted by day/month net). */
+export function topRecommendationRowsPerSport<T extends { sport: Sport }>(
+  rows: T[],
+  perSport = 2,
+): T[] {
+  const limit = Math.max(0, Math.floor(perSport))
+  if (limit === 0) return []
+  const counts = new Map<Sport, number>()
+  const selected: T[] = []
+  for (const row of rows) {
+    const count = counts.get(row.sport) ?? 0
+    if (count >= limit) continue
+    counts.set(row.sport, count + 1)
+    selected.push(row)
+  }
+  return selected
+}
+
+function dayMetricsFromAnalysis(
+  analysis: PotentialAnalysisResult,
+  monthDay: string,
+): {
+  netDelta: number
+  guaranteedNetDelta: number
+  gain: number
+  displaced: number
+} {
+  let gain = 0
+  let guaranteedGain = 0
+  let displaced = 0
+  let guaranteedDisplaced = 0
+
+  for (const { day, candidate } of analysis.candidates) {
+    if (day.claimDay !== monthDay || candidate.status === 'overlap') continue
+    gain += candidate.performance.raxEarned
+    if (candidate.status === 'guaranteed') {
+      guaranteedGain += candidate.performance.raxEarned
+    }
+  }
+
+  for (const { day, candidate, previousStatus } of analysis.displacedExisting) {
+    if (day.claimDay !== monthDay) continue
+    displaced += candidate.performance.raxEarned
+    if (previousStatus === 'guaranteed') {
+      guaranteedDisplaced += candidate.performance.raxEarned
+    }
+  }
+
+  return {
+    netDelta: gain - displaced,
+    guaranteedNetDelta: guaranteedGain - guaranteedDisplaced,
+    gain,
+    displaced,
+  }
 }
 
 export function catalogProfileToParsedRows(profile: CatalogImportProfile): ParsedRealAppToolsRow[] {
@@ -348,21 +465,30 @@ export function catalogProfileToParsedRows(profile: CatalogImportProfile): Parse
   const rawJson = catalogProfileToJson({ rows: filteredRows })
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
-    passKind: profile.passKind,
+    passKind: recommendationPassKind(profile),
     applyOtdMultiplier: false,
   })
   return parsed.rows
 }
 
+/** Always simulate buy-at Iconic 1 — ignore catalog rarity_label (shop/Meowbot leftovers). */
 export function profileAsIconic1(profile: CatalogImportProfile): CatalogImportProfile {
-  return { ...profile, rarityLabel: RECOMMENDATION_SIMULATED_RARITY }
+  return {
+    ...profile,
+    rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    passKind: recommendationPassKind(profile),
+  }
 }
 
 export function profileAtSimulatedRarity(
   profile: CatalogImportProfile,
   rarityLabel: string,
 ): CatalogImportProfile {
-  return { ...profile, rarityLabel }
+  return {
+    ...profile,
+    rarityLabel,
+    passKind: recommendationPassKind(profile),
+  }
 }
 
 export type RecommendationPassAdjustmentMode = 'assume-iconic-1' | 'exclude'
@@ -384,6 +510,16 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
   adjustments?: RecommendationPassAdjustment[]
 }
 
+/**
+ * Default Rank catalog sport+season exclusions.
+ * Keys use season labels (`2022-23`), not seasonYear — NFL is start-year encoded
+ * (`seasonYear` 2022 → label `2022-23` via `seasonYearKindForSport`).
+ */
+export const DEFAULT_RANK_EXCLUDED_SPORT_SEASONS: ReadonlyArray<{
+  sport: Sport
+  seasonLabel: string
+}> = [{ sport: 'NFL', seasonLabel: '2022-23' }]
+
 export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: number }): string {
   const label = item.seasonLabel.trim()
   return label || String(item.seasonYear)
@@ -391,6 +527,12 @@ export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: nu
 
 export function sportSeasonFilterKey(sport: Sport, seasonLabel: string): string {
   return `${sport}|${seasonLabel}`
+}
+
+export function defaultRankExcludedSportSeasonKeys(): string[] {
+  return DEFAULT_RANK_EXCLUDED_SPORT_SEASONS.map((entry) =>
+    sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+  )
 }
 
 export function passSeasonIncluded(
@@ -507,7 +649,7 @@ export function analyzeCatalogCandidate(
 ): PassRecommendationRow | null {
   const analysis = analyzeCatalogProfilePotential(data, profile)
   if (!analysis) return null
-  return buildPassRecommendationRow(profile, analysis)
+  return buildPassRecommendationRow(profileAsIconic1(profile), analysis)
 }
 
 function analyzeCatalogProfilePotential(
@@ -516,18 +658,20 @@ function analyzeCatalogProfilePotential(
 ): PotentialAnalysisResult | null {
   if (profile.rows.length === 0) return null
 
-  const rows = catalogProfileToParsedRows(profile)
+  // Rank/solo parity: always score at Iconic 1, never the catalog's stored rarity_label.
+  const simulated = profileAsIconic1(profile)
+  const rows = catalogProfileToParsedRows(simulated)
   if (rows.length === 0) return null
 
-  const sport = sportFromCatalog(profile.sport)
+  const sport = sportFromCatalog(simulated.sport)
   return analyzePotentialCard(
     data,
     {
-      name: profile.name,
+      name: simulated.name,
       sport,
-      season: profile.seasonLabel || String(profile.seasonYear),
-      simulatedRarityLabel: profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
-      passKind: profile.passKind,
+      season: simulated.seasonLabel || String(simulated.seasonYear),
+      simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      passKind: simulated.passKind,
     },
     rows,
   )
@@ -538,14 +682,15 @@ function buildPassRecommendationRow(
   analysis: PotentialAnalysisResult,
 ): PassRecommendationRow {
   const sport = sportFromCatalog(profile.sport)
+  const passKind = recommendationPassKind(profile)
   return {
     externalKey: profile.externalKey,
     name: profile.name,
     sport,
     season: profile.seasonLabel || String(profile.seasonYear),
     seasonYear: profile.seasonYear,
-    rarityLabel: profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
-    passKind: profile.passKind,
+    rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    passKind,
     totalBaseRax: profile.totalBaseRax,
     iconic1TotalRax: estimateIconic1TotalRax(profile),
     rowCount: profile.rows.length,
@@ -576,6 +721,33 @@ export function analyzeCatalogCandidateForMonth(
     monthGuaranteedNetDelta: monthly?.guaranteedNetDelta ?? 0,
     monthGain: monthly?.potentialGain ?? 0,
     monthDisplaced: monthly?.displacedLoss ?? 0,
+  }
+}
+
+export function analyzeCatalogCandidateForDay(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  monthDay: string,
+): MonthPassRecommendationRow | null {
+  const normalizedDay = normalizeBestDayParam(monthDay)
+  if (!normalizedDay) return null
+  if (!profileHasEarningsOnMonthDay(profile, normalizedDay)) return null
+
+  const analysis = analyzeCatalogProfilePotential(data, profile)
+  if (!analysis) return null
+
+  const metrics = dayMetricsFromAnalysis(analysis, normalizedDay)
+  const base = buildPassRecommendationRow(profile, analysis)
+  const monthIdx = monthIndexFromMonthDay(normalizedDay)
+
+  return {
+    ...base,
+    monthIdx,
+    month: formatClaimDay(normalizedDay),
+    monthNetDelta: metrics.netDelta,
+    monthGuaranteedNetDelta: metrics.guaranteedNetDelta,
+    monthGain: metrics.gain,
+    monthDisplaced: metrics.displaced,
   }
 }
 
@@ -653,8 +825,9 @@ export type OwnedIconicUpgradeImpactRow = {
 }
 
 export type OwnedIconicUpgradeImpactResult = {
+  /** Per-pass rows sorted by marginal net RAX (highest first). */
   rows: OwnedIconicUpgradeImpactRow[]
-  /** Net claimable gain after all upgrades, same-sport picks ordered by isolated value. */
+  /** Net claimable gain after all upgrades (greedy same-sport order by isolated value). */
   combinedNetDelta: number
   /** Guaranteed-only net gain (top 2 per sport). */
   combinedGuaranteedNetDelta: number
@@ -816,6 +989,14 @@ export function analyzeOwnedIconicUpgradeImpacts(
   }
 
   const combined = collectionNetDeltas(data, workingData)
+
+  // Display order for per-pass contribution: highest net RAX first.
+  rows.sort(
+    (a, b) =>
+      b.marginalNetDelta - a.marginalNetDelta ||
+      b.passClaimableRax - a.passClaimableRax ||
+      a.name.localeCompare(b.name),
+  )
 
   return {
     rows,
@@ -1011,6 +1192,19 @@ function rankMonthCandidatesSync(
   return sortMonthRecommendationRows(rows)
 }
 
+function rankDayCandidatesSync(
+  data: RaxTrackerData,
+  candidates: CatalogImportProfile[],
+  monthDay: string,
+): MonthPassRecommendationRow[] {
+  const rows: MonthPassRecommendationRow[] = []
+  for (const profile of candidates) {
+    const row = analyzeCatalogCandidateForDay(data, profile, monthDay)
+    if (row) rows.push(row)
+  }
+  return sortMonthRecommendationRows(rows)
+}
+
 async function rankCandidatesAsync(
   data: RaxTrackerData,
   candidates: CatalogImportProfile[],
@@ -1071,6 +1265,45 @@ async function rankMonthCandidatesAsync(
     const batch = candidates.slice(index, index + batchSize)
     for (const profile of batch) {
       const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx)
+      if (row) rows.push(row)
+    }
+
+    const current = Math.min(index + batch.length, candidates.length)
+    options?.onProgress?.({
+      current,
+      total: candidates.length,
+      label: options.progressLabel
+        ? `${options.progressLabel}: ${batch[batch.length - 1]?.name || 'Finishing…'}`
+        : batch[batch.length - 1]?.name || 'Finishing…',
+    })
+    await yieldToMain()
+  }
+
+  return sortMonthRecommendationRows(rows)
+}
+
+async function rankDayCandidatesAsync(
+  data: RaxTrackerData,
+  candidates: CatalogImportProfile[],
+  monthDay: string,
+  options?: {
+    onProgress?: (progress: PassRecommendationProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+    progressLabel?: string
+  },
+): Promise<MonthPassRecommendationRow[]> {
+  const rows: MonthPassRecommendationRow[] = []
+  const batchSize = Math.max(options?.batchSize ?? 24, 1)
+
+  for (let index = 0; index < candidates.length; index += batchSize) {
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
+    const batch = candidates.slice(index, index + batchSize)
+    for (const profile of batch) {
+      const row = analyzeCatalogCandidateForDay(data, profile, monthDay)
       if (row) rows.push(row)
     }
 
@@ -1282,6 +1515,113 @@ export async function rankCatalogRecommendationsForMonthAsync(
     prefilterTrimmed: trimmed,
     monthIdx,
     month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
+  }
+}
+
+export function rankCatalogRecommendationsForDay(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+  claimDay: string,
+  options?: RecommendationFilterOptions & { analysisCap?: number },
+): MonthPassRecommendationResult {
+  const monthDay = normalizeBestDayParam(claimDay)
+  if (!monthDay) {
+    return {
+      rows: [],
+      skippedOwnedIconic: 0,
+      skippedNoRows: 0,
+      skippedAdjusted: 0,
+      analyzedCount: 0,
+      prefilterTrimmed: 0,
+      monthIdx: -1,
+      month: 'Day',
+      claimDay: undefined,
+    }
+  }
+
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
+    data,
+    profiles,
+    options,
+  )
+  const {
+    profiles: analysisPool,
+    trimmed,
+    skippedNoDayRows,
+  } = prefilterRecommendationProfilesForDay(
+    candidates,
+    monthDay,
+    options?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP,
+  )
+  const rows = rankDayCandidatesSync(data, analysisPool, monthDay)
+  const monthIdx = monthIndexFromMonthDay(monthDay)
+
+  return {
+    rows,
+    skippedOwnedIconic,
+    skippedNoRows: skippedNoRows + skippedNoDayRows,
+    skippedAdjusted,
+    analyzedCount: rows.length,
+    prefilterTrimmed: trimmed,
+    monthIdx,
+    month: formatClaimDay(monthDay),
+    claimDay: monthDay,
+  }
+}
+
+export async function rankCatalogRecommendationsForDayAsync(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+  claimDay: string,
+  options?: RecommendationFilterOptions & {
+    analysisCap?: number
+    onProgress?: (progress: PassRecommendationProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+  },
+): Promise<MonthPassRecommendationResult> {
+  const monthDay = normalizeBestDayParam(claimDay)
+  if (!monthDay) {
+    return {
+      rows: [],
+      skippedOwnedIconic: 0,
+      skippedNoRows: 0,
+      skippedAdjusted: 0,
+      analyzedCount: 0,
+      prefilterTrimmed: 0,
+      monthIdx: -1,
+      month: 'Day',
+      claimDay: undefined,
+    }
+  }
+
+  const { candidates, skippedOwnedIconic, skippedNoRows, skippedAdjusted } = filterRecommendationProfiles(
+    data,
+    profiles,
+    options,
+  )
+  const {
+    profiles: analysisPool,
+    trimmed,
+    skippedNoDayRows,
+  } = prefilterRecommendationProfilesForDay(
+    candidates,
+    monthDay,
+    options?.analysisCap ?? RECOMMENDATION_ANALYSIS_CAP,
+  )
+  const rows = await rankDayCandidatesAsync(data, analysisPool, monthDay, options)
+  const monthIdx = monthIndexFromMonthDay(monthDay)
+
+  return {
+    rows,
+    skippedOwnedIconic,
+    skippedNoRows: skippedNoRows + skippedNoDayRows,
+    skippedAdjusted,
+    analyzedCount: rows.length,
+    prefilterTrimmed: trimmed,
+    monthIdx,
+    month: formatClaimDay(monthDay),
+    claimDay: monthDay,
   }
 }
 

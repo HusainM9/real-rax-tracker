@@ -13,6 +13,7 @@ import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from '../lib/claimDay
 import { computeClaimDayResults } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
 import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
+import { normalizeBestDayParam } from '../lib/passRecommendation'
 import { useRaxData } from '../context/RaxDataContext'
 import type { ClaimCandidate, ClaimDayResult } from '../types/rax'
 
@@ -66,7 +67,19 @@ function OverlapSection({ overlaps }: { overlaps: ClaimCandidate[] }) {
   )
 }
 
+function bestCatalogEarnersHref(monthDay: string): string | null {
+  const normalized = normalizeBestDayParam(monthDay)
+  if (!normalized) return null
+  const params = new URLSearchParams({
+    bestDay: `${currentYear()}-${normalized}`,
+    topPerSport: '2',
+  })
+  return `/potential?${params.toString()}`
+}
+
 function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
+  const bestEarnersHref = bestCatalogEarnersHref(day.claimDay)
+
   return (
     <article className="panel day-panel">
       <div className="section-heading">
@@ -79,6 +92,14 @@ function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
         </div>
         {day.proBonus ? <span className="badge">Pro: {day.proBonus.card.name}</span> : null}
       </div>
+
+      {bestEarnersHref ? (
+        <div className="button-row calendar-day-actions">
+          <Link className="button primary" to={bestEarnersHref}>
+            Top catalog earners
+          </Link>
+        </div>
+      ) : null}
 
       <div className="sport-grid">
         {day.sports.map((sport) => (

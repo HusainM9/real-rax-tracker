@@ -79,7 +79,7 @@ describe('catalogPassIdentity', () => {
     expect(ownedKey).toBe(catalogKey)
   })
 
-  it('matches NFL owned cards when season is stored as end year instead of label', () => {
+  it('matches NFL owned cards when season is stored as the start year instead of label', () => {
     const ownedKey = catalogPassIdentityKeyFromOwnedCard({
       passKind: 'player',
       sport: 'NFL',
@@ -91,7 +91,7 @@ describe('catalogPassIdentity', () => {
       passKind: 'player',
       sport: 'NFL',
       seasonYear: 2024,
-      seasonLabel: '2023-24',
+      seasonLabel: '2024-25',
       name: 'Ceedee Lamb',
       entityId: 12345,
       externalKey: '12345|2024|NFL',
@@ -99,19 +99,71 @@ describe('catalogPassIdentity', () => {
     expect(ownedKey).toBe(catalogKey)
   })
 
+  it('treats UFC team shop rows as the same player identity', () => {
+    const teamKey = catalogPassIdentityKey({
+      passKind: 'team',
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      name: 'Anderson Silva',
+      entityId: 235,
+      externalKey: '235|2023|UFC',
+    })
+    const playerKey = catalogPassIdentityKey({
+      passKind: 'player',
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      name: 'Anderson Silva',
+      entityId: 235,
+      externalKey: '235|2023|UFC',
+    })
+    expect(teamKey).toBe(playerKey)
+    expect(teamKey).toBe('player|UFC|2023|anderson silva')
+  })
+
+  it('dedupes UFC team + player rows by name preferring higher base rax', () => {
+    const { items, duplicatesRemoved } = dedupeCatalogPassSummaries([
+      {
+        passKind: 'player' as const,
+        sport: 'UFC',
+        seasonYear: 2023,
+        seasonLabel: '2023',
+        name: 'Anderson Silva',
+        entityId: 235,
+        externalKey: '235|2023|UFC',
+        totalBaseRax: 100,
+      },
+      {
+        passKind: 'team' as const,
+        sport: 'UFC',
+        seasonYear: 2023,
+        seasonLabel: '2023',
+        name: 'Anderson Silva',
+        entityId: 235,
+        externalKey: '235|2023|UFC',
+        totalBaseRax: 4200,
+      },
+    ])
+    expect(duplicatesRemoved).toBe(1)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.totalBaseRax).toBe(4200)
+    expect(items[0]?.passKind).toBe('team')
+  })
+
   it('normalizes en-dash season labels for identity matching', () => {
     const hyphenKey = catalogPassIdentityKey({
       passKind: 'player',
       sport: 'NFL',
       seasonYear: 2024,
-      seasonLabel: '2023-24',
+      seasonLabel: '2024-25',
       name: 'CeeDee Lamb',
       externalKey: '846|2024|NFL',
     })
     const enDashKey = catalogPassIdentityKeyFromOwnedCard({
       passKind: 'player',
       sport: 'NFL',
-      season: '2023–24',
+      season: '2024–25',
       name: 'CeeDee Lamb',
       externalKey: '846|2024|NFL',
     })

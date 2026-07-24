@@ -546,6 +546,99 @@ label.button input.sr-only {
   border-top: 1px solid var(--border);
 }
 
+.admin-page .admin-primary-tools {
+  border-top: none;
+  padding-top: 0;
+  gap: 0.85rem;
+}
+
+.admin-page .admin-sport-toggles {
+  flex-wrap: wrap;
+  gap: 0.65rem 0.85rem;
+}
+
+.admin-page .admin-advanced {
+  margin-top: 0.15rem;
+}
+
+.admin-page .admin-advanced summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.88rem;
+  width: fit-content;
+}
+
+.admin-page .admin-advanced .form-grid {
+  margin-top: 0.75rem;
+}
+
+.admin-page .nested-panel {
+  margin-top: 0.35rem;
+}
+
+.admin-page .shop-crawl-resume {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.admin-page .shop-crawl-cursor-grid {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.admin-page .shop-crawl-log {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-page .shop-crawl-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.admin-page .shop-crawl-log-panel {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.admin-page .shop-crawl-log-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.admin-page .shop-crawl-log-line {
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.admin-page .shop-crawl-log-line + .shop-crawl-log-line {
+  margin-top: 0.2rem;
+}
+
+.admin-page .shop-crawl-log-line.is-error {
+  color: var(--bad);
+}
+
+.admin-page .shop-crawl-log-line.is-warn {
+  color: var(--warn);
+}
+
+.admin-page .shop-crawl-log-line.is-ok {
+  color: var(--good);
+}
+
 .form-subsection h3 {
   margin: 0;
   font-size: 0.95rem;
@@ -754,6 +847,64 @@ label.button input.sr-only {
   max-height: 14rem;
   overflow: auto;
   padding-right: 0.25rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-intro {
+  margin-bottom: 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-intro .import-hint {
+  margin: 0;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-toolbar {
+  align-items: end;
+  gap: 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-count {
+  margin: 0.45rem 0 0.65rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-list {
+  gap: 0.45rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  max-width: min(100%, 16rem);
+  text-align: left;
+  white-space: normal;
+  line-height: 1.25;
+  min-height: 2.5rem;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-name {
+  font-weight: 600;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-pass-meta {
+  font-size: 0.78rem;
+  opacity: 0.78;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-selected-labels {
+  margin: 0.2rem 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.owned-iconic-upgrade-analyzer .owned-collection-baseline-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
 }
 
 .iconic-20-checker .iconic-20-checker-owned,
@@ -1159,6 +1310,34 @@ label.button input.sr-only {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.day-boost-day-field .date-picker-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.date-picker-control .date-picker-input {
+  min-width: 9.5rem;
+  flex: 1 1 auto;
+}
+
+.date-picker-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.55rem;
+  min-width: 2.25rem;
+}
+
+.date-picker-icon {
+  display: block;
+}
+
+.calendar-day-actions {
+  margin: 0 0 0.85rem;
+}
+
 .rank-search-field {
   grid-column: 1 / -1;
 }
@@ -1172,30 +1351,17 @@ label.button input.sr-only {
 }
 
 .cloud-profile-panel {
-  border-color: rgba(228, 160, 36, 0.22);
+  border-color: var(--line);
 }
 
 .cloud-load-block {
   display: grid;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(228, 160, 36, 0.18);
-  background: rgba(228, 160, 36, 0.04);
+  gap: 0.85rem;
+  margin-bottom: 0.75rem;
 }
 
 .cloud-load-fields {
   margin-bottom: 0;
-}
-
-.cloud-load-button {
-  width: 100%;
-  min-height: 4rem;
-  padding: 1rem 1.5rem;
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
 }
 
 .cloud-load-meta {
@@ -1203,16 +1369,7 @@ label.button input.sr-only {
 }
 
 .cloud-sync-advanced {
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--line);
-}
-
-.cloud-sync-subheading {
-  margin: 0 0 0.85rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-soft);
+  margin-top: 0.75rem;
 }
 
 .cloud-save-actions .button {
@@ -2471,6 +2628,31 @@ button.calendar-day {
   color: var(--accent-soft);
 }
 
+.help-details {
+  margin: 0.75rem 0 0;
+}
+
+.help-details > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  width: fit-content;
+}
+
+.help-details[open] > summary {
+  margin-bottom: 0.55rem;
+}
+
+.help-details .help-list,
+.help-details .import-hint {
+  margin-top: 0.55rem;
+}
+
+.panel > .help-details:first-child,
+.form-subsection > .help-details:first-child {
+  margin-top: 0;
+}
+
 .sr-only {
   height: 1px;
   margin: -1px;
@@ -2642,6 +2824,27 @@ button.calendar-day {
     grid-template-columns: 1fr;
   }
 
+  .owned-iconic-upgrade-analyzer .owned-collection-toolbar {
+    align-items: stretch;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-pass {
+    max-width: none;
+    width: 100%;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-pass-list {
+    max-height: 18rem;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-baseline-actions {
+    align-items: stretch;
+  }
+
+  .owned-iconic-upgrade-analyzer .owned-collection-baseline-actions .button {
+    width: 100%;
+  }
+
   .hero-card,
   .panel {
     padding: 1rem;
@@ -2677,6 +2880,27 @@ button.calendar-day {
     min-width: 0;
     white-space: normal;
     text-align: center;
+  }
+
+  .day-boost-day-field .date-picker-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+  }
+
+  .date-picker-control .date-picker-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .date-picker-control .button:not(.date-picker-icon-button) {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .cloud-save-actions .button {
+    width: 100%;
+    min-width: 0;
   }
 
   .compact-actions {

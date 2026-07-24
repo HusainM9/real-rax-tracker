@@ -13,6 +13,7 @@ import {
   type RemoveCardFromCollectionOptions,
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
+import { ignorePassOnImport, removeIgnoredPassKey } from '../lib/ignoredPasses'
 import {
   createEmptyData,
   exportTrackerData,
@@ -27,10 +28,12 @@ import {
 import {
   importFromAdminOwnership as runAdminOwnershipImport,
   importFromUsername as runUsernameImport,
+  retryFailedEarnings as runRetryFailedEarnings,
   type UsernameImportOptions,
   type UsernameImportProgress,
   type UsernameImportResult,
 } from '../lib/usernameImport'
+import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { createId } from '../lib/id'
 import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
@@ -82,6 +85,8 @@ type RaxDataContextValue = {
   setCardRarity: (id: string, targetRarity: string) => void
   deleteCard: (id: string) => void
   removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
+  ignorePassOnImport: (id: string) => boolean
+  unignorePassKey: (externalKey: string) => void
   addPerformance: (input: PerformanceInput) => void
   addPerformances: (inputs: PerformanceInput[]) => void
   updatePerformance: (id: string, patch: Partial<PerformanceInput>) => void
@@ -107,6 +112,10 @@ type RaxDataContextValue = {
   replaceData: (next: RaxTrackerData) => void
   importFromUsername: (
     username: string,
+    options?: ImportFromUsernameOptions,
+  ) => Promise<UsernameImportResult>
+  retryFailedEarnings: (
+    passes: EarningsBackfillPass[],
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
   importFromAdminOwnership: (
@@ -254,6 +263,19 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           return next
         })
         return removed
+      },
+      ignorePassOnImport: (id) => {
+        let ignored = false
+        setData((current) => {
+          const next = ignorePassOnImport(current, id)
+          if (!next) return current
+          ignored = true
+          return next
+        })
+        return ignored
+      },
+      unignorePassKey: (externalKey) => {
+        setData((current) => removeIgnoredPassKey(current, externalKey))
       },
       addPerformance: (input) => {
         setData((current) => ({
@@ -490,6 +512,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           ...nextData,
           settings: { ...nextData.settings, savedUsername: trimmed },
         })
+        return result
+      },
+      retryFailedEarnings: async (passes, options) => {
+        const { data: nextData, result } = await runRetryFailedEarnings(data, passes, options)
+        setData(nextData)
         return result
       },
       importFromAdminOwnership: async (username, options) => {

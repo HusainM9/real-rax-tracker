@@ -1,6 +1,7 @@
 import type { CatalogImportProfile, CatalogSearchResult } from './catalogApi'
 import { sportFromCatalog } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
+import { isUfcCatalogSport } from '../../lib/passKind'
 import {
   analyzeCatalogBundleImpacts,
   analyzeCatalogCandidate,
@@ -61,7 +62,7 @@ export function plannedPassFromCatalogResult(
     name: result.name,
     sport: sportFromCatalog(result.sport),
     season: result.seasonLabel.trim() || String(result.seasonYear),
-    passKind: result.passKind,
+    passKind: isUfcCatalogSport(result.sport) ? 'player' : result.passKind,
     simulatedRarityLabel: simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY,
     totalBaseRax: result.totalBaseRax,
     rowCount: result.rowCount,

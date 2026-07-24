@@ -32,7 +32,22 @@ export function createEmptyData(): RaxTrackerData {
     cachedPlayerEarnings: [],
     savedSellRankings: null,
     plannedPasses: [],
+    ignoredPassKeys: [],
   }
+}
+
+function hydrateIgnoredPassKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const key = entry.trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    keys.push(key)
+  }
+  return keys
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -315,6 +330,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .map(hydratePlannedPass)
           .filter((pass): pass is PlannedPass => pass !== null)
       : [],
+    ignoredPassKeys: hydrateIgnoredPassKeys(value.ignoredPassKeys),
   }
 }
 

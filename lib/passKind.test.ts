@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeTeamPassName, resolveImportPassKind } from './passKind'
+import {
+  catalogCandidatePassKindsForSport,
+  isPlayerLikeCatalogPass,
+  isUfcCatalogSport,
+  looksLikeTeamPassName,
+  resolveImportPassKind,
+} from './passKind'
 
 describe('looksLikeTeamPassName', () => {
   it('detects common Real team pass names', () => {
@@ -12,6 +18,17 @@ describe('looksLikeTeamPassName', () => {
   it('does not treat player names as team passes', () => {
     expect(looksLikeTeamPassName('Julian Strawther')).toBe(false)
     expect(looksLikeTeamPassName('Christian Braun')).toBe(false)
+  })
+})
+
+describe('UFC catalog pass kind helpers', () => {
+  it('treats UFC fighters as player-like even when pass_kind is team', () => {
+    expect(isUfcCatalogSport('UFC')).toBe(true)
+    expect(isPlayerLikeCatalogPass({ passKind: 'team', sport: 'UFC' })).toBe(true)
+    expect(isPlayerLikeCatalogPass({ passKind: 'team', sport: 'NBA' })).toBe(false)
+    expect(isPlayerLikeCatalogPass({ passKind: 'player', sport: 'NBA' })).toBe(true)
+    expect(catalogCandidatePassKindsForSport('UFC')).toEqual(['team', 'player'])
+    expect(catalogCandidatePassKindsForSport('NBA')).toEqual(['player'])
   })
 })
 

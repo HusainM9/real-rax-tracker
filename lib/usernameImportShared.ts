@@ -1,4 +1,8 @@
-import { normalizeSportForSeasonWindow } from './seasonClaimWindow'
+import {
+  expectedSeasonLabelFromYear,
+  normalizeSportForSeasonWindow,
+  seasonYearKindForSport,
+} from './seasonClaimWindow'
 
 function normalizeMeowbotSport(raw: string): string {
   const sport = raw.trim().toLowerCase()
@@ -8,13 +12,7 @@ function normalizeMeowbotSport(raw: string): string {
 }
 
 export function isCalendarYearSportRaw(sportRaw: string): boolean {
-  const sport = normalizeMeowbotSport(sportRaw)
-  return sport === 'ufc' || sport === 'golf' || sport === 'mlb' || sport === 'wnba'
-}
-
-function isCollegeSportRaw(sportRaw: string): boolean {
-  const sport = normalizeMeowbotSport(sportRaw)
-  return sport === 'ncaaf' || sport === 'ncaam'
+  return seasonYearKindForSport(normalizeMeowbotSport(sportRaw)) === 'calendar'
 }
 
 export function displaySportFromRaw(raw: string): string {
@@ -45,15 +43,9 @@ export function displaySportFromRaw(raw: string): string {
   }
 }
 
+/** Single source of truth for season-year encoding lives in seasonClaimWindow. */
 export function seasonLabelFromSportRaw(seasonYear: number, sportRaw: string): string {
-  if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
-  if (isCollegeSportRaw(sportRaw)) {
-    return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
-  }
-  if (isCalendarYearSportRaw(sportRaw)) {
-    return String(seasonYear)
-  }
-  return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
+  return expectedSeasonLabelFromYear(seasonYear, normalizeMeowbotSport(sportRaw))
 }
 
 /** Same season label rules for live username import and admin ownership snapshots. */

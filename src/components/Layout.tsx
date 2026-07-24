@@ -124,10 +124,7 @@ export default function Layout() {
       </main>
 
       <footer className="site-footer">
-        <p>
-          Data stays in your browser unless you export a backup. Not affiliated with Real Sports
-          or Meowbot.
-        </p>
+        <p>Data stays in your browser unless you export a backup. Not affiliated with Real Sports.</p>
         {!devBypass ? (
           <button className="button auth-sign-out" type="button" onClick={() => void signOut()}>
             Sign out

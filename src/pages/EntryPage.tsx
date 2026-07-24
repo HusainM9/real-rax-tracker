@@ -1,7 +1,12 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
-import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImportEnabled } from '../lib/importShutdown'
+import {
+  usernameImportDisabled,
+  realappToolsShutdownLabel,
+  realProviderImportEnabled,
+  testAdminCacheImportEnabled,
+} from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
@@ -11,12 +16,14 @@ import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearc
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
+import { formatIgnorePassConfirmMessage } from '../lib/ignoredPasses'
 import { CARD_RARITY_OPTIONS } from '../lib/cardRarity'
 import {
   getFailedPlayerPasses,
   type FailedPlayerPassImport,
   type UsernameImportProgress,
 } from '../lib/usernameImport'
+import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -102,7 +109,7 @@ function cardEntryFromCatalogProfile(
     season: profile.seasonLabel || String(profile.seasonYear),
     rarityLabel: profile.rarityLabel ?? '',
     passKind: profile.passKind,
-    notes: profile.rows.length > 0 ? 'Imported from Meowbot catalog' : '',
+    notes: profile.rows.length > 0 ? 'Imported from shared catalog' : '',
     earningsInput: 'paste',
     rawJson: profile.rows.length > 0 ? catalogProfileToFilteredJson(profile) : '',
   }
@@ -115,11 +122,13 @@ export default function EntryPage() {
     updateCard,
     setCardRarity,
     removeCardFromCollection,
+    ignorePassOnImport,
     addPerformance,
     addPerformances,
     updatePerformance,
     deletePerformance,
     importFromUsername,
+    retryFailedEarnings,
     importFromAdminOwnership,
     saveCardProfile,
     restoreCardProfile,
@@ -148,6 +157,8 @@ export default function EntryPage() {
   const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
     FailedPlayerPassImport[]
   >([])
+  const [retryableEarningsPasses, setRetryableEarningsPasses] = useState<EarningsBackfillPass[]>([])
+  const [retryingFailedEarnings, setRetryingFailedEarnings] = useState(false)
   const [existingCardQuery, setExistingCardQuery] = useState('')
   const [catalogImportingKey, setCatalogImportingKey] = useState('')
   const [catalogStatus, setCatalogStatus] = useState('')
@@ -166,6 +177,7 @@ export default function EntryPage() {
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
   const testingAdminCache = testAdminCacheImportEnabled()
+  const realImportActive = realProviderImportEnabled()
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -205,7 +217,7 @@ export default function EntryPage() {
     try {
       const { profile, storageConfigured } = await fetchCatalogImportProfile(result.externalKey)
       if (!storageConfigured) {
-        setCatalogStatus('Meowbot catalog search is not configured yet.')
+        setCatalogStatus('Shared catalog search is not configured yet.')
         return
       }
       if (!profile) {
@@ -453,7 +465,7 @@ export default function EntryPage() {
     if (!username) return
     if (importDisabled) {
       setUsernameImportStatus(
-        'Automatic username import is closed because realapp.tools / Meowbot has shut down. Use catalog quick add or Manual add below for future entries.',
+        'Automatic username import is closed. Use catalog quick add or Manual add below.',
       )
       return
     }
@@ -465,6 +477,7 @@ export default function EntryPage() {
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
     setUsernameImportFailedPasses([])
+    setRetryableEarningsPasses([])
 
     try {
       const result = await importFromUsername(username, {
@@ -488,7 +501,12 @@ export default function EntryPage() {
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
+      const ignoreNote =
+        result.passesIgnored > 0
+          ? ` · skipped ${result.passesIgnored} ignored pass${result.passesIgnored === 1 ? '' : 'es'}`
+          : ''
       setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
       void reportImportAdminEvents(username, result)
       if (result.errors.length > 0) {
         setCardEntry((current) => ({
@@ -503,7 +521,7 @@ export default function EntryPage() {
           result.passesFetched
         } pass${result.passesFetched === 1 ? '' : 'es'} (${result.cardsCreated} new card${
           result.cardsCreated === 1 ? '' : 's'
-        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
+        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${ignoreNote}${issueNote}.`,
       )
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
         setShowHeavyTables(false)
@@ -529,6 +547,49 @@ export default function EntryPage() {
     importAbortRef.current?.abort()
   }
 
+  const retryFailedEarningsImport = async () => {
+    if (retryableEarningsPasses.length === 0) return
+
+    importAbortRef.current?.abort()
+    const controller = new AbortController()
+    importAbortRef.current = controller
+    setRetryingFailedEarnings(true)
+    setUsernameImportStatus('')
+    setUsernameImportProgress(null)
+
+    try {
+      const result = await retryFailedEarnings(retryableEarningsPasses, {
+        signal: controller.signal,
+        onProgress: setUsernameImportProgress,
+      })
+      const failedPlayerPasses = getFailedPlayerPasses(result)
+      setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
+      const remaining = result.retryableEarningsPasses.length
+      setUsernameImportStatus(
+        remaining > 0
+          ? `Retry imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'}; ${remaining} pass${remaining === 1 ? '' : 'es'} still need another try.`
+          : `Retry imported ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} — all failed earnings resolved.`,
+      )
+      if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
+        setShowHeavyTables(false)
+      }
+      setPerformancesPage(1)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setUsernameImportStatus('Retry cancelled.')
+      } else {
+        setUsernameImportStatus(
+          error instanceof Error ? error.message : 'Retry failed. Try again.',
+        )
+      }
+    } finally {
+      setRetryingFailedEarnings(false)
+      setUsernameImportProgress(null)
+      importAbortRef.current = null
+    }
+  }
+
   const importFromAdminSnapshot = async () => {
     const username = usernameImport.username.trim()
     if (!username) return
@@ -536,15 +597,21 @@ export default function EntryPage() {
     setUsernameImportStatus('')
     setUsernameImportProgress(null)
     setUsernameImportFailedPasses([])
+    setRetryableEarningsPasses([])
     try {
       const result = await importFromAdminOwnership(username, {
         onProgress: setUsernameImportProgress,
       })
       const failedPlayerPasses = getFailedPlayerPasses(result)
       setUsernameImportFailedPasses(failedPlayerPasses)
+      setRetryableEarningsPasses(result.retryableEarningsPasses)
       const skipNote =
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
+          : ''
+      const ignoreNote =
+        result.passesIgnored > 0
+          ? ` · skipped ${result.passesIgnored} ignored pass${result.passesIgnored === 1 ? '' : 'es'}`
           : ''
       const raxNote =
         result.rowsImported > 0
@@ -555,7 +622,7 @@ export default function EntryPage() {
           ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
           : ''
       setUsernameImportStatus(
-        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${issueNote}.`,
+        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${ignoreNote}${issueNote}.`,
       )
       setCardsPage(1)
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
@@ -627,59 +694,33 @@ export default function EntryPage() {
 
   return (
     <div className="page-stack">
-      <CatalogSearchPanel
-        sectionId="catalog-search"
-        title="Quick add from catalog"
-        description="The fastest way to add a pass — search the shared Meowbot database, choose rarity, and import daily earnings in one step. No JSON paste required when catalog rows exist."
-        badge="Recommended"
-        actionLabel="Add to collection"
-        loadingLabel="Adding…"
-        loadingKey={catalogImportingKey}
-        disabled={Boolean(catalogImportingKey)}
-        collectionAdd={{
-          defaultRarity: catalogAddDefaultRarity,
-          onDefaultRarityChange: setCatalogAddDefaultRarity,
-          rarityOptions: CARD_RARITY_OPTIONS,
-          rarityForResult: (result) =>
-            resolveCatalogAddRarity(result, catalogAddDefaultRarity, catalogAddRarityOverrides),
-          onRarityForResultChange: (externalKey, rarity) =>
-            setCatalogAddRarityOverrides((current) => ({ ...current, [externalKey]: rarity })),
-        }}
-        onSelect={importFromCatalog}
-        planAdd={{ plannedExternalKeys, onPlanLabel: 'On plan' }}
-        onAddToPlan={addToPlan}
-      />
-      {planStatus ? <p className="import-status">{planStatus}</p> : null}
-      {catalogStatus ? (
-        <section className="panel catalog-add-success">
-          <p className="import-status">{catalogStatus}</p>
-          <div className="button-row">
-            <a className="button primary" href="#player-cards">
-              View your cards
-            </a>
-            <button className="button" type="button" onClick={() => setCatalogStatus('')}>
-              Dismiss
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
         <div className="section-heading">
           <div>
-            <h2>Import from Real username</h2>
-            <p>
-              Enter your @username to fetch Legendary+ player and team passes while realapp.tools
-              is still online. Automatic import closes after {realappToolsShutdownLabel()}; existing
-              local data and backups keep working. Data via{' '}
-              <a href="https://realapp.tools" target="_blank" rel="noreferrer">
-                realapp.tools
-              </a>{' '}
-              / Meowbot — no Real API key needed.
-            </p>
+            <h2>Username import</h2>
+            {realImportActive ? (
+              <p>
+                Enter your Real @username to recover Legendary+ passes. Daily RAX may load in
+                stages — retry misses without redoing the pass list.
+              </p>
+            ) : (
+              <p>
+                Automatic username import{' '}
+                {importDisabled
+                  ? 'is closed'
+                  : `closes after ${realappToolsShutdownLabel()}`}
+                . Local data and backups still work.
+              </p>
+            )}
           </div>
           <span className="badge">
-            {testingAdminCache ? 'Admin cache test' : importDisabled ? 'Closed' : 'Until shutdown'}
+            {testingAdminCache
+              ? 'Admin cache test'
+              : realImportActive
+                ? 'Primary'
+                : importDisabled
+                  ? 'Closed'
+                  : 'Limited'}
           </span>
         </div>
         <div className="form-grid">
@@ -688,7 +729,7 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting || adminSnapshotImporting}
+              disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
@@ -696,44 +737,23 @@ export default function EntryPage() {
           </label>
         </div>
         <p className="import-hint">
-          Imports Legendary, Mystic, and Iconic passes into your collection, and caches any player
-          earnings it can fetch to speed up future manual Entry and Potential checks. Your username
-          is saved in this browser after a successful import.
+          Legendary+ only
+          {realImportActive ? ' · duplicates keep best rarity' : ''}
+          . Username saved after a successful import.
         </p>
         {importDisabled ? (
           <>
-            <section className="panel import-hint" aria-labelledby="admin-cache-info-heading">
-              <h3 id="admin-cache-info-heading">Recovering from admin cache</h3>
+            <details className="help-details import-hint">
+              <summary>Recover from admin cached passes</summary>
               <p>
-                If you never imported while Meowbot was online, use{' '}
-                <strong>Import from admin cached passes</strong> below with your Real @username.
-                Admin may have saved a full snapshot before shutdown.
+                Try <strong>Import from admin cached passes</strong> with your exact Real @username
+                if a prior import reported ownership. Data may be incomplete — verify in Real.
+                Optional cloud backup is on the <Link to="/dashboard">Dashboard</Link>.
               </p>
-              <ul className="help-list">
-                <li>
-                  Data may <strong>not be up to date</strong> — it reflects what was saved when admin
-                  ran the import, not live Meowbot.
-                </li>
-                <li>
-                  Some RAX or pass values <strong>could be wrong</strong>. Treat totals as estimates
-                  until you verify against Real.
-                </li>
-                <li>
-                  Everything is tied to the <strong>Real @username</strong> admin used at import time
-                  (before Meowbot shut down). Use that exact username below — a different spelling
-                  will not find your snapshot.
-                </li>
-                <li>
-                  After importing, set up a <strong>cloud sync PIN</strong> on the{' '}
-                  <Link to="/dashboard">Dashboard</Link> using the same Real username so you can
-                  back up and restore your collection on other devices.
-                </li>
-              </ul>
-            </section>
+            </details>
             <p className="import-status">
-              Automatic username import is closed. If admin did not import your username, search the{' '}
-              <a href="#catalog-search">shared catalog</a> above instead. Existing local data stays
-              in this browser — use Export JSON on Dashboard for backups.
+              Automatic username import is closed. Use{' '}
+              <a href="#catalog-search">Quick add</a> below, or Export JSON on Dashboard.
             </p>
           </>
         ) : null}
@@ -743,6 +763,7 @@ export default function EntryPage() {
             type="submit"
             disabled={
               usernameImporting ||
+              retryingFailedEarnings ||
               adminSnapshotImporting ||
               importDisabled ||
               usernameImport.username.trim().length === 0
@@ -754,13 +775,18 @@ export default function EntryPage() {
             <button
               className="button"
               type="button"
-              disabled={usernameImporting || adminSnapshotImporting || usernameImport.username.trim().length === 0}
+              disabled={
+                usernameImporting ||
+                retryingFailedEarnings ||
+                adminSnapshotImporting ||
+                usernameImport.username.trim().length === 0
+              }
               onClick={() => void importFromAdminSnapshot()}
             >
               {adminSnapshotImporting ? 'Importing cached passes…' : 'Import from admin cached passes'}
             </button>
           ) : null}
-          {usernameImporting ? (
+          {usernameImporting || retryingFailedEarnings ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>
               Cancel
             </button>
@@ -773,49 +799,54 @@ export default function EntryPage() {
           <p className="import-progress">
             {usernameImportProgress.phase === 'resolving'
               ? usernameImportProgress.label
-              : `Fetching pass ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`}
+              : usernameImportProgress.phase === 'earnings'
+                ? `Daily RAX ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`
+                : `Fetching pass ${usernameImportProgress.current}/${usernameImportProgress.total} — ${usernameImportProgress.label}`}
           </p>
         ) : null}
         {usernameImportStatus ? <p className="import-status">{usernameImportStatus}</p> : null}
-        {usernameImportFailedPasses.length > 0 && !usernameImporting ? (
+        {usernameImportFailedPasses.length > 0 && !usernameImporting && !retryingFailedEarnings ? (
           <section className="import-failures">
             <p className="import-hint">
               <strong>
                 {usernameImportFailedPasses.length} player pass
                 {usernameImportFailedPasses.length === 1 ? '' : 'es'} could not import earnings.
               </strong>{' '}
-              Use <a href="#catalog-search">shared catalog search</a> or{' '}
-              <a href="#manual-card-entry">Manual add</a> below to finish these passes
+              {retryableEarningsPasses.length > 0 ? (
+                <>
+                  Use <strong>Retry failed earnings</strong> for misses only (pass list stays put).
+                </>
+              ) : (
+                <>
+                  Finish with <a href="#catalog-search">Quick add</a> or{' '}
+                  <a href="#manual-card-entry">Manual add</a> below.
+                </>
+              )}
               {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings') ? (
                 <>
                   {' '}
-                  (cards with <strong>no earnings</strong> were still created — select the card, paste
-                  JSON, or add RAX day by day)
-                </>
-              ) : null}
-              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
-                <>
-                  {usernameImportFailedPasses.some((pass) => pass.reason === 'no_earnings')
-                    ? '; for fetch failures you can paste from'
-                    : ' — paste from'}
-                </>
-              ) : null}
-              {usernameImportFailedPasses.some((pass) => pass.reason === 'fetch_error') ? (
-                <>
-                  {' '}
-                  <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                    realapp.com
-                  </a>{' '}
-                  or restore a{' '}
+                  <strong>No earnings</strong> cards were still created — paste JSON or add days via{' '}
                   <button className="link-button" type="button" onClick={openCardEntryForExisting}>
-                    saved profile
+                    Manual add
                   </button>
+                  .
                 </>
-              ) : (
-                <> — search the shared catalog above or paste from realapp.com if you have it</>
-              )}
-              .
+              ) : null}
             </p>
+            {retryableEarningsPasses.length > 0 ? (
+              <div className="button-row">
+                <button
+                  className="button primary"
+                  type="button"
+                  disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
+                  onClick={() => void retryFailedEarningsImport()}
+                >
+                  {retryingFailedEarnings
+                    ? 'Retrying…'
+                    : `Retry failed earnings (${retryableEarningsPasses.length})`}
+                </button>
+              </div>
+            ) : null}
             <div className="table-wrap">
               <table>
                 <thead>
@@ -843,7 +874,11 @@ export default function EntryPage() {
                       <td>{pass.sport}</td>
                       <td>{pass.season || '—'}</td>
                       <td>
-                        {pass.reason === 'no_earnings' ? 'No earnings (card added)' : 'Fetch failed'}
+                        {pass.reason === 'no_earnings'
+                          ? 'No earnings (card added)'
+                          : pass.retryable
+                            ? 'Fetch failed (retryable)'
+                            : 'Fetch failed'}
                         <br />
                         <small className="table-sub">{pass.detail}</small>
                       </td>
@@ -854,7 +889,7 @@ export default function EntryPage() {
             </div>
           </section>
         ) : null}
-        {usernameImportStatus && !usernameImporting ? (
+        {usernameImportStatus && !usernameImporting && !retryingFailedEarnings ? (
           <div className="button-row">
             <Link className="button primary" to="/">
               View Dashboard
@@ -866,12 +901,57 @@ export default function EntryPage() {
         ) : null}
       </form>
 
+      {planStatus ? <p className="import-status">{planStatus}</p> : null}
+      {catalogStatus ? (
+        <section className="panel catalog-add-success">
+          <p className="import-status">{catalogStatus}</p>
+          <div className="button-row">
+            <a className="button primary" href="#player-cards">
+              View your cards
+            </a>
+            <button className="button" type="button" onClick={() => setCatalogStatus('')}>
+              Dismiss
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <CollapsiblePanel
+        id="catalog-search"
+        title="Quick add"
+        description="Search the shared catalog, pick rarity, add when earnings exist."
+        badge="Secondary"
+        defaultOpen={false}
+      >
+        <CatalogSearchPanel
+          embedded
+          description="Search the shared catalog, pick rarity, add when earnings exist."
+          actionLabel="Add to collection"
+          loadingLabel="Adding…"
+          loadingKey={catalogImportingKey}
+          disabled={Boolean(catalogImportingKey)}
+          emptyHint="Type a player name — Add to collection when earnings are available."
+          collectionAdd={{
+            defaultRarity: catalogAddDefaultRarity,
+            onDefaultRarityChange: setCatalogAddDefaultRarity,
+            rarityOptions: CARD_RARITY_OPTIONS,
+            rarityForResult: (result) =>
+              resolveCatalogAddRarity(result, catalogAddDefaultRarity, catalogAddRarityOverrides),
+            onRarityForResultChange: (externalKey, rarity) =>
+              setCatalogAddRarityOverrides((current) => ({ ...current, [externalKey]: rarity })),
+          }}
+          onSelect={importFromCatalog}
+          planAdd={{ plannedExternalKeys, onPlanLabel: 'On plan' }}
+          onAddToPlan={addToPlan}
+        />
+      </CollapsiblePanel>
+
       <CollapsiblePanel
         id="manual-card-entry"
         title="Manual add (paste JSON)"
-        description="Only needed when a pass isn't in the catalog or you want to paste earnings directly from realapp.com."
+        description="When a pass isn't in the catalog, or you want to paste realapp.com earnings."
         badge={`${data.cards.length} cards`}
-        defaultOpen={data.cards.length === 0}
+        defaultOpen={false}
       >
       <form
         className="form-panel-inner"
@@ -882,8 +962,7 @@ export default function EntryPage() {
           <div>
             <h2>Add card &amp; earnings manually</h2>
             <p>
-              Prefer the <a href="#catalog-search">catalog quick add</a> above when the pass is in
-              the shared database — it imports daily RAX automatically.
+              Prefer <a href="#catalog-search">Quick add</a> when the pass is in the shared catalog.
             </p>
           </div>
         </div>
@@ -1045,48 +1124,28 @@ export default function EntryPage() {
             <div>
               <h3>Daily RAX earnings</h3>
               <p className="subsection-note">
-                Paste JSON from realapp.com, load cached player earnings, or enter a single day
-                manually.
+                Paste JSON, load cached earnings, or enter a single day.
               </p>
             </div>
           </div>
 
-          <section className="panel import-hint">
-            <p>
-              <strong>Manual earnings after import shutdown</strong> — use realapp.com on a{' '}
-              <strong>desktop</strong> browser (Real Pro). Mobile redirects to the app store.
-            </p>
+          <details className="help-details">
+            <summary>How to copy earnings JSON</summary>
             <ol className="help-list ordered">
               <li>
-                Open{' '}
+                Desktop{' '}
                 <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
                   realapp.com
                 </a>{' '}
-                and log in.
+                (Real Pro) → open pass earnings.
               </li>
               <li>
-                Open DevTools (<kbd>F12</kbd>) and the <strong>Network</strong> tab before loading
-                earnings.
+                DevTools (<kbd>F12</kbd>) → <strong>Network</strong> →{' '}
+                <code>userpassearnings</code> → copy Response JSON.
               </li>
-              <li>
-                Go to the player&apos;s season and open the card earnings screen by clicking the{' '}
-                <strong>RAX icon</strong> on a performance.
-              </li>
-              <li>
-                In Network, filter for the request whose URL
-                includes <code>playerBoxScoreId</code> (for example{' '}
-                <code>
-                  userpassearnings/nba/season/2023/entity/player/…?playerBoxScoreId=…
-                </code>
-                ).
-              </li>
-              <li>
-                Copy the full <strong>Response</strong> JSON — an <code>earnings</code> array with{' '}
-                <code>day</code> and <code>earnings</code> fields.
-              </li>
-              <li>Paste below and save. OTD rarity is applied from the card when set.</li>
+              <li>Paste below and save.</li>
             </ol>
-          </section>
+          </details>
 
           <div className="entry-mode-toggle" role="group" aria-label="Earnings input mode">
             <button
@@ -1170,15 +1229,12 @@ export default function EntryPage() {
       <CollapsiblePanel
         className="saved-earnings-profiles-panel"
         title="Saved earnings profiles"
-        description="Cards you add manually are saved here automatically. After re-import wipes pasted earnings, click Restore to add them back onto the matching pass."
+        description="Auto-saved pastes. Restore after re-import wipes earnings on a pass."
         badge={`${data.savedCardProfiles.length} saved`}
         defaultOpen={false}
       >
         {data.savedCardProfiles.length === 0 ? (
-          <p className="empty">
-            No saved profiles yet. Import or paste earnings above — each save updates the profile
-            for that player.
-          </p>
+          <p className="empty">No saved profiles yet. Paste or import earnings to create one.</p>
         ) : (
           <div className="list saved-earnings-profile-list">
             {data.savedCardProfiles.map((profile) => (
@@ -1325,18 +1381,36 @@ export default function EntryPage() {
                       <input value={card.notes} onChange={(event) => updateCard(card.id, { notes: event.target.value })} />
                     </td>
                     <td>
-                      <button
-                        className="button danger"
-                        type="button"
-                        onClick={() => {
-                          if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
-                          removeCardFromCollection(card.id, {
-                            removedNote: `Removed ${new Date().toISOString().slice(0, 10)}`,
-                          })
-                        }}
-                      >
-                        Remove
-                      </button>
+                      <span className="button-row compact-actions">
+                        {card.externalKey ? (
+                          <button
+                            className="button compact"
+                            type="button"
+                            onClick={() => {
+                              if (!window.confirm(formatIgnorePassConfirmMessage(card))) return
+                              if (ignorePassOnImport(card.id)) {
+                                setCardEntryStatus(
+                                  `Ignored ${card.name || 'pass'} on import. Manage under Cards → Ignored passes.`,
+                                )
+                              }
+                            }}
+                          >
+                            Ignore on import
+                          </button>
+                        ) : null}
+                        <button
+                          className="button danger compact"
+                          type="button"
+                          onClick={() => {
+                            if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
+                            removeCardFromCollection(card.id, {
+                              removedNote: `Removed ${new Date().toISOString().slice(0, 10)}`,
+                            })
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))

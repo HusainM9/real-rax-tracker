@@ -1,6 +1,7 @@
+import { expectedSeasonLabelFromYear } from '../../lib/seasonClaimWindow'
 import { normalizeMeowbotSport } from './meowbotApi'
 
-/** College seasons use the start year in Real's `season` field. */
+/** College sports (encoding differs: CFB/ncaaf start-year, CBB/ncaam end-year). */
 export function isCollegeSport(sportRaw: string): boolean {
   const sport = normalizeMeowbotSport(sportRaw)
   return sport === 'ncaaf' || sport === 'ncaam'
@@ -31,15 +32,9 @@ export function isCalendarYearSport(sportRaw: string): boolean {
   )
 }
 
+/** Season-year encoding per sport lives in lib/seasonClaimWindow (`seasonYearKindForSport`). */
 export function seasonLabelFromPass(season: number, sportRaw: string): string {
-  if (!Number.isInteger(season) || season < 1000) return String(season)
-  if (isCollegeSport(sportRaw)) {
-    return `${season}-${String(season + 1).slice(-2)}`
-  }
-  if (isCalendarYearSport(sportRaw)) {
-    return String(season)
-  }
-  return `${season - 1}-${String(season).slice(-2)}`
+  return expectedSeasonLabelFromYear(season, normalizeMeowbotSport(sportRaw))
 }
 
 export function passMetadataKey(entityId: number, season: number, sportRaw: string): string {

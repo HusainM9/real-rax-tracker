@@ -26,6 +26,19 @@ export function getRealAppToolsRows(input: unknown): unknown[] {
   return []
 }
 
+/** realapp.tools sends `player_box_score_id`; realapp.com/Real send `playerBoxScoreIds: [...]`. */
+export function realAppToolsBoxScoreId(row: RealAppToolsRow): number | null {
+  const raw =
+    row.player_box_score_id !== undefined && row.player_box_score_id !== null
+      ? row.player_box_score_id
+      : Array.isArray(row.playerBoxScoreIds)
+        ? row.playerBoxScoreIds[0]
+        : undefined
+  if (raw === undefined || raw === null || raw === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function parseClaimDay(day: string): string | null {
   return /^(\d{4}-\d{2}-\d{2})/.exec(day)?.[1] ?? null
 }
@@ -141,6 +154,38 @@ function parseBaseDailyRow(row: RealAppToolsRow): ParsedBaseEarningsRow | null {
   }
 
   return { claimDay, baseRaxEarned: baseEarnings }
+}
+
+/** Base RAX per day, collapsed to one row per claim day (the catalog PK is key + claim_day). */
+export function parseRealAppToolsBaseDailyRows(inputRows: RealAppToolsRow[]): {
+  rows: Array<ParsedBaseEarningsRow & { playerBoxScoreId: number | null }>
+  skipped: number
+} {
+  const byDay = new Map<string, ParsedBaseEarningsRow & { playerBoxScoreId: number | null }>()
+  let skipped = 0
+
+  for (const input of inputRows) {
+    const parsed = parseBaseDailyRow(input)
+    if (!parsed) {
+      skipped += 1
+      continue
+    }
+    const existing = byDay.get(parsed.claimDay)
+    if (existing) {
+      existing.baseRaxEarned += parsed.baseRaxEarned
+      existing.playerBoxScoreId = existing.playerBoxScoreId ?? realAppToolsBoxScoreId(input)
+      continue
+    }
+    byDay.set(parsed.claimDay, {
+      ...parsed,
+      playerBoxScoreId: realAppToolsBoxScoreId(input),
+    })
+  }
+
+  return {
+    rows: [...byDay.values()].sort((a, b) => a.claimDay.localeCompare(b.claimDay)),
+    skipped,
+  }
 }
 
 export function parseRealAppToolsBaseRows(rawJson: string): RealAppToolsBaseParseResult {

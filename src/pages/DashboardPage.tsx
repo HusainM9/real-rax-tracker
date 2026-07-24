@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
+import CollapsiblePanel from '../components/CollapsiblePanel'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import {
@@ -209,7 +210,7 @@ export default function DashboardPage() {
     })
     persistRememberedCredentials()
     setCloudStatus(
-      `Loaded ${cloudConfirm.payload.cards.length} card${cloudConfirm.payload.cards.length === 1 ? '' : 's'} and ${cloudConfirm.payload.performances.length} earnings row${cloudConfirm.payload.performances.length === 1 ? '' : 's'} into your collection. No username import needed — open Cards or Calendar to explore.`,
+      `Loaded ${cloudConfirm.payload.cards.length} card${cloudConfirm.payload.cards.length === 1 ? '' : 's'} · ${cloudConfirm.payload.performances.length} earnings row${cloudConfirm.payload.performances.length === 1 ? '' : 's'}.`,
     )
     setCloudConfirm(null)
   }
@@ -270,7 +271,7 @@ export default function DashboardPage() {
           <div className="section-heading">
             <div>
               <h2>Getting started</h2>
-              <p>Three steps to plan your RAX On This Day claims.</p>
+              <p>Import your collection, then plan OTD claims.</p>
             </div>
             <button className="button" type="button" onClick={closeOnboarding}>
               Dismiss
@@ -278,21 +279,20 @@ export default function DashboardPage() {
           </div>
           <ol className="onboarding-steps">
             <li>
-              <strong>Import or add cards</strong> — use username import while realapp.tools is
-              available, then add future cards manually or from cached earnings.
+              <strong>Entry</strong> — username import recovers your collection; catalog or Manual
+              add for extras.
             </li>
             <li>
-              <strong>Check the Dashboard</strong> — see claimable vs overlapped RAX across your
-              collection and toggle Pro bonus if you use it.
+              <strong>Dashboard</strong> — claimable vs overlapped RAX; toggle Pro bonus if you use
+              it.
             </li>
             <li>
-              <strong>Plan with Calendar and Overlaps</strong> — pick the best claim days and
-              spot wasted RAX before you spend in the app.
+              <strong>Calendar / Overlaps</strong> — pick claim days and spot wasted RAX.
             </li>
           </ol>
           <div className="button-row">
-              <Link className="button primary" to="/entry">
-                Import / add cards
+            <Link className="button primary" to="/entry">
+              Import / add cards
             </Link>
             <Link className="button" to="/help">
               How it works
@@ -301,134 +301,12 @@ export default function DashboardPage() {
         </section>
       ) : null}
 
-      <section className="panel cloud-profile-panel">
-        <div className="section-heading">
-          <div>
-            <h2>Cloud profile</h2>
-            <p>Load your collection with your Real @username and sync PIN.</p>
-          </div>
-        </div>
-        <div className="cloud-load-block">
-          <div className="sort-controls cloud-load-fields">
-            <label className="field inline-field">
-              <span>Real username</span>
-              <input
-                type="text"
-                value={cloudUsername}
-                disabled={cloudBusy}
-                placeholder="username"
-                onChange={(event) => setCloudUsername(event.target.value.replace(/^@/, ''))}
-              />
-            </label>
-            <label className="field inline-field">
-              <span>Sync PIN</span>
-              <input
-                type="password"
-                value={cloudPassphrase}
-                disabled={cloudBusy}
-                placeholder="Current PIN"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={SYNC_PIN_MAX_LENGTH}
-                onChange={(event) =>
-                  setCloudPassphrase(stripSpacesFromSyncPinInput(event.target.value))
-                }
-              />
-              <small className="field-hint">{SYNC_PIN_HELP}</small>
-            </label>
-          </div>
-          <button
-            className="button primary cloud-load-button"
-            type="button"
-            disabled={cloudBusy}
-            onClick={() => void onLoadCloudProfile()}
-          >
-            {cloudBusy ? 'Loading…' : 'Load from cloud'}
-          </button>
-          {data.settings.lastCloudSyncAt ? (
-            <p className="import-hint cloud-load-meta">
-              Last cloud sync on this device:{' '}
-              {new Date(data.settings.lastCloudSyncAt).toLocaleString()}
-            </p>
-          ) : null}
-          {cloudStatus ? <p className="import-status">{cloudStatus}</p> : null}
-        </div>
-        <p className="import-hint">
-          Cloud sync stores cards, earnings, saved profiles, potential cards, and settings.{' '}
-          <strong>Load from cloud</strong> replaces your local collection — you do not need a
-          separate username import afterward. Cached player earnings, sell-ranking snapshots, and
-          original JSON pastes are omitted to save space. Your sync PIN is required to load or save.
-          After an admin reset, sign in with the PIN they gave you, then use{' '}
-          <strong>Change sync PIN</strong> below to pick your own. Forgot your PIN? Ask an admin to
-          reset it.
-        </p>
-        <p className="import-hint">
-          <strong>Large collections (Mac / Safari):</strong> if the site forgets your data after
-          refresh, your browser storage may be full or you may be in Private Browsing. After
-          importing, use <strong>Save to cloud</strong> with your Real @username and a sync PIN —
-          then <strong>Load from cloud</strong> on your next visit. Export JSON as an extra backup.
-        </p>
-        <div className="cloud-sync-advanced">
-          <h3 className="cloud-sync-subheading">Save or change PIN</h3>
-          <div className="sort-controls">
-            <label className="field inline-field">
-              <span>New sync PIN</span>
-              <input
-                type="password"
-                value={cloudNewPassphrase}
-                disabled={cloudBusy}
-                placeholder="Only for changing PIN"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={SYNC_PIN_MAX_LENGTH}
-                onChange={(event) =>
-                  setCloudNewPassphrase(stripSpacesFromSyncPinInput(event.target.value))
-                }
-              />
-              <small className="field-hint">Leave blank unless changing PIN. {SYNC_PIN_HELP}</small>
-            </label>
-          </div>
-          <label className="toggle cloud-sync-remember">
-            <input
-              type="checkbox"
-              checked={rememberCloudSync}
-              disabled={cloudBusy}
-              onChange={(event) => {
-                const checked = event.target.checked
-                setRememberCloudSync(checked)
-                if (!checked) saveCloudSyncCredentials(null)
-              }}
-            />
-            Remember sync PIN on this device
-          </label>
-          <div className="button-row cloud-save-actions">
-            <button
-              className="button"
-              type="button"
-              disabled={cloudBusy}
-              onClick={onSaveCloudProfile}
-            >
-              {cloudBusy ? 'Saving…' : 'Save to cloud'}
-            </button>
-            <button
-              className="button"
-              type="button"
-              disabled={cloudBusy || !cloudNewPassphrase}
-              onClick={() => void onChangeCloudPin()}
-            >
-              Change sync PIN
-            </button>
-          </div>
-        </div>
-      </section>
-
       <section className="hero-card">
         <div>
           <p className="eyebrow">Overview</p>
           <h2>Know what to claim before overlaps waste RAX.</h2>
           <p>
-            Each OTD day shows which player cards are claimable vs overlapped. The calendar groups
-            by month/day so you can plan across your full collection.
+            Claimable vs overlapped RAX by OTD day. Use Calendar for the full month/day view.
           </p>
         </div>
         <div className="hero-actions">
@@ -516,8 +394,7 @@ export default function DashboardPage() {
           </div>
           {rollup.sports.length === 0 ? (
             <p className="empty">
-              Sport totals appear after you import or add player cards.{' '}
-              <Link to="/help">Read the guide</Link>
+              Sport totals appear after you <Link to="/entry">import or add cards</Link>.
             </p>
           ) : (
             <div className="list">
@@ -535,6 +412,117 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      <CollapsiblePanel
+        className="cloud-profile-panel"
+        title="Cloud sync (optional)"
+        description="Sync claims & planner across devices. Collection recovery is username import on Entry."
+        badge="Backup"
+        defaultOpen={false}
+      >
+        <div className="cloud-load-block">
+          <div className="sort-controls cloud-load-fields">
+            <label className="field inline-field">
+              <span>Real username</span>
+              <input
+                type="text"
+                value={cloudUsername}
+                disabled={cloudBusy}
+                placeholder="username"
+                onChange={(event) => setCloudUsername(event.target.value.replace(/^@/, ''))}
+              />
+            </label>
+            <label className="field inline-field">
+              <span>Sync PIN</span>
+              <input
+                type="password"
+                value={cloudPassphrase}
+                disabled={cloudBusy}
+                placeholder="Current PIN"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={SYNC_PIN_MAX_LENGTH}
+                onChange={(event) =>
+                  setCloudPassphrase(stripSpacesFromSyncPinInput(event.target.value))
+                }
+              />
+              <small className="field-hint">{SYNC_PIN_HELP}</small>
+            </label>
+          </div>
+          <div className="button-row">
+            <button
+              className="button primary"
+              type="button"
+              disabled={cloudBusy}
+              onClick={() => void onLoadCloudProfile()}
+            >
+              {cloudBusy ? 'Loading…' : 'Load from cloud'}
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={cloudBusy}
+              onClick={onSaveCloudProfile}
+            >
+              {cloudBusy ? 'Saving…' : 'Save to cloud'}
+            </button>
+          </div>
+          {data.settings.lastCloudSyncAt ? (
+            <p className="import-hint cloud-load-meta">
+              Last sync: {new Date(data.settings.lastCloudSyncAt).toLocaleString()}
+            </p>
+          ) : null}
+          {cloudStatus ? <p className="import-status">{cloudStatus}</p> : null}
+        </div>
+        <p className="import-hint">
+          Optional backup of cards, earnings, planner, and settings. Load replaces this device.
+          Cached earnings and sell snapshots are omitted. Forgot PIN? Ask an admin to reset it.
+        </p>
+        <details className="help-details cloud-sync-advanced">
+          <summary>Change PIN / remember on this device</summary>
+          <div className="sort-controls">
+            <label className="field inline-field">
+              <span>New sync PIN</span>
+              <input
+                type="password"
+                value={cloudNewPassphrase}
+                disabled={cloudBusy}
+                placeholder="Only for changing PIN"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={SYNC_PIN_MAX_LENGTH}
+                onChange={(event) =>
+                  setCloudNewPassphrase(stripSpacesFromSyncPinInput(event.target.value))
+                }
+              />
+              <small className="field-hint">Leave blank unless changing PIN. {SYNC_PIN_HELP}</small>
+            </label>
+          </div>
+          <label className="toggle cloud-sync-remember">
+            <input
+              type="checkbox"
+              checked={rememberCloudSync}
+              disabled={cloudBusy}
+              onChange={(event) => {
+                const checked = event.target.checked
+                setRememberCloudSync(checked)
+                if (!checked) saveCloudSyncCredentials(null)
+              }}
+            />
+            Remember sync PIN on this device
+          </label>
+          <div className="button-row cloud-save-actions">
+            <button
+              className="button"
+              type="button"
+              disabled={cloudBusy || !cloudNewPassphrase}
+              onClick={() => void onChangeCloudPin()}
+            >
+              Change sync PIN
+            </button>
+          </div>
+        </details>
+      </CollapsiblePanel>
+
       {cloudConfirm?.action === 'save' ? (
         <ConfirmDialog
           title={`Save cloud profile for @${cloudConfirm.username}?`}
@@ -544,13 +532,7 @@ export default function DashboardPage() {
           onConfirm={() => void executeSaveCloudProfile()}
           onCancel={cancelCloudConfirm}
         >
-          <p>
-            This overwrites any existing cloud copy for this username. Cards, earnings, saved
-            profiles, potential cards, and settings on this device will be uploaded.
-          </p>
-          <p>
-            Cached player earnings, sell-ranking snapshots, and original JSON pastes are not included.
-          </p>
+          <p>Overwrites any existing cloud copy for this username.</p>
           <p className="confirm-dialog-summary">{cloudConfirm.localSummary}</p>
         </ConfirmDialog>
       ) : null}
@@ -563,10 +545,7 @@ export default function DashboardPage() {
           onConfirm={executeLoadCloudProfile}
           onCancel={cancelCloudConfirm}
         >
-          <p>
-            This replaces local cards, earnings, saved profiles, and settings on this device. You do
-            not need a separate username import afterward.
-          </p>
+          <p>Replaces local cards, earnings, planner, and settings on this device.</p>
           <p className="confirm-dialog-summary">{formatCloudProfileMeta(cloudConfirm.meta)}</p>
         </ConfirmDialog>
       ) : null}

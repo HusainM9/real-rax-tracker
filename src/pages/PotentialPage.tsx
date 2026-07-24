@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { SeasonMultiSelect } from '../components/SeasonMultiSelect'
@@ -16,7 +16,7 @@ import {
 import { computeYearRollup } from '../lib/claimOptimizer'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
-import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
+import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import {
   analyzePotentialCard,
   netWithProDelta,
@@ -31,6 +31,7 @@ import {
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
   countAppliedBaselineAdjustments,
+  DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
   iconic20CatalogSelectionKey,
   iconic20OwnedSelectionKey,
   ICONIC_20_SIMULATED_RARITY,
@@ -41,7 +42,9 @@ import {
   ownedCardToIconic20CheckerCandidate,
   ownedCardToIconicUpgradeCandidate,
   type OwnedIconicUpgradeCandidate,
+  normalizeBestDayParam,
   rankAndRecommendAsync,
+  rankCatalogRecommendationsForDayAsync,
   rankCatalogRecommendationsForMonthAsync,
   RECOMMENDATION_GREEDY_RERANK_CAP,
   RECOMMENDATION_MAX_BUNDLE_SIZE,
@@ -49,6 +52,7 @@ import {
   recommendationCapsForSport,
   recommendationCapsForSports,
   selectSummariesForBulkFetch,
+  topRecommendationRowsPerSport,
   type PassRecommendationBundle,
   type RecommendationPassAdjustment,
   type RecommendationPassAdjustmentMode,
@@ -70,12 +74,12 @@ import {
   topSportOpportunityFocus,
   type SportOpportunityRow,
 } from '../lib/sportOpportunityAnalysis'
-import { realappToolsShutdownLabel } from '../lib/importShutdown'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from '../lib/realAppToolsImport'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { plannedPassFromRecommendationRow } from '../lib/plannedPasses'
+import { isPlayerLikeCatalogPass, isPlayerPass, isUfcCatalogSport } from '../lib/passKind'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
@@ -111,7 +115,7 @@ async function loadSportCatalogSummaries(
         const sportIndex = waveStart + offset
         onSportStart?.(sport, sportIndex, sports.length)
         const result = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player', limit: summaryLimitForSport(sport) },
+          { sport, limit: summaryLimitForSport(sport) },
           signal,
         )
         return { sport, result }
@@ -152,6 +156,14 @@ type ExcludedSportSeason = {
 
 function formatExcludedSportSeason(entry: ExcludedSportSeason): string {
   return `${entry.sport} · ${entry.seasonLabel}`
+}
+
+function createDefaultExcludedSportSeasons(): ExcludedSportSeason[] {
+  return DEFAULT_RANK_EXCLUDED_SPORT_SEASONS.map((entry) => ({
+    key: sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+    sport: entry.sport,
+    seasonLabel: entry.seasonLabel,
+  }))
 }
 
 const EMPTY_FORM = {
@@ -752,17 +764,18 @@ function applyCatalogProfileToForm(
     const storedRows = profile.storedRowCount ?? 0
     setters.setStatus(
       storedRows > 0
-        ? `${profile.name} has ${storedRows} stored catalog row${storedRows === 1 ? '' : 's'} for season ${profile.seasonLabel || profile.seasonYear}, but none are valid after season filtering — re-import this pass in Admin (Meowbot or realapp JSON), or paste earnings manually below.`
-        : `${profile.name} is in the catalog but has no daily RAX rows yet — re-import in Admin or paste earnings manually below.`,
+        ? `${profile.name} has ${storedRows} stored catalog row${storedRows === 1 ? '' : 's'} for season ${profile.seasonLabel || profile.seasonYear}, but none are valid after season filtering — refresh in Admin or paste earnings below.`
+        : `${profile.name} is in the catalog but has no daily RAX rows yet — refresh in Admin or paste earnings below.`,
     )
     return false
   }
 
   const sport = sportFromCatalog(profile.sport)
+  const passKind = isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
   const rawJson = catalogProfileToFilteredJson(profile)
   const parsed = parseRealAppToolsRows(rawJson, {
     sport,
-    passKind: profile.passKind,
+    passKind,
   })
   setters.setEditingId(null)
   setters.setPotentialRows(parsed.rows)
@@ -770,7 +783,7 @@ function applyCatalogProfileToForm(
     name: profile.name,
     sport,
     season: profile.seasonLabel || String(profile.seasonYear),
-    notes: 'Loaded from shared Meowbot catalog',
+    notes: 'Loaded from shared catalog',
     rawJson,
     previewAs: soloPreviewRarity,
   })
@@ -786,8 +799,26 @@ function applyCatalogProfileToForm(
 
 const POTENTIAL_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
 
+function CalendarDayIcon() {
+  return (
+    <svg
+      className="date-picker-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M2 6.5h12" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M5 1.75v2.5M11 1.75v2.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function PotentialPage() {
   const { data, addPotentialCard, updatePotentialCard, deletePotentialCard, addPlannedPass, addPlannedPassFromCatalog } = useRaxData()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [form, setForm] = useState(EMPTY_FORM)
   const [potentialRows, setPotentialRows] = useState<ParsedRealAppToolsRow[]>([])
   const [status, setStatus] = useState('')
@@ -800,6 +831,7 @@ export default function PotentialPage() {
   const [potentialBundleProfilesLoading, setPotentialBundleProfilesLoading] = useState(false)
   const [potentialBundleRarity, setPotentialBundleRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [catalogRankOpen, setCatalogRankOpen] = useState(false)
+  const [checkOnePassOpen, setCheckOnePassOpen] = useState(false)
   const [monthBoostOpen, setMonthBoostOpen] = useState(false)
   const [monthBoostSport, setMonthBoostSport] = useState<RankSportChoice>('FC')
   const [monthBoostExcludedSports, setMonthBoostExcludedSports] = useState<Sport[]>([])
@@ -826,10 +858,40 @@ export default function PotentialPage() {
     monthIdx: number
     month: string
   } | null>(null)
+  const [dayBoostOpen, setDayBoostOpen] = useState(false)
+  const [dayBoostSport, setDayBoostSport] = useState<RankSportChoice>('FC')
+  const [dayBoostExcludedSports, setDayBoostExcludedSports] = useState<Sport[]>([])
+  /** ISO YYYY-MM-DD claim day to rank. */
+  const [dayBoostBestDay, setDayBoostBestDay] = useState<string | null>(null)
+  /** When set (e.g. Calendar deep link), keep only this many rows per sport. */
+  const [dayBoostTopPerSport, setDayBoostTopPerSport] = useState<number | null>(null)
+  const [dayBoostPendingAutoRun, setDayBoostPendingAutoRun] = useState(false)
+  const [dayBoostInProgress, setDayBoostInProgress] = useState(false)
+  const [dayBoostProgress, setDayBoostProgress] = useState<PassRecommendationProgress | null>(null)
+  const [dayBoostStatus, setDayBoostStatus] = useState('')
+  const [dayBoostAllRows, setDayBoostAllRows] = useState<MonthPassRecommendationRow[]>([])
+  const [dayBoostVisibleCount, setDayBoostVisibleCount] = useState(MONTH_BOOST_PAGE_SIZE)
+  const [dayBoostMeta, setDayBoostMeta] = useState<{
+    calculatedAt: string
+    skippedOwnedIconic: number
+    skippedAdjusted: number
+    skippedNoRows: number
+    catalogCount: number
+    fetchTrimmed: number
+    prefilterTrimmed: number
+    baselineAdjustmentCount: number
+    claimDay: string
+    dayLabel: string
+    topPerSport?: number | null
+  } | null>(null)
+  const dayBoostDayInputRef = useRef<HTMLInputElement>(null)
+  const dayBoostDeepLinkHandledRef = useRef<string | null>(null)
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
-  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>([])
+  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>(
+    createDefaultExcludedSportSeasons,
+  )
   const [excludeFormSport, setExcludeFormSport] = useState<Sport>('NFL')
   const [excludeFormSeasonLabel, setExcludeFormSeasonLabel] = useState('')
   const [excludeFormSeasonOptions, setExcludeFormSeasonOptions] = useState<CatalogSportSeasonOption[]>([])
@@ -884,6 +946,7 @@ export default function PotentialPage() {
   >(new Map())
   const rankAbortRef = useRef<AbortController | null>(null)
   const monthBoostAbortRef = useRef<AbortController | null>(null)
+  const dayBoostAbortRef = useRef<AbortController | null>(null)
   const sportOpportunityAbortRef = useRef<AbortController | null>(null)
   const [sportOpportunityInProgress, setSportOpportunityInProgress] = useState(false)
   const [sportOpportunityStatus, setSportOpportunityStatus] = useState('')
@@ -901,6 +964,7 @@ export default function PotentialPage() {
   const catalogAnalysisBusy =
     rankingInProgress ||
     monthBoostInProgress ||
+    dayBoostInProgress ||
     sportOpportunityInProgress ||
     bundleClaimInProgress ||
     iconic20ProfilesLoading
@@ -1010,6 +1074,7 @@ export default function PotentialPage() {
           sport: form.sport,
           season: form.season,
           simulatedRarityLabel: form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
+          passKind: 'player',
         },
         potentialRows,
       ),
@@ -1116,9 +1181,13 @@ export default function PotentialPage() {
         note: row.note,
       })),
     )
+    setCheckOnePassOpen(true)
     setStatus(
-      `Loaded ${saved.name || 'profile'}${saved.rows.length ? ` with ${saved.rows.length} row${saved.rows.length === 1 ? '' : 's'}` : ''}. Click Analyze to refresh results.`,
+      `Loaded ${saved.name || 'profile'}${saved.rows.length ? ` with ${saved.rows.length} row${saved.rows.length === 1 ? '' : 's'}` : ''}. Click Analyze to refresh.`,
     )
+    window.setTimeout(() => {
+      document.getElementById('potential-card-form')?.scrollIntoView({ behavior: 'smooth' })
+    }, 0)
   }
 
   const loadFromCatalog = async (result: CatalogSearchResult, _rarityLabel = '') => {
@@ -1155,7 +1224,7 @@ export default function PotentialPage() {
   const loadRecommendationRow = (row: PassRecommendationRow) => {
     const profile = profileByKey.get(row.externalKey)
     if (!profile) {
-      setStatus('Catalog profile is no longer loaded — run Rank catalog passes again.')
+      setStatus('Catalog profile is no longer loaded — run Rank catalog again.')
       return
     }
     const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
@@ -1169,7 +1238,10 @@ export default function PotentialPage() {
       },
       soloPreviewRarity,
     )
-    document.getElementById('potential-card-form')?.scrollIntoView({ behavior: 'smooth' })
+    setCheckOnePassOpen(true)
+    window.setTimeout(() => {
+      document.getElementById('potential-card-form')?.scrollIntoView({ behavior: 'smooth' })
+    }, 0)
   }
 
   const isRecommendationOwnedAtIconic = (externalKey: string, trackerData: RaxTrackerData = data) => {
@@ -1197,6 +1269,14 @@ export default function PotentialPage() {
     setMonthBoostStatus('Month boost ranking cancelled.')
   }
 
+  const cancelDayBoostRanking = () => {
+    dayBoostAbortRef.current?.abort()
+    dayBoostAbortRef.current = null
+    setDayBoostInProgress(false)
+    setDayBoostProgress(null)
+    setDayBoostStatus('Day ranking cancelled.')
+  }
+
   const cancelSportOpportunityScan = () => {
     sportOpportunityAbortRef.current?.abort()
     sportOpportunityAbortRef.current = null
@@ -1213,6 +1293,7 @@ export default function PotentialPage() {
     sportOpportunityAbortRef.current?.abort()
     rankAbortRef.current?.abort()
     monthBoostAbortRef.current?.abort()
+    dayBoostAbortRef.current?.abort()
     const controller = new AbortController()
     sportOpportunityAbortRef.current = controller
     setSportOpportunityInProgress(true)
@@ -1260,7 +1341,7 @@ export default function PotentialPage() {
           `Loading ${sport} catalog… (${sportIndex + 1}/${SPORTS.length})`,
         )
         const { results: summaries, storageConfigured } = await fetchCatalogPassSummaries(
-          { sport, passKind: 'player', limit: SPORT_OPPORTUNITY_SUMMARY_LIMIT },
+          { sport, limit: SPORT_OPPORTUNITY_SUMMARY_LIMIT },
           controller.signal,
         )
         if (!storageConfigured) {
@@ -1391,7 +1472,7 @@ export default function PotentialPage() {
     let cancelled = false
     setExcludeFormSeasonsLoading(true)
 
-    fetchCatalogSeasonYears({ sport: excludeFormSport, passKind: 'player' })
+    fetchCatalogSeasonYears({ sport: excludeFormSport })
       .then(({ seasonYears, storageConfigured }) => {
         if (cancelled) return
         if (!storageConfigured) {
@@ -1428,7 +1509,7 @@ export default function PotentialPage() {
       [...data.cards]
         .filter(
           (card) =>
-            card.passKind !== 'team' &&
+            isPlayerPass(card) &&
             card.externalKey &&
             isIconicBelowLevel(card.rarityLabel, 20),
         )
@@ -1512,7 +1593,7 @@ export default function PotentialPage() {
     () =>
       [...data.cards]
         .filter(
-          (card) => card.passKind !== 'team' && !isAtLeastIconic1Rarity(card.rarityLabel),
+          (card) => isPlayerPass(card) && !isAtLeastIconic1Rarity(card.rarityLabel),
         )
         .sort(
           (a, b) =>
@@ -1533,6 +1614,21 @@ export default function PotentialPage() {
       return haystack.includes(query)
     })
   }, [ownedAdjustableCards, ownedQuickAddFilter])
+
+  const bundleEligibleFilteredOwnedCards = useMemo(
+    () =>
+      filteredOwnedQuickAddCards.filter(
+        (card): card is (typeof ownedAdjustableCards)[number] & { externalKey: string } =>
+          Boolean(card.externalKey),
+      ),
+    [filteredOwnedQuickAddCards],
+  )
+
+  const allFilteredOwnedInBundle =
+    bundleEligibleFilteredOwnedCards.length > 0 &&
+    bundleEligibleFilteredOwnedCards.every((card) =>
+      quickAddAnalysisSelection.has(card.externalKey),
+    )
 
   const addRankAdjustment = (
     result: Pick<CatalogSearchResult, 'externalKey' | 'name' | 'sport' | 'seasonLabel' | 'seasonYear'>,
@@ -1634,6 +1730,13 @@ export default function PotentialPage() {
       }
       return next
     })
+  }
+
+  const addAllFilteredOwnedToBundle = () => {
+    if (bundleEligibleFilteredOwnedCards.length === 0) return
+    setQuickAddAnalysisSelection(
+      new Set(bundleEligibleFilteredOwnedCards.map((card) => card.externalKey)),
+    )
   }
 
   const addOwnedCardToBaseline = (card: (typeof ownedAdjustableCards)[number]) => {
@@ -1795,7 +1898,7 @@ export default function PotentialPage() {
             setAdjustmentSearchResults([])
             return
           }
-          const playerResults = result.results.filter((item) => item.passKind === 'player')
+          const playerResults = result.results.filter((item) => isPlayerLikeCatalogPass(item))
           setAdjustmentSearchResults(playerResults)
           setAdjustmentSearchStatus(
             playerResults.length === 0 ? 'No player passes match that search.' : '',
@@ -1838,7 +1941,7 @@ export default function PotentialPage() {
           }
           const playerResults = result.results.filter(
             (item) =>
-              item.passKind === 'player' &&
+              isPlayerLikeCatalogPass(item) &&
               item.rowCount > 0 &&
               !ownedCollectionExternalKeys.has(item.externalKey),
           )
@@ -1945,6 +2048,18 @@ export default function PotentialPage() {
   const excludedMonthBoostSportOptions = useMemo(
     () => rankSportOptions.filter((option) => monthBoostExcludedSports.includes(option.value as Sport)),
     [monthBoostExcludedSports, rankSportOptions],
+  )
+
+  const dayBoostAllSports = dayBoostSport === ALL_SPORTS_RANK
+
+  const includedDayBoostSports = useMemo(
+    () => SPORTS.filter((sport) => !dayBoostExcludedSports.includes(sport)),
+    [dayBoostExcludedSports],
+  )
+
+  const excludedDayBoostSportOptions = useMemo(
+    () => rankSportOptions.filter((option) => dayBoostExcludedSports.includes(option.value as Sport)),
+    [dayBoostExcludedSports, rankSportOptions],
   )
 
   const isRecommendationRowClaimable = (row: PassRecommendationRow) =>
@@ -2081,13 +2196,13 @@ export default function PotentialPage() {
       return
     }
     if (rankCatalogProfiles.length === 0) {
-      setRankStatus('Run Rank catalog passes before claiming recommendations.')
+      setRankStatus('Run Rank catalog before claiming recommendations.')
       return
     }
 
     const missingProfile = rows.find((row) => !profileByKey.has(row.externalKey))
     if (missingProfile) {
-      setRankStatus('Catalog profile is no longer loaded — run Rank catalog passes again.')
+      setRankStatus('Catalog profile is no longer loaded — run Rank catalog again.')
       return
     }
 
@@ -2207,6 +2322,7 @@ export default function PotentialPage() {
   const runCatalogRanking = async () => {
     rankAbortRef.current?.abort()
     monthBoostAbortRef.current?.abort()
+    dayBoostAbortRef.current?.abort()
     sportOpportunityAbortRef.current?.abort()
     const controller = new AbortController()
     rankAbortRef.current = controller
@@ -2379,6 +2495,7 @@ export default function PotentialPage() {
 
   const runMonthBoostRanking = async () => {
     monthBoostAbortRef.current?.abort()
+    dayBoostAbortRef.current?.abort()
     rankAbortRef.current?.abort()
     sportOpportunityAbortRef.current?.abort()
     const controller = new AbortController()
@@ -2550,6 +2667,188 @@ export default function PotentialPage() {
     }
   }
 
+  const runDayBoostRanking = async () => {
+    dayBoostAbortRef.current?.abort()
+    monthBoostAbortRef.current?.abort()
+    rankAbortRef.current?.abort()
+    sportOpportunityAbortRef.current?.abort()
+    const controller = new AbortController()
+    dayBoostAbortRef.current = controller
+    setDayBoostInProgress(true)
+    setDayBoostProgress(null)
+    setDayBoostStatus('')
+    setDayBoostAllRows([])
+    setDayBoostVisibleCount(MONTH_BOOST_PAGE_SIZE)
+    setDayBoostMeta(null)
+
+    const seasonFilter = {
+      excludedSportSeasonKeys,
+      adjustments: rankAdjustments,
+    }
+    const dayBoostSports: Sport[] = dayBoostAllSports
+      ? includedDayBoostSports
+      : [dayBoostSport as Sport]
+    const caps = dayBoostAllSports
+      ? recommendationCapsForSports(dayBoostSports)
+      : recommendationCapsForSport(dayBoostSport as Sport)
+    const monthDay = normalizeBestDayParam(dayBoostBestDay)
+    const dayLabel = monthDay ? formatClaimDay(monthDay) : ''
+
+    try {
+      if (!monthDay) {
+        setDayBoostStatus('Pick a claim day to rank.')
+        return
+      }
+      if (dayBoostAllSports && dayBoostSports.length === 0) {
+        setDayBoostStatus('Select at least one sport to rank.')
+        return
+      }
+
+      let catalogCount = 0
+      let skippedOwnedIconic = 0
+      let skippedAdjusted = 0
+      let fetchTrimmed = 0
+      const candidateKeys: string[] = []
+      const seenCandidateKeys = new Set<string>()
+
+      const { bySport, storageConfigured: summariesConfigured } = await loadSportCatalogSummaries(
+        dayBoostSports,
+        (sport) => {
+          const sportCaps = recommendationCapsForSport(sport)
+          return Math.min(sportCaps.bulkFetchCap + 250, 1500)
+        },
+        controller.signal,
+        (sport, sportIndex, total) => {
+          setDayBoostStatus(
+            dayBoostAllSports
+              ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${total})`
+              : `Loading ${sport} catalog passes…`,
+          )
+        },
+      )
+      if (!summariesConfigured) {
+        setDayBoostStatus('Shared catalog is not configured yet.')
+        return
+      }
+
+      for (const sport of dayBoostSports) {
+        const results = bySport.get(sport) ?? []
+        catalogCount += results.length
+
+        const selected = selectSummariesForBulkFetch(data, results, { ...seasonFilter, sport })
+        skippedOwnedIconic += selected.skippedOwnedIconic
+        skippedAdjusted += selected.skippedAdjusted
+        fetchTrimmed += selected.fetchTrimmed
+        for (const key of selected.keys) {
+          if (!seenCandidateKeys.has(key)) {
+            seenCandidateKeys.add(key)
+            candidateKeys.push(key)
+          }
+        }
+      }
+
+      if (candidateKeys.length === 0) {
+        setDayBoostStatus(
+          skippedOwnedIconic > 0
+            ? dayBoostAllSports
+              ? `All eligible catalog passes across every sport are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+              : `All eligible ${dayBoostSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+            : dayBoostAllSports
+              ? 'No player passes with earnings found across any sport.'
+              : `No player passes with earnings found for ${dayBoostSport}.`,
+        )
+        return
+      }
+
+      const assumeIconicKeys = rankAdjustments
+        .filter((adjustment) => adjustment.mode === 'assume-iconic-1')
+        .map((adjustment) => adjustment.externalKey)
+      const allProfileKeys = [...new Set([...candidateKeys, ...assumeIconicKeys])]
+
+      setDayBoostStatus(
+        dayBoostAllSports
+          ? `Fetching earnings for ${allProfileKeys.length} passes across ${dayBoostSports.length} sport${
+              dayBoostSports.length === 1 ? '' : 's'
+            } (cap ${caps.bulkFetchCap} total)…`
+          : `Fetching earnings for ${allProfileKeys.length} passes${
+              fetchTrimmed > 0
+                ? ` (top ${candidateKeys.length} by base RAX · cap ${caps.bulkFetchCap})`
+                : ''
+            }…`,
+      )
+      const reportBulkProgress = (loaded: number, total: number) => {
+        setDayBoostStatus(`Fetching earnings ${loaded}/${total} passes…`)
+      }
+      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
+        allProfileKeys,
+        controller.signal,
+        { onBatch: reportBulkProgress },
+      )
+      if (!bulkConfigured) {
+        setDayBoostStatus('Shared catalog is not configured yet.')
+        return
+      }
+
+      const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+      const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
+      const baselineAdjustmentCount = countAppliedBaselineAdjustments(profileMap, rankAdjustments)
+
+      setDayBoostStatus(
+        `Analyzing top candidates for ${dayLabel} at ${RECOMMENDATION_SIMULATED_RARITY} OTD…`,
+      )
+      const ranked = await rankCatalogRecommendationsForDayAsync(baselineData, profiles, monthDay, {
+        ...seasonFilter,
+        ...(dayBoostAllSports ? { analysisCap: caps.analysisCap } : {}),
+        signal: controller.signal,
+        batchSize: 24,
+        onProgress: setDayBoostProgress,
+      })
+
+      const displayRows = dayBoostTopPerSport
+        ? topRecommendationRowsPerSport(ranked.rows, dayBoostTopPerSport)
+        : ranked.rows
+      setDayBoostAllRows(displayRows)
+      setDayBoostMeta({
+        calculatedAt: new Date().toISOString(),
+        skippedOwnedIconic: ranked.skippedOwnedIconic + skippedOwnedIconic,
+        skippedAdjusted: skippedAdjusted + ranked.skippedAdjusted,
+        skippedNoRows: ranked.skippedNoRows,
+        catalogCount,
+        fetchTrimmed,
+        prefilterTrimmed: ranked.prefilterTrimmed,
+        baselineAdjustmentCount,
+        claimDay: ranked.claimDay ?? monthDay,
+        dayLabel: ranked.month || dayLabel,
+        topPerSport: dayBoostTopPerSport,
+      })
+      const sportLabel = dayBoostAllSports
+        ? dayBoostSports.length === SPORTS.length
+          ? 'all sports'
+          : dayBoostSports.join(', ')
+        : dayBoostSport
+      const topPerSportNote =
+        dayBoostTopPerSport != null ? ` · top ${dayBoostTopPerSport} per sport` : ''
+      setDayBoostStatus(
+        displayRows.length === 0
+          ? `No catalog earners for ${dayLabel} (${sportLabel}).`
+          : `Ranked ${displayRows.length} pass${displayRows.length === 1 ? '' : 'es'} for ${dayLabel} (${sportLabel})${topPerSportNote} · showing top ${Math.min(MONTH_BOOST_PAGE_SIZE, displayRows.length)}${
+              excludedSportSeasons.length > 0
+                ? ` · excluding ${excludedSportSeasons.map(formatExcludedSportSeason).join(', ')}`
+                : ''
+            }.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setDayBoostStatus(error instanceof Error ? error.message : 'Could not rank passes for day.')
+    } finally {
+      if (dayBoostAbortRef.current === controller) {
+        dayBoostAbortRef.current = null
+      }
+      setDayBoostInProgress(false)
+      setDayBoostProgress(null)
+    }
+  }
+
   const rankResultsPageTotal = pageCount(recommendationRows.length, RANKING_PAGE_SIZE)
   const paginatedRecommendationRows = useMemo(
     () => paginate(recommendationRows, rankResultsPage, RANKING_PAGE_SIZE),
@@ -2567,20 +2866,89 @@ export default function PotentialPage() {
     [monthBoostAllRows, monthBoostVisibleCount],
   )
 
-  const monthBoostHasMore =
-    monthBoostVisibleCount < monthBoostAllRows.length
+  const monthBoostHasMore = monthBoostVisibleCount < monthBoostAllRows.length
+
+  const visibleDayBoostRows = useMemo(
+    () => dayBoostAllRows.slice(0, dayBoostVisibleCount),
+    [dayBoostAllRows, dayBoostVisibleCount],
+  )
+
+  const dayBoostHasMore = dayBoostVisibleCount < dayBoostAllRows.length
+  const dayBoostMonthDay = normalizeBestDayParam(dayBoostBestDay)
+  const dayBoostTargetLabel = dayBoostMonthDay ? formatClaimDay(dayBoostMonthDay) : null
+
+  const clearDayBoostDay = () => {
+    setDayBoostBestDay(null)
+    setDayBoostTopPerSport(null)
+    if (searchParams.has('bestDay') || searchParams.has('day') || searchParams.has('topPerSport')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('bestDay')
+      next.delete('day')
+      next.delete('topPerSport')
+      setSearchParams(next, { replace: true })
+    }
+  }
+
+  const openDayBoostDayPicker = () => {
+    const input = dayBoostDayInputRef.current
+    if (!input) return
+    if (typeof input.showPicker === 'function') {
+      void input.showPicker()
+      return
+    }
+    input.focus()
+    input.click()
+  }
+
+  useEffect(() => {
+    const rawDay = searchParams.get('bestDay') ?? searchParams.get('day')
+    const monthDay = normalizeBestDayParam(rawDay)
+    if (!monthDay) {
+      dayBoostDeepLinkHandledRef.current = null
+      return
+    }
+
+    const topRaw = searchParams.get('topPerSport')
+    const topPerSport =
+      topRaw != null && topRaw !== ''
+        ? Number.isFinite(Number(topRaw)) && Number(topRaw) > 0
+          ? Math.floor(Number(topRaw))
+          : 2
+        : 2
+    const handledKey = `${monthDay}|${topPerSport}`
+    if (dayBoostDeepLinkHandledRef.current === handledKey) return
+    dayBoostDeepLinkHandledRef.current = handledKey
+
+    setDayBoostBestDay(`${currentYear()}-${monthDay}`)
+    setDayBoostSport(ALL_SPORTS_RANK)
+    setDayBoostTopPerSport(topPerSport)
+    setDayBoostOpen(true)
+    setDayBoostPendingAutoRun(true)
+    window.setTimeout(() => {
+      document.getElementById('day-boost-passes')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+  }, [searchParams])
+
+  useEffect(() => {
+    if (!dayBoostPendingAutoRun || !dayBoostBestDay) return
+    setDayBoostPendingAutoRun(false)
+    void runDayBoostRanking()
+    // Bootstrap only: ranking fn reads latest sport/day state from this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deep-link auto-run
+  }, [dayBoostPendingAutoRun, dayBoostBestDay])
 
   return (
     <div className="page-stack">
       <section className="hero-card">
         <div>
           <p className="eyebrow">What-if</p>
-          <h2>Potential card checker</h2>
+          <h2>Potential</h2>
           <p>
-            Test a player pass you do not own yet, rank catalog passes by net claimable RAX, or analyze
-            Iconic upgrades on passes you already own. Search the shared Meowbot catalog — new card
-            analysis previews at {RECOMMENDATION_SIMULATED_RARITY} OTD — or paste JSON from
-            realapp.com. Saved profiles stay out of your real totals.
+            Rank the catalog, check an owned upgrade, or preview one new pass. New cards simulate{' '}
+            {RECOMMENDATION_SIMULATED_RARITY} OTD. Saved profiles stay out of totals.
           </p>
         </div>
         <Link className="button" to="/overlaps">
@@ -2588,471 +2956,283 @@ export default function PotentialPage() {
         </Link>
       </section>
 
-      {ownedAdjustableCards.length > 0 ? (
-        <CollapsiblePanel
-          id="owned-iconic-upgrade"
-          className="owned-iconic-upgrade-analyzer"
-          title="Iconic 1 upgrade analyzer"
-          description={`See how much extra claimable RAX you would get if you upgraded player passes you already own to ${RECOMMENDATION_SIMULATED_RARITY}. Pick one pass for a solo check, or several for a bundle.`}
-          badge={
-            quickAddAnalysisSelection.size > 0
-              ? `${quickAddAnalysisSelection.size} selected`
-              : undefined
-          }
-          defaultOpen={false}
-        >
-          <p className="import-hint">
-            <strong>What is analyzed:</strong> daily earnings saved on each selected pass, recomputed
-            at {RECOMMENDATION_SIMULATED_RARITY} OTD multipliers, then run through the same claim
-            rules as the Dashboard (top 2 guaranteed per sport per day, plus Pro bonus if enabled).
-            Your saved cards are not changed — results show net claimable gain vs your collection
-            today.
-          </p>
-          <div className="sort-controls">
-            <label className="field inline-field recommendation-adjustment-owned-search">
-              <span>Filter your collection</span>
-              <input
-                value={ownedQuickAddFilter}
-                disabled={catalogAnalysisBusy}
-                placeholder="Name, sport, season, or rarity"
-                onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
-              />
-            </label>
-            {ownedQuickAddFilter.trim() ? (
-              <span className="badge">
-                {filteredOwnedQuickAddCards.length} match
-                {filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}
-              </span>
-            ) : null}
-          </div>
-          {filteredOwnedQuickAddCards.length > 0 ? (
-            <>
-              <p className="import-hint">Click passes to select them for analysis.</p>
-              <div className="recommendation-adjustment-owned-list button-row wrap-row">
-                {filteredOwnedQuickAddCards.map((card) => {
-                  const missingCatalogLink = !card.externalKey
-                  const selected = card.externalKey
-                    ? quickAddAnalysisSelection.has(card.externalKey)
-                    : false
-                  return (
-                    <button
-                      className={`button compact${selected ? ' primary' : ''}`}
-                      type="button"
-                      key={card.id}
-                      disabled={catalogAnalysisBusy || missingCatalogLink}
-                      title={
-                        missingCatalogLink
-                          ? 'No catalog link — re-import or use catalog search in baseline adjustments'
-                          : selected
-                            ? 'Remove from analysis'
-                            : 'Add to analysis'
-                      }
-                      onClick={() => {
-                        if (!card.externalKey) return
-                        toggleQuickAddAnalysisSelection(card.externalKey)
-                      }}
-                    >
-                      {card.name}
-                      {card.season ? ` · ${card.season}` : ''}
-                      {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                    </button>
-                  )
-                })}
-              </div>
-              {quickAddAnalysisSelection.size > 0 ? (
-                <div className="owned-upgrade-analysis-results">
-                  <div className="section-heading">
-                    <div>
-                      <h3>
-                        {quickAddAnalysisSelection.size === 1
-                          ? 'Analysis result'
-                          : `Bundle analysis (${quickAddAnalysisSelection.size} passes)`}
-                      </h3>
-                      <p className="import-hint">
-                        Simulating upgrade to {RECOMMENDATION_SIMULATED_RARITY} for:{' '}
-                        {selectedUpgradePassLabels.join('; ')}
-                      </p>
-                    </div>
-                    <button
-                      className="button compact"
-                      type="button"
-                      disabled={catalogAnalysisBusy}
-                      onClick={() => setQuickAddAnalysisSelection(new Set())}
-                    >
-                      Clear selection
-                    </button>
-                  </div>
-                  <CheckerNetGainMetrics
-                    baselineGuaranteed={collectionGuaranteedNow}
-                    baselineWithPro={collectionWithProNow}
-                    combinedGuaranteedNetDelta={quickAddAnalysis.combinedGuaranteedNetDelta}
-                    combinedWithProNetDelta={quickAddAnalysis.combinedNetDelta}
-                    baselineLabel="Your collection now"
-                    afterLabel="After upgrade"
-                    netGainDetail={
-                      quickAddAnalysisSelection.size === 1
-                        ? 'from this pass alone'
-                        : 'bundle after same-sport overlap'
-                    }
-                    passClaimable={
-                      quickAddAnalysis.rows.length === 1
-                        ? {
-                            guaranteed: quickAddAnalysis.rows[0]!.passGuaranteedRax,
-                            withPro: quickAddAnalysis.rows[0]!.passClaimableRax,
-                          }
-                        : undefined
-                    }
-                    passClaimableLabel={`Pass claimable at ${RECOMMENDATION_SIMULATED_RARITY}`}
-                  />
-                  {quickAddAnalysis.rows.length > 1 ? (
-                    <>
-                      <p className="import-hint">Per-pass contribution inside this bundle:</p>
-                      <ul className="list compact-list">
-                        {quickAddAnalysis.rows.map((row) => (
-                          <li key={row.key}>
-                            <strong>{row.name}</strong>
-                            <small>
-                              {row.sport} · {row.season} ·{' '}
-                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable at{' '}
-                              {RECOMMENDATION_SIMULATED_RARITY} · adds{' '}
-                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
-                            </small>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                  <p className="import-hint">
-                    Want catalog ranking to treat these as already upgraded? Add them under{' '}
-                    <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
-                      Ranking baseline adjustments
-                    </button>{' '}
-                    on the
-                    catalog ranker below.
-                  </p>
-                  <div className="button-row">
-                    <button
-                      className="button"
-                      type="button"
-                      disabled={catalogAnalysisBusy}
-                      onClick={addSelectedQuickAddToBaseline}
-                    >
-                      Add analyzed passes to ranking baseline
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <p className="empty">Select at least one pass to run the analysis.</p>
-              )}
-            </>
-          ) : (
-            <p className="empty">No collection passes match that filter.</p>
-          )}
-        </CollapsiblePanel>
-      ) : null}
-
       <CollapsiblePanel
-        id="month-boost-passes"
-        title="Best passes for a month"
-        description={`Find catalog passes that would add the most net claimable RAX in a specific calendar month. Every candidate is simulated at ${RECOMMENDATION_SIMULATED_RARITY} OTD.`}
-        open={monthBoostOpen}
-        onOpenChange={setMonthBoostOpen}
+        id="potential-card-form"
+        className="form-panel"
+        title="Check one pass"
+        description="Catalog search or paste JSON. Solo preview rarity below (default Iconic 1)."
+        badge={editingId ? 'Editing' : potentialAnalysis ? 'Results ready' : 'New'}
+        open={checkOnePassOpen}
+        onOpenChange={setCheckOnePassOpen}
         defaultOpen={false}
       >
-        <p className="import-hint">
-          Ranks player passes from the shared catalog by how much they would increase your net
-          claimable RAX in the selected month (includes Pro bonus claims). Uses the same ranking
-          baseline adjustments and season exclusions as{' '}
-          <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
-            Rank catalog passes
-          </button>
-          . Only the top catalog passes by base RAX are fetched and analyzed.
-          {monthBoostAllSports ? (
+        <p className="import-hint potential-baseline-notice">
+          {potentialBaselineAdjustmentCount > 0 ? (
             <>
-              {' '}
-              <strong>All sports</strong> loads every sport&apos;s catalog and ranks across the
-              combined pool — expect long runtimes.
+              Uses <strong>Baseline adjustments</strong> ({potentialBaselineAdjustmentCount}{' '}
+              pass{potentialBaselineAdjustmentCount === 1 ? '' : 'es'} at{' '}
+              {RECOMMENDATION_SIMULATED_RARITY}).{' '}
+              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                Edit baseline
+              </button>
             </>
-          ) : null}
+          ) : (
+            <>
+              Uses your saved collection. To simulate planned upgrades, add{' '}
+              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                Baseline adjustments
+              </button>{' '}
+              under Rank catalog.
+            </>
+          )}
         </p>
-
-        <div className="sort-controls">
+        <div className="sort-controls potential-solo-rarity">
           <label className="field inline-field">
-            <span>Month</span>
+            <span>Solo preview rarity</span>
             <select
-              value={monthBoostMonthIdx}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => setMonthBoostMonthIdx(Number(event.target.value))}
+              value={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, previewAs: event.target.value }))
+              }
             >
-              {CALENDAR_MONTH_NAMES.map((month, index) => (
-                <option key={month} value={index}>
-                  {month}
+              {POTENTIAL_RARITY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
                 </option>
               ))}
             </select>
           </label>
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={monthBoostSport}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = event.target.value
-                setMonthBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                if (next !== ALL_SPORTS_RANK) {
-                  setMonthBoostExcludedSports([])
-                }
-              }}
-            >
-              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
-          {monthBoostAllSports ? (
-            <div className="field inline-field season-multi-select-field">
-              <SeasonMultiSelect
-                options={rankSportOptions}
-                excludedValues={monthBoostExcludedSports}
-                onExcludedValuesChange={(values) => setMonthBoostExcludedSports(values as Sport[])}
-                disabled={catalogAnalysisBusy}
-                label="Sports"
-                menuTitle="Sports"
-                allOptionLabel="All sports"
-                emptyTriggerLabel="No sports"
-                countUnit="sports"
-              />
-              {excludedMonthBoostSportOptions.length > 0 ? (
-                <p className="season-filter-summary">
-                  <span>
-                    Including:{' '}
-                    {includedMonthBoostSports.length > 0
-                      ? includedMonthBoostSports.join(', ')
-                      : 'none'}
-                  </span>
-                  {' · '}
-                  <span>
-                    Excluding: {excludedMonthBoostSportOptions.map((option) => option.label).join(', ')}
-                  </span>
-                </p>
-              ) : null}
-            </div>
-          ) : null}
         </div>
+        <CatalogSearchPanel
+          embedded
+          sectionId="catalog-search-panel"
+          description="Analyze one pass, bundle several, or save to your plan."
+          passKind="player"
+          actionLabel="Analyze solo"
+          bundleActionLabel="Add to bundle"
+          loadingKey={catalogLoadingKey}
+          disabled={Boolean(catalogLoadingKey)}
+          bundleExternalKeys={potentialBundleSelection}
+          onToggleBundle={togglePotentialBundle}
+          planAdd={{
+            plannedExternalKeys: new Set((data.plannedPasses ?? []).map((pass) => pass.externalKey)),
+            onPlanLabel: 'On plan',
+          }}
+          onAddToPlan={(result, rarityLabel) => {
+            const id = addPlannedPassFromCatalog(
+              result,
+              rarityLabel || form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
+              'catalog',
+            )
+            setStatus(
+              id ? `Added ${result.name} to your plan.` : `${result.name} is already on your plan.`,
+            )
+          }}
+          onSelect={loadFromCatalog}
+        />
 
-        <div className="button-row">
-          <button
-            className="button primary"
-            type="button"
-            disabled={
-              catalogAnalysisBusy ||
-              (monthBoostAllSports && includedMonthBoostSports.length === 0)
-            }
-            onClick={() => void runMonthBoostRanking()}
-          >
-            {monthBoostInProgress ? 'Ranking…' : `Rank for ${CALENDAR_MONTH_NAMES[monthBoostMonthIdx]}`}
-          </button>
-          {monthBoostInProgress ? (
-            <button className="button" type="button" onClick={cancelMonthBoostRanking}>
-              Cancel
-            </button>
-          ) : null}
-        </div>
-        {monthBoostProgress ? (
-          <p className="import-progress">
-            Analyzing pass {monthBoostProgress.current}/{monthBoostProgress.total} —{' '}
-            {monthBoostProgress.label}
-          </p>
-        ) : null}
-        {monthBoostStatus ? <p className="import-status">{monthBoostStatus}</p> : null}
-
-        {monthBoostAllRows.length > 0 ? (
-          <>
-            {monthBoostMeta ? (
-              <p className="import-hint">
-                Saved {new Date(monthBoostMeta.calculatedAt).toLocaleString()} ·{' '}
-                {monthBoostMeta.catalogCount} catalog pass
-                {monthBoostMeta.catalogCount === 1 ? '' : 'es'} · target {monthBoostMeta.month}
-                {monthBoostMeta.skippedOwnedIconic > 0
-                  ? ` · ${monthBoostMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
-                  : ''}
-                {monthBoostMeta.skippedAdjusted > 0
-                  ? ` · ${monthBoostMeta.skippedAdjusted} skipped by your adjustments`
-                  : ''}
-                {monthBoostMeta.baselineAdjustmentCount > 0
-                  ? ` · ${monthBoostMeta.baselineAdjustmentCount} assumed at ${RECOMMENDATION_SIMULATED_RARITY} in baseline`
-                  : ''}
-                {monthBoostMeta.fetchTrimmed > 0
-                  ? ` · ${monthBoostMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
-                  : ''}
-                {monthBoostMeta.prefilterTrimmed > 0
-                  ? ` · ${monthBoostMeta.prefilterTrimmed} not fully simulated (Iconic 1 pre-filter)`
-                  : ''}
-                . Net Δ includes Pro bonus; guaranteed-only shown for comparison. Click a pass to
-                open detailed analysis below.
-              </p>
-            ) : null}
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Pass</th>
-                    <th>{monthBoostMeta?.month ?? 'Month'} net Δ</th>
-                    <th>Pro bonus</th>
-                    <th>Year-round net Δ</th>
-                    <th>Month gain</th>
-                    <th>Month displaced</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleMonthBoostRows.map((row, index) => {
-                    const rankNumber = index + 1
-                    const monthProBonus = row.monthNetDelta - row.monthGuaranteedNetDelta
-                    const yearRoundProBonus = row.netClaimableDelta - row.netGuaranteedDelta
-                    return (
-                      <tr key={row.externalKey}>
-                        <td>{rankNumber}</td>
-                        <td>
-                          <button
-                            className="link-button"
-                            type="button"
-                            onClick={() => loadRecommendationRow(row)}
-                          >
-                            {row.name}
-                          </button>
-                          <br />
-                          <small className="table-sub">
-                            {row.sport} · {row.season}
-                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                          </small>
-                        </td>
-                        <td>
-                          <strong
-                            className={
-                              row.monthNetDelta > 0
-                                ? 'sale-positive'
-                                : row.monthNetDelta < 0
-                                  ? 'sale-negative'
-                                  : ''
-                            }
-                          >
-                            {formatSignedRax(displayRaxValue(row.monthNetDelta))}
-                          </strong>
-                          <br />
-                          <small className="table-sub">
-                            {formatSignedRax(displayRaxValue(row.monthGuaranteedNetDelta))}{' '}
-                            guaranteed
-                          </small>
-                        </td>
-                        <td>
-                          {monthProBonus > 0 ? (
-                            <>+{formatRax(displayRaxValue(monthProBonus))}</>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>
-                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
-                          <br />
-                          <small className="table-sub">
-                            {formatSignedRax(displayRaxValue(row.netGuaranteedDelta))} guaranteed
-                            {yearRoundProBonus > 0
-                              ? ` · +${formatRax(displayRaxValue(yearRoundProBonus))} Pro`
-                              : ''}
-                          </small>
-                        </td>
-                        <td>{formatRax(displayRaxValue(row.monthGain))}</td>
-                        <td>
-                          {row.monthDisplaced > 0
-                            ? `−${formatRax(displayRaxValue(row.monthDisplaced))}`
-                            : '—'}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {monthBoostHasMore ? (
-              <div className="button-row">
-                <button
-                  className="button"
-                  type="button"
-                  disabled={catalogAnalysisBusy}
-                  onClick={() =>
-                    setMonthBoostVisibleCount((count) =>
-                      Math.min(count + MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length),
-                    )
-                  }
+        {potentialBundleSelection.size > 0 ? (
+          <div className="potential-bundle-controls">
+            <div className="sort-controls">
+              <label className="field inline-field">
+                <span>Bundle preview rarity</span>
+                <select
+                  value={potentialBundleRarity}
+                  onChange={(event) => setPotentialBundleRarity(event.target.value)}
                 >
-                  Show next {Math.min(MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length - monthBoostVisibleCount)} (
-                  {monthBoostVisibleCount} of {monthBoostAllRows.length})
-                </button>
+                  {POTENTIAL_RARITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="button"
+                type="button"
+                onClick={() => setPotentialBundleSelection(new Set())}
+              >
+                Clear bundle ({potentialBundleSelection.size})
+              </button>
+            </div>
+            {potentialBundleProfilesLoading ? (
+              <p className="import-hint">Loading bundle catalog rows…</p>
+            ) : null}
+            {potentialBundleAnalysis && potentialBundleProfiles.length > 0 ? (
+              <div className="owned-upgrade-analysis-results">
+                <div className="section-heading">
+                  <div>
+                    <h3>
+                      Bundle analysis ({potentialBundleProfiles.length} pass
+                      {potentialBundleProfiles.length === 1 ? '' : 'es'} at {potentialBundleRarity})
+                    </h3>
+                    <p className="import-hint">
+                      Same-sport overlap is counted in bundle order (best isolated net first within
+                      each sport).
+                    </p>
+                  </div>
+                </div>
+                <CheckerNetGainMetrics
+                  baselineGuaranteed={potentialCollectionGuaranteed}
+                  baselineWithPro={potentialCollectionWithPro}
+                  combinedGuaranteedNetDelta={potentialBundleAnalysis.combinedGuaranteedNetDelta}
+                  combinedWithProNetDelta={potentialBundleAnalysis.combinedNetDelta}
+                  baselineLabel="Baseline collection"
+                  afterLabel="After bundle"
+                  netGainDetail="bundle total"
+                />
+                {potentialBundleAnalysis.rows.length > 1 ? (
+                  <>
+                    <p className="import-hint">Per-pass contribution inside this bundle:</p>
+                    <ul className="list compact-list">
+                      {potentialBundleAnalysis.rows.map((row) => (
+                        <li key={row.key}>
+                          <strong>{row.name}</strong>
+                          <small>
+                            {' '}
+                            · {row.sport} · {row.season} · isolated{' '}
+                            {formatSignedRax(displayRaxValue(row.isolatedNetDelta))} · marginal{' '}
+                            {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
               </div>
-            ) : monthBoostAllRows.length > MONTH_BOOST_PAGE_SIZE ? (
+            ) : potentialBundleSelection.size > 0 && !potentialBundleProfilesLoading ? (
               <p className="import-hint">
-                Showing all {monthBoostAllRows.length} ranked passes.
+                Selected passes are loading or have no catalog earnings rows yet.
               </p>
             ) : null}
-          </>
+          </div>
+        ) : null}
+
+        <h3 className="mini-heading potential-section-divider">Or enter manually</h3>
+        <form className="form-panel-inner" onSubmit={submitAnalyze}>
+          <div className="form-grid">
+            <label className="field">
+              <span>Player / team name</span>
+              <input
+                value={form.name}
+                placeholder="Dominik Szoboszlai"
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Sport</span>
+              <select
+                value={form.sport}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, sport: event.target.value as Sport }))
+                }
+              >
+                {SPORTS.map((sport) => (
+                  <option key={sport} value={sport}>
+                    {sport}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Season / card label</span>
+              <input
+                value={form.season}
+                placeholder="2025-26"
+                onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
+              />
+            </label>
+          </div>
+          <label className="field">
+            <span>Profile notes (optional)</span>
+            <input
+              value={form.notes}
+              placeholder="Target price, rarity, listing link…"
+              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>realapp.com earnings JSON</span>
+            <textarea
+              className="bulk-import-textarea"
+              value={form.rawJson}
+              placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
+              onChange={(event) => setForm((current) => ({ ...current, rawJson: event.target.value }))}
+            />
+          </label>
+          <div className="button-row">
+            <button className="button primary" type="submit" disabled={!form.rawJson.trim()}>
+              Analyze potential card
+            </button>
+            <button className="button" type="button" disabled={!form.name.trim()} onClick={saveProfile}>
+              Save profile
+            </button>
+            <button className="button" type="button" onClick={resetForm}>
+              New profile
+            </button>
+            {status ? <p className="import-status">{status}</p> : null}
+          </div>
+        </form>
+
+        {potentialAnalysis ? (
+          <div className="potential-analysis-inline">
+            <h3 className="mini-heading potential-section-divider">Analysis result</h3>
+            <PotentialAnalysisResults
+              analysis={potentialAnalysis}
+              previewAs={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
+              baselineAdjustmentCount={potentialBaselineAdjustmentCount}
+            />
+          </div>
         ) : null}
       </CollapsiblePanel>
 
       <CollapsiblePanel
         id="catalog-recommendations"
-        title="Rank catalog passes"
-        description="Find player passes in the shared catalog that would add the most net claimable RAX to your collection. Every candidate is simulated at Iconic 1 OTD."
+        title="Rank catalog"
+        description={`Player passes by net claimable RAX (${RECOMMENDATION_SIMULATED_RARITY} OTD).`}
         open={catalogRankOpen}
         onOpenChange={setCatalogRankOpen}
         defaultOpen={false}
       >
-        <p className="import-hint">
-          Candidates come from the shared Meowbot catalog only. Passes already in your collection
-          at {RECOMMENDATION_SIMULATED_RARITY} or higher are skipped; lower-rarity owned passes stay
-          eligible. Only the top catalog passes by base RAX are fetched and analyzed (default 1000,
-          higher for MLB and other large sports). The catalog may be incomplete or outdated. The
-          recommended bundle uses a <strong>greedy</strong> pick: best pass first, then re-rank
-          remaining candidates with each prior pick virtually added.
-          {rankSport === ALL_SPORTS_RANK ? (
-            <>
-              {' '}
-              <strong>All sports</strong> loads every sport&apos;s catalog, fetches each sport&apos;s
-              top passes by base RAX, then ranks across the combined pool — expect long runtimes.
-            </>
-          ) : null}
-        </p>
+        <details className="help-details">
+          <summary>How ranking works</summary>
+          <p className="import-hint">
+            Shared catalog only. Owned {RECOMMENDATION_SIMULATED_RARITY}+ skipped; lower owned stay
+            eligible. Top base-RAX pool analyzed (default 1000). Bundle picks are{' '}
+            <strong>greedy</strong> — best first, then re-rank. Catalog may be incomplete.
+            {rankSport === ALL_SPORTS_RANK ? (
+              <>
+                {' '}
+                <strong>All sports</strong> merges every sport&apos;s pool — expect long runs.
+              </>
+            ) : null}
+          </p>
+        </details>
 
         <CollapsiblePanel
           id="recommendation-adjustments"
           className="nested-panel recommendation-adjustments"
-          title="Ranking baseline adjustments"
-          description="Temporarily change how your collection is treated for catalog ranking and the Search and analyze new potential card section (single-card and bundle checks). Does not modify saved cards."
+          title="Baseline adjustments"
+          description="Temp collection tweaks for ranking and what-if. Does not change saved cards."
           badge={rankAdjustments.length > 0 ? `${rankAdjustments.length} adjusted` : undefined}
           open={baselineAdjustmentsOpen}
           onOpenChange={setBaselineAdjustmentsOpen}
           defaultOpen={false}
         >
           <p className="import-hint">
-            <strong>Assume {RECOMMENDATION_SIMULATED_RARITY}</strong> — treat a pass as already at{' '}
-            {RECOMMENDATION_SIMULATED_RARITY} in your collection (for passes you are upgrading, like
-            a lower-tier Ashton Jeanty). Rankings, single-card search analysis, and custom bundle
-            tests all use this adjusted baseline. <strong>Exclude</strong> — skip a pass from
-            recommendations without adding it to your baseline.
+            <strong>Assume {RECOMMENDATION_SIMULATED_RARITY}</strong> — treat a pass as already
+            upgraded for ranking and what-if. <strong>Exclude</strong> — skip from recommendations
+            without adding to baseline.
           </p>
 
           {ownedAdjustableCards.length > 0 ? (
             <div className="recommendation-adjustment-owned">
               <div className="section-heading recommendation-adjustment-owned-heading">
                 <div>
-                  <h4>Quick add from your collection</h4>
+                  <h4>From your collection</h4>
                   <p className="import-hint">
-                    Click a pass to treat it as already at {RECOMMENDATION_SIMULATED_RARITY} when
-                    ranking catalog candidates. Passes already in the baseline are marked and
-                    skipped.
+                    Click to assume {RECOMMENDATION_SIMULATED_RARITY} for ranking. Already-adjusted
+                    passes are marked and skipped.
                   </p>
                 </div>
                 {ownedQuickAddFilter.trim() ? (
@@ -3231,15 +3411,13 @@ export default function PotentialPage() {
         <CollapsiblePanel
           id="sport-opportunity-scan"
           className="nested-panel"
-          title="Sport opportunity scan"
-          description={`Compare every sport against your adjusted baseline and score net claimable RAX from the top ${SPORT_OPPORTUNITY_BUNDLE_SIZE} greedy catalog picks at ${RECOMMENDATION_SIMULATED_RARITY}.`}
+          title="Sport opportunities"
+          description={`Per-sport net from the top ${SPORT_OPPORTUNITY_BUNDLE_SIZE} greedy picks at ${RECOMMENDATION_SIMULATED_RARITY}.`}
           defaultOpen={false}
         >
           <p className="import-hint">
-            Add quick-add or catalog baseline adjustments above first — the scan treats those as
-            already at {RECOMMENDATION_SIMULATED_RARITY} when scoring your collection and
-            recommendations. Uses a lighter pass than full ranking ({SPORT_OPPORTUNITY_FETCH_CAP}{' '}
-            catalog passes fetched per sport). Excluded sport+season filters apply too.
+            Uses baseline adjustments above ({SPORT_OPPORTUNITY_FETCH_CAP} catalog passes per
+            sport). Lighter than full ranking; season exclusions apply.
           </p>
           <div className="sort-controls">
             <button
@@ -3444,14 +3622,14 @@ export default function PotentialPage() {
 
         <CollapsiblePanel
           className="nested-panel recommendation-exclusions"
-          title="Exclude sport + season from ranking"
-          description="Skip catalog passes for a specific sport and season. Exclusions stay when you change the rank sport above."
+          title="Exclude sport + season"
+          description="Skip catalog passes for a sport/season. NFL 2022-23 starts excluded by default; remove it below if you want it ranked."
           badge={
             excludedSportSeasons.length > 0
               ? `${excludedSportSeasons.length} excluded`
               : undefined
           }
-          defaultOpen={false}
+          defaultOpen={excludedSportSeasons.length > 0}
         >
           <div className="sort-controls">
             <label className="field inline-field">
@@ -3545,7 +3723,7 @@ export default function PotentialPage() {
             }
             onClick={() => void runCatalogRanking()}
           >
-            {rankingInProgress ? 'Ranking…' : 'Rank catalog passes'}
+            {rankingInProgress ? 'Ranking…' : 'Rank catalog'}
           </button>
           {rankingInProgress ? (
             <button className="button" type="button" onClick={cancelRanking}>
@@ -3563,11 +3741,11 @@ export default function PotentialPage() {
         {recommendationBundle ? (
           <CollapsiblePanel
             className="nested-panel"
-            title="Recommended bundle (greedy)"
+            title="Recommended bundle"
             description={
               visibleBundlePicks.length > 0
-                ? `Top ${visibleBundlePicks.length} pass${visibleBundlePicks.length === 1 ? '' : 'es'} to add one at a time — marginal net after prior picks in the bundle.`
-                : 'No more positive greedy picks with the current catalog pool and baseline.'
+                ? `Top ${visibleBundlePicks.length} greedy pick${visibleBundlePicks.length === 1 ? '' : 's'} — marginal net after prior picks.`
+                : 'No more positive greedy picks with the current pool and baseline.'
             }
             badge={
               visibleBundlePicks.length > 0
@@ -3693,7 +3871,7 @@ export default function PotentialPage() {
           <CollapsiblePanel
             className="nested-panel"
             title="Ranking results"
-            description="Top catalog passes by net claimable RAX. Click a row to open detailed analysis below."
+            description="Top catalog passes by net claimable RAX. Click a row for detail below."
             badge={`${recommendationRows.length} passes`}
             defaultOpen={false}
           >
@@ -3905,357 +4083,750 @@ export default function PotentialPage() {
         ) : null}
       </CollapsiblePanel>
 
-      <CollapsiblePanel
-        className="help-section"
-        title="Manual import walkthrough"
-        description={`Username import closes after ${realappToolsShutdownLabel()}. Use shared catalog search below for player passes and RAX, or paste one card at a time from realapp.com.`}
-        defaultOpen={false}
-      >
-        <ol className="help-list ordered">
-              <li>
-                Open{' '}
-                <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                  realapp.com
-                </a>{' '}
-                on a desktop browser and log in with Real Pro.
-              </li>
-              <li>
-                Find the player or team pass you are considering and open its earnings view.
-              </li>
-              <li>
-                <strong>Chrome or Edge (Windows/Mac):</strong> press <kbd>F12</kbd> or{' '}
-                <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>I</kbd> on Mac → <strong>Network</strong> →
-                filter <code>userpassearnings</code> → click the request → open <strong>Response</strong>{' '}
-                (or Preview) → select <strong>all</strong> the JSON (it must start with{' '}
-                <code>{'{'}</code>) → copy.
-              </li>
-              <li>
-                <strong>Safari on Mac:</strong> Safari → Settings → Advanced → enable{' '}
-                <strong>Show features for web developers</strong>. Then Develop →{' '}
-                <strong>Show Web Inspector</strong> → <strong>Network</strong> tab (same filter and
-                copy steps). Safari labels panels slightly differently than Chrome; use the panel
-                that shows the raw JSON body, not Headers only.
-              </li>
-              <li>
-                <strong>Firefox (Windows/Mac):</strong> <kbd>F12</kbd> or <kbd>Cmd</kbd>+
-                <kbd>Option</kbd>+<kbd>I</kbd> → <strong>Network</strong> → click{' '}
-                <code>userpassearnings</code> → <strong>Response</strong>.
-              </li>
-              <li>
-                <strong>On mobile:</strong> use desktop site mode on a PC if you can, or remote
-                debugging (Safari Web Inspector on iOS, Chrome <code>chrome://inspect</code> on
-                Android). Alternatively, paste on desktop first and save the profile here.
-              </li>
-              <li>
-                Fill in the player name, sport, and season/card label below, paste the JSON, and
-                click <strong>Analyze potential card</strong>. Analysis previews at{' '}
-                {RECOMMENDATION_SIMULATED_RARITY} OTD.
-              </li>
-              <li>
-                Click <strong>Save profile</strong> to keep the player info and JSON for later.
-              </li>
-            </ol>
+      {ownedAdjustableCards.length > 0 ? (
+        <CollapsiblePanel
+          id="owned-iconic-upgrade"
+          className="owned-iconic-upgrade-analyzer"
+          title="Your collection"
+          description={`Check owned passes as if upgraded to ${RECOMMENDATION_SIMULATED_RARITY}.`}
+          badge={
+            quickAddAnalysisSelection.size > 0
+              ? `${quickAddAnalysisSelection.size} in bundle`
+              : `${ownedAdjustableCards.length} eligible`
+          }
+          defaultOpen={false}
+        >
+          <div className="owned-collection-intro">
             <p className="import-hint">
-              The JSON must start with <code>{'{'}</code>, e.g.{' '}
-              <code>{'{"earnings":[{"day":"2025-08-22","earnings":26,...}]}'}</code>. If you only
-              copy from <code>earnings</code> onward, paste will fail — select from the opening
-              brace.
+              Tap passes to build a what-if bundle. Uses saved earnings — nothing in your collection
+              changes.
             </p>
-      </CollapsiblePanel>
+          </div>
 
-      <CollapsiblePanel
-        id="potential-card-form"
-        className="form-panel"
-        title="Search and analyze new potential card"
-        description="Search the shared catalog or paste realapp.com JSON. Solo analysis uses the preview rarity below (default Iconic 1)."
-        badge={editingId ? 'Editing' : potentialAnalysis ? 'Results ready' : 'New'}
-        defaultOpen
-      >
-        <p className="import-hint potential-baseline-notice">
-          {potentialBaselineAdjustmentCount > 0 ? (
-            <>
-              Single-card and bundle analysis use your{' '}
-              <strong>ranking baseline adjustments</strong> ({potentialBaselineAdjustmentCount}{' '}
-              pass{potentialBaselineAdjustmentCount === 1 ? '' : 'es'} assumed at{' '}
-              {RECOMMENDATION_SIMULATED_RARITY}).{' '}
-              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
-                Edit baseline adjustments
+          <div className="owned-collection-toolbar sort-controls">
+            <label className="field inline-field recommendation-adjustment-owned-search">
+              <span>Filter</span>
+              <input
+                value={ownedQuickAddFilter}
+                disabled={catalogAnalysisBusy}
+                placeholder="Name, sport, season, or rarity"
+                onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
+              />
+            </label>
+            <button
+              className="button primary"
+              type="button"
+              disabled={
+                catalogAnalysisBusy ||
+                bundleEligibleFilteredOwnedCards.length === 0 ||
+                allFilteredOwnedInBundle
+              }
+              title={
+                bundleEligibleFilteredOwnedCards.length === 0
+                  ? 'No catalog-linked passes match the filter'
+                  : allFilteredOwnedInBundle
+                    ? 'All listed passes are already in the bundle'
+                    : `Check all ${bundleEligibleFilteredOwnedCards.length} listed pass${bundleEligibleFilteredOwnedCards.length === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY}`
+              }
+              onClick={addAllFilteredOwnedToBundle}
+            >
+              {allFilteredOwnedInBundle
+                ? 'All in bundle'
+                : `Add all to bundle${
+                    bundleEligibleFilteredOwnedCards.length > 0
+                      ? ` (${bundleEligibleFilteredOwnedCards.length})`
+                      : ''
+                  }`}
+            </button>
+            {quickAddAnalysisSelection.size > 0 ? (
+              <button
+                className="button"
+                type="button"
+                disabled={catalogAnalysisBusy}
+                onClick={() => setQuickAddAnalysisSelection(new Set())}
+              >
+                Clear bundle
               </button>
+            ) : null}
+          </div>
+
+          <p className="owned-collection-count season-filter-summary">
+            {ownedQuickAddFilter.trim()
+              ? `${filteredOwnedQuickAddCards.length} match${filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}`
+              : `${filteredOwnedQuickAddCards.length} pass${filteredOwnedQuickAddCards.length === 1 ? '' : 'es'}`}
+            {quickAddAnalysisSelection.size > 0
+              ? ` · ${quickAddAnalysisSelection.size} in bundle`
+              : ''}
+            {filteredOwnedQuickAddCards.length > bundleEligibleFilteredOwnedCards.length
+              ? ` · ${filteredOwnedQuickAddCards.length - bundleEligibleFilteredOwnedCards.length} missing catalog link`
+              : ''}
+          </p>
+
+          {filteredOwnedQuickAddCards.length > 0 ? (
+            <>
+              <div className="recommendation-adjustment-owned-list owned-collection-pass-list button-row wrap-row">
+                {filteredOwnedQuickAddCards.map((card) => {
+                  const missingCatalogLink = !card.externalKey
+                  const selected = card.externalKey
+                    ? quickAddAnalysisSelection.has(card.externalKey)
+                    : false
+                  return (
+                    <button
+                      className={`button compact owned-collection-pass${selected ? ' primary' : ''}`}
+                      type="button"
+                      key={card.id}
+                      disabled={catalogAnalysisBusy || missingCatalogLink}
+                      title={
+                        missingCatalogLink
+                          ? 'No catalog link — re-import or use catalog search in baseline adjustments'
+                          : selected
+                            ? 'Remove from bundle'
+                            : `Add to bundle (check at ${RECOMMENDATION_SIMULATED_RARITY})`
+                      }
+                      onClick={() => {
+                        if (!card.externalKey) return
+                        toggleQuickAddAnalysisSelection(card.externalKey)
+                      }}
+                    >
+                      <span className="owned-collection-pass-name">{card.name}</span>
+                      <span className="owned-collection-pass-meta">
+                        {[card.sport, card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {quickAddAnalysisSelection.size > 0 ? (
+                <div className="owned-upgrade-analysis-results">
+                  <div className="section-heading">
+                    <div>
+                      <h3>
+                        {quickAddAnalysisSelection.size === 1
+                          ? `${RECOMMENDATION_SIMULATED_RARITY} result`
+                          : `Bundle at ${RECOMMENDATION_SIMULATED_RARITY} (${quickAddAnalysisSelection.size})`}
+                      </h3>
+                      <p className="import-hint owned-collection-selected-labels">
+                        {selectedUpgradePassLabels.join(' · ')}
+                      </p>
+                    </div>
+                  </div>
+                  <CheckerNetGainMetrics
+                    baselineGuaranteed={collectionGuaranteedNow}
+                    baselineWithPro={collectionWithProNow}
+                    combinedGuaranteedNetDelta={quickAddAnalysis.combinedGuaranteedNetDelta}
+                    combinedWithProNetDelta={quickAddAnalysis.combinedNetDelta}
+                    baselineLabel="Your collection now"
+                    afterLabel="After upgrade"
+                    netGainDetail={
+                      quickAddAnalysisSelection.size === 1
+                        ? 'from this pass alone'
+                        : 'bundle after same-sport overlap'
+                    }
+                    passClaimable={
+                      quickAddAnalysis.rows.length === 1
+                        ? {
+                            guaranteed: quickAddAnalysis.rows[0]!.passGuaranteedRax,
+                            withPro: quickAddAnalysis.rows[0]!.passClaimableRax,
+                          }
+                        : undefined
+                    }
+                    passClaimableLabel={`Pass claimable at ${RECOMMENDATION_SIMULATED_RARITY}`}
+                  />
+                  {quickAddAnalysis.rows.length > 1 ? (
+                    <>
+                      <p className="import-hint">Per-pass contribution inside this bundle:</p>
+                      <ul className="list compact-list">
+                        {quickAddAnalysis.rows.map((row) => (
+                          <li key={row.key}>
+                            <strong>{row.name}</strong>
+                            <small>
+                              {row.sport} · {row.season} ·{' '}
+                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable · adds{' '}
+                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
+                            </small>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <div className="owned-collection-baseline-actions">
+                    <p className="import-hint">
+                      Keep this upgrade in Rank catalog? Add under{' '}
+                      <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                        Baseline adjustments
+                      </button>
+                      .
+                    </p>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={catalogAnalysisBusy}
+                      onClick={addSelectedQuickAddToBaseline}
+                    >
+                      Add bundle to ranking baseline
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="empty">Select a pass, or use Add all to bundle, to see the what-if.</p>
+              )}
             </>
           ) : (
-            <>
-              Single-card and bundle analysis use your collection as saved. To simulate upgrades you
-              plan first, add{' '}
-              <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
-                ranking baseline adjustments
-              </button>{' '}
-              under Rank
-              catalog passes.
-            </>
+            <p className="empty">No collection passes match that filter.</p>
           )}
+        </CollapsiblePanel>
+      ) : null}
+
+      <CollapsiblePanel
+        id="month-boost-passes"
+        title="Best for a month"
+        description={`Catalog picks that add the most net claimable RAX in one month (${RECOMMENDATION_SIMULATED_RARITY} OTD).`}
+        open={monthBoostOpen}
+        onOpenChange={setMonthBoostOpen}
+        defaultOpen={false}
+      >
+        <p className="import-hint">
+          Same baseline and exclusions as{' '}
+          <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
+            Rank catalog
+          </button>
+          .
+          {monthBoostAllSports ? (
+            <>
+              {' '}
+              <strong>All sports</strong> can take a long time.
+            </>
+          ) : null}
         </p>
-        <div className="sort-controls potential-solo-rarity">
+
+        <div className="sort-controls">
           <label className="field inline-field">
-            <span>Solo preview rarity</span>
+            <span>Month</span>
             <select
-              value={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, previewAs: event.target.value }))
-              }
+              value={monthBoostMonthIdx}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => setMonthBoostMonthIdx(Number(event.target.value))}
             >
-              {POTENTIAL_RARITY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+              {CALENDAR_MONTH_NAMES.map((month, index) => (
+                <option key={month} value={index}>
+                  {month}
                 </option>
               ))}
             </select>
           </label>
-        </div>
-        <CatalogSearchPanel
-          embedded
-          sectionId="catalog-search-panel"
-          description="Analyze one pass at the solo preview rarity above, add several to a bundle, or save to your plan."
-          passKind="player"
-          actionLabel="Analyze solo"
-          bundleActionLabel="Add to bundle"
-          loadingKey={catalogLoadingKey}
-          disabled={Boolean(catalogLoadingKey)}
-          bundleExternalKeys={potentialBundleSelection}
-          onToggleBundle={togglePotentialBundle}
-          planAdd={{
-            plannedExternalKeys: new Set((data.plannedPasses ?? []).map((pass) => pass.externalKey)),
-            onPlanLabel: 'On plan',
-          }}
-          onAddToPlan={(result, rarityLabel) => {
-            const id = addPlannedPassFromCatalog(
-              result,
-              rarityLabel || form.previewAs || RECOMMENDATION_SIMULATED_RARITY,
-              'catalog',
-            )
-            setStatus(
-              id ? `Added ${result.name} to your plan.` : `${result.name} is already on your plan.`,
-            )
-          }}
-          onSelect={loadFromCatalog}
-        />
-
-        {potentialBundleSelection.size > 0 ? (
-          <div className="potential-bundle-controls">
-            <div className="sort-controls">
-              <label className="field inline-field">
-                <span>Bundle preview rarity</span>
-                <select
-                  value={potentialBundleRarity}
-                  onChange={(event) => setPotentialBundleRarity(event.target.value)}
-                >
-                  {POTENTIAL_RARITY_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="button"
-                type="button"
-                onClick={() => setPotentialBundleSelection(new Set())}
-              >
-                Clear bundle ({potentialBundleSelection.size})
-              </button>
+          <label className="field inline-field">
+            <span>Sport</span>
+            <select
+              value={monthBoostSport}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => {
+                const next = event.target.value
+                setMonthBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+                if (next !== ALL_SPORTS_RANK) {
+                  setMonthBoostExcludedSports([])
+                }
+              }}
+            >
+              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
+              {SPORTS.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+          </label>
+          {monthBoostAllSports ? (
+            <div className="field inline-field season-multi-select-field">
+              <SeasonMultiSelect
+                options={rankSportOptions}
+                excludedValues={monthBoostExcludedSports}
+                onExcludedValuesChange={(values) => setMonthBoostExcludedSports(values as Sport[])}
+                disabled={catalogAnalysisBusy}
+                label="Sports"
+                menuTitle="Sports"
+                allOptionLabel="All sports"
+                emptyTriggerLabel="No sports"
+                countUnit="sports"
+              />
+              {excludedMonthBoostSportOptions.length > 0 ? (
+                <p className="season-filter-summary">
+                  <span>
+                    Including:{' '}
+                    {includedMonthBoostSports.length > 0
+                      ? includedMonthBoostSports.join(', ')
+                      : 'none'}
+                  </span>
+                  {' · '}
+                  <span>
+                    Excluding: {excludedMonthBoostSportOptions.map((option) => option.label).join(', ')}
+                  </span>
+                </p>
+              ) : null}
             </div>
-            {potentialBundleProfilesLoading ? (
-              <p className="import-hint">Loading bundle catalog rows…</p>
-            ) : null}
-            {potentialBundleAnalysis && potentialBundleProfiles.length > 0 ? (
-              <div className="owned-upgrade-analysis-results">
-                <div className="section-heading">
-                  <div>
-                    <h3>
-                      Bundle analysis ({potentialBundleProfiles.length} pass
-                      {potentialBundleProfiles.length === 1 ? '' : 'es'} at {potentialBundleRarity})
-                    </h3>
-                    <p className="import-hint">
-                      Same-sport overlap is counted in bundle order (best isolated net first within
-                      each sport).
-                    </p>
-                  </div>
-                </div>
-                <CheckerNetGainMetrics
-                  baselineGuaranteed={potentialCollectionGuaranteed}
-                  baselineWithPro={potentialCollectionWithPro}
-                  combinedGuaranteedNetDelta={potentialBundleAnalysis.combinedGuaranteedNetDelta}
-                  combinedWithProNetDelta={potentialBundleAnalysis.combinedNetDelta}
-                  baselineLabel="Baseline collection"
-                  afterLabel="After bundle"
-                  netGainDetail="bundle total"
-                />
-                {potentialBundleAnalysis.rows.length > 1 ? (
-                  <>
-                    <p className="import-hint">Per-pass contribution inside this bundle:</p>
-                    <ul className="list compact-list">
-                      {potentialBundleAnalysis.rows.map((row) => (
-                        <li key={row.key}>
-                          <strong>{row.name}</strong>
-                          <small>
-                            {' '}
-                            · {row.sport} · {row.season} · isolated{' '}
-                            {formatSignedRax(displayRaxValue(row.isolatedNetDelta))} · marginal{' '}
-                            {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
-                          </small>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-              </div>
-            ) : potentialBundleSelection.size > 0 && !potentialBundleProfilesLoading ? (
+          ) : null}
+        </div>
+
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={
+              catalogAnalysisBusy ||
+              (monthBoostAllSports && includedMonthBoostSports.length === 0)
+            }
+            onClick={() => void runMonthBoostRanking()}
+          >
+            {monthBoostInProgress
+              ? 'Ranking…'
+              : `Rank for ${CALENDAR_MONTH_NAMES[monthBoostMonthIdx]}`}
+          </button>
+          {monthBoostInProgress ? (
+            <button className="button" type="button" onClick={cancelMonthBoostRanking}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {monthBoostProgress ? (
+          <p className="import-progress">
+            Analyzing pass {monthBoostProgress.current}/{monthBoostProgress.total} —{' '}
+            {monthBoostProgress.label}
+          </p>
+        ) : null}
+        {monthBoostStatus ? <p className="import-status">{monthBoostStatus}</p> : null}
+
+        {monthBoostAllRows.length > 0 ? (
+          <>
+            {monthBoostMeta ? (
               <p className="import-hint">
-                Selected passes are loading or have no catalog earnings rows yet.
+                Saved {new Date(monthBoostMeta.calculatedAt).toLocaleString()} ·{' '}
+                {monthBoostMeta.catalogCount} catalog pass
+                {monthBoostMeta.catalogCount === 1 ? '' : 'es'} · target {monthBoostMeta.month}
+                {monthBoostMeta.skippedOwnedIconic > 0
+                  ? ` · ${monthBoostMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
+                  : ''}
+                {monthBoostMeta.skippedAdjusted > 0
+                  ? ` · ${monthBoostMeta.skippedAdjusted} skipped by your adjustments`
+                  : ''}
+                {monthBoostMeta.baselineAdjustmentCount > 0
+                  ? ` · ${monthBoostMeta.baselineAdjustmentCount} assumed at ${RECOMMENDATION_SIMULATED_RARITY} in baseline`
+                  : ''}
+                {monthBoostMeta.fetchTrimmed > 0
+                  ? ` · ${monthBoostMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
+                  : ''}
+                {monthBoostMeta.prefilterTrimmed > 0
+                  ? ` · ${monthBoostMeta.prefilterTrimmed} not fully simulated (Iconic 1 pre-filter)`
+                  : ''}
+                . Net Δ includes Pro bonus; guaranteed-only shown for comparison. Click a pass to
+                open detailed analysis below.
               </p>
             ) : null}
-          </div>
-        ) : null}
-
-        <h3 className="mini-heading potential-section-divider">Or enter manually</h3>
-        <form className="form-panel-inner" onSubmit={submitAnalyze}>
-          <div className="form-grid">
-            <label className="field">
-              <span>Player / team name</span>
-              <input
-                value={form.name}
-                placeholder="Dominik Szoboszlai"
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>Sport</span>
-              <select
-                value={form.sport}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, sport: event.target.value as Sport }))
-                }
-              >
-                {SPORTS.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Season / card label</span>
-              <input
-                value={form.season}
-                placeholder="2025-26"
-                onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
-              />
-            </label>
-          </div>
-          <label className="field">
-            <span>Profile notes (optional)</span>
-            <input
-              value={form.notes}
-              placeholder="Target price, rarity, listing link…"
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-            />
-          </label>
-          <label className="field">
-            <span>realapp.com earnings JSON</span>
-            <textarea
-              className="bulk-import-textarea"
-              value={form.rawJson}
-              placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
-              onChange={(event) => setForm((current) => ({ ...current, rawJson: event.target.value }))}
-            />
-          </label>
-          <div className="button-row">
-            <button className="button primary" type="submit" disabled={!form.rawJson.trim()}>
-              Analyze potential card
-            </button>
-            <button className="button" type="button" disabled={!form.name.trim()} onClick={saveProfile}>
-              Save profile
-            </button>
-            <button className="button" type="button" onClick={resetForm}>
-              New profile
-            </button>
-            {status ? <p className="import-status">{status}</p> : null}
-          </div>
-        </form>
-
-        {potentialAnalysis ? (
-          <div className="potential-analysis-inline">
-            <h3 className="mini-heading potential-section-divider">Analysis result</h3>
-            <PotentialAnalysisResults
-              analysis={potentialAnalysis}
-              previewAs={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
-              baselineAdjustmentCount={potentialBaselineAdjustmentCount}
-            />
-          </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Pass</th>
+                    <th>{monthBoostMeta?.month ?? 'Month'} net Δ</th>
+                    <th>Pro bonus</th>
+                    <th>Year-round net Δ</th>
+                    <th>Month gain</th>
+                    <th>Month displaced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleMonthBoostRows.map((row, index) => {
+                    const rankNumber = index + 1
+                    const monthProBonus = row.monthNetDelta - row.monthGuaranteedNetDelta
+                    const yearRoundProBonus = row.netClaimableDelta - row.netGuaranteedDelta
+                    return (
+                      <tr key={row.externalKey}>
+                        <td>{rankNumber}</td>
+                        <td>
+                          <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => loadRecommendationRow(row)}
+                          >
+                            {row.name}
+                          </button>
+                          <br />
+                          <small className="table-sub">
+                            {row.sport} · {row.season}
+                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                          </small>
+                        </td>
+                        <td>
+                          <strong
+                            className={
+                              row.monthNetDelta > 0
+                                ? 'sale-positive'
+                                : row.monthNetDelta < 0
+                                  ? 'sale-negative'
+                                  : ''
+                            }
+                          >
+                            {formatSignedRax(displayRaxValue(row.monthNetDelta))}
+                          </strong>
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.monthGuaranteedNetDelta))}{' '}
+                            guaranteed
+                          </small>
+                        </td>
+                        <td>
+                          {monthProBonus > 0 ? (
+                            <>+{formatRax(displayRaxValue(monthProBonus))}</>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.netGuaranteedDelta))} guaranteed
+                            {yearRoundProBonus > 0
+                              ? ` · +${formatRax(displayRaxValue(yearRoundProBonus))} Pro`
+                              : ''}
+                          </small>
+                        </td>
+                        <td>{formatRax(displayRaxValue(row.monthGain))}</td>
+                        <td>
+                          {row.monthDisplaced > 0
+                            ? `−${formatRax(displayRaxValue(row.monthDisplaced))}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {monthBoostHasMore ? (
+              <div className="button-row">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={catalogAnalysisBusy}
+                  onClick={() =>
+                    setMonthBoostVisibleCount((count) =>
+                      Math.min(count + MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length),
+                    )
+                  }
+                >
+                  Show next {Math.min(MONTH_BOOST_PAGE_SIZE, monthBoostAllRows.length - monthBoostVisibleCount)} (
+                  {monthBoostVisibleCount} of {monthBoostAllRows.length})
+                </button>
+              </div>
+            ) : monthBoostAllRows.length > MONTH_BOOST_PAGE_SIZE ? (
+              <p className="import-hint">
+                Showing all {monthBoostAllRows.length} ranked passes.
+              </p>
+            ) : null}
+          </>
         ) : null}
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="Saved profiles"
-        description="Player info and pasted JSON — reload to re-run the what-if analysis."
-        badge={`${data.potentialCards.length} saved`}
+        id="day-boost-passes"
+        title="Best for a day"
+        description={`Top catalog earners for one OTD day (${RECOMMENDATION_SIMULATED_RARITY}).`}
+        open={dayBoostOpen}
+        onOpenChange={setDayBoostOpen}
         defaultOpen={false}
       >
-        {data.potentialCards.length === 0 ? (
-          <p className="empty">No saved profiles yet. Analyze a card above, then save it for later.</p>
-        ) : (
-          <div className="list">
-            {data.potentialCards.map((saved) => (
-              <div className="list-row" key={saved.id}>
-                <span>
-                  <strong>{saved.name || 'Potential card'}</strong>
-                  <small>
-                    {saved.sport} · {saved.season || 'No season'} · {saved.rows.length} row
-                    {saved.rows.length === 1 ? '' : 's'}
-                    {saved.notes ? ` · ${saved.notes}` : ''}
-                  </small>
-                </span>
-                <span className="button-row compact-actions">
-                  <button className="button" type="button" onClick={() => loadProfile(saved.id)}>
-                    Load
-                  </button>
-                  <button
-                    className="button danger"
-                    type="button"
-                    onClick={() => {
-                      if (editingId === saved.id) resetForm()
-                      deletePotentialCard(saved.id)
-                    }}
-                  >
-                    Delete
-                  </button>
-                </span>
-              </div>
-            ))}
+        <p className="import-hint">
+          Same baseline and exclusions as{' '}
+          <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
+            Rank catalog
+          </button>
+          .
+          {dayBoostAllSports ? (
+            <>
+              {' '}
+              <strong>All sports</strong> can take a long time.
+            </>
+          ) : null}
+        </p>
+
+        <div className="sort-controls">
+          <div className="field inline-field day-boost-day-field">
+            <span>Day</span>
+            <div className="date-picker-control">
+              <input
+                ref={dayBoostDayInputRef}
+                className="date-picker-input"
+                type="date"
+                value={dayBoostBestDay ?? ''}
+                disabled={catalogAnalysisBusy}
+                onChange={(event) => {
+                  const value = event.target.value || null
+                  setDayBoostBestDay(value)
+                  setDayBoostTopPerSport(null)
+                  if (!value) return
+                  setDayBoostPendingAutoRun(true)
+                }}
+                aria-label="Claim day"
+              />
+              <button
+                className="button date-picker-icon-button"
+                type="button"
+                disabled={catalogAnalysisBusy}
+                aria-label="Pick a claim day"
+                title="Pick a claim day"
+                onClick={openDayBoostDayPicker}
+              >
+                <CalendarDayIcon />
+              </button>
+              {dayBoostBestDay ? (
+                <button
+                  className="button"
+                  type="button"
+                  disabled={catalogAnalysisBusy}
+                  onClick={clearDayBoostDay}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
           </div>
-        )}
+          <label className="field inline-field">
+            <span>Sport</span>
+            <select
+              value={dayBoostSport}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => {
+                const next = event.target.value
+                setDayBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+                if (next !== ALL_SPORTS_RANK) {
+                  setDayBoostExcludedSports([])
+                }
+              }}
+            >
+              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
+              {SPORTS.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+          </label>
+          {dayBoostAllSports ? (
+            <div className="field inline-field season-multi-select-field">
+              <SeasonMultiSelect
+                options={rankSportOptions}
+                excludedValues={dayBoostExcludedSports}
+                onExcludedValuesChange={(values) => setDayBoostExcludedSports(values as Sport[])}
+                disabled={catalogAnalysisBusy}
+                label="Sports"
+                menuTitle="Sports"
+                allOptionLabel="All sports"
+                emptyTriggerLabel="No sports"
+                countUnit="sports"
+              />
+              {excludedDayBoostSportOptions.length > 0 ? (
+                <p className="season-filter-summary">
+                  <span>
+                    Including:{' '}
+                    {includedDayBoostSports.length > 0 ? includedDayBoostSports.join(', ') : 'none'}
+                  </span>
+                  {' · '}
+                  <span>
+                    Excluding: {excludedDayBoostSportOptions.map((option) => option.label).join(', ')}
+                  </span>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={
+              catalogAnalysisBusy ||
+              !dayBoostMonthDay ||
+              (dayBoostAllSports && includedDayBoostSports.length === 0)
+            }
+            onClick={() => void runDayBoostRanking()}
+          >
+            {dayBoostInProgress
+              ? 'Ranking…'
+              : dayBoostTargetLabel
+                ? `Rank for ${dayBoostTargetLabel}`
+                : 'Pick a day'}
+          </button>
+          {dayBoostInProgress ? (
+            <button className="button" type="button" onClick={cancelDayBoostRanking}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {dayBoostProgress ? (
+          <p className="import-progress">
+            Analyzing pass {dayBoostProgress.current}/{dayBoostProgress.total} —{' '}
+            {dayBoostProgress.label}
+          </p>
+        ) : null}
+        {dayBoostStatus ? <p className="import-status">{dayBoostStatus}</p> : null}
+
+        {dayBoostAllRows.length > 0 ? (
+          <>
+            {dayBoostMeta ? (
+              <p className="import-hint">
+                Saved {new Date(dayBoostMeta.calculatedAt).toLocaleString()} ·{' '}
+                {dayBoostMeta.catalogCount} catalog pass
+                {dayBoostMeta.catalogCount === 1 ? '' : 'es'} · target {dayBoostMeta.dayLabel}
+                {dayBoostMeta.topPerSport != null
+                  ? ` · top ${dayBoostMeta.topPerSport} per sport`
+                  : ''}
+                {dayBoostMeta.skippedOwnedIconic > 0
+                  ? ` · ${dayBoostMeta.skippedOwnedIconic} already owned at ${RECOMMENDATION_SIMULATED_RARITY}+`
+                  : ''}
+                {dayBoostMeta.skippedAdjusted > 0
+                  ? ` · ${dayBoostMeta.skippedAdjusted} skipped by your adjustments`
+                  : ''}
+                {dayBoostMeta.baselineAdjustmentCount > 0
+                  ? ` · ${dayBoostMeta.baselineAdjustmentCount} assumed at ${RECOMMENDATION_SIMULATED_RARITY} in baseline`
+                  : ''}
+                {dayBoostMeta.fetchTrimmed > 0
+                  ? ` · ${dayBoostMeta.fetchTrimmed} not fetched (base RAX pre-filter)`
+                  : ''}
+                {dayBoostMeta.prefilterTrimmed > 0
+                  ? ` · ${dayBoostMeta.prefilterTrimmed} not fully simulated (Iconic 1 pre-filter)`
+                  : ''}
+                . Net Δ includes Pro bonus; guaranteed-only shown for comparison. Click a pass to
+                open detailed analysis below.
+              </p>
+            ) : null}
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Pass</th>
+                    <th>{dayBoostMeta?.dayLabel ?? 'Day'} net Δ</th>
+                    <th>Pro bonus</th>
+                    <th>Year-round net Δ</th>
+                    <th>Day gain</th>
+                    <th>Day displaced</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleDayBoostRows.map((row, index) => {
+                    const rankNumber = index + 1
+                    const dayProBonus = row.monthNetDelta - row.monthGuaranteedNetDelta
+                    const yearRoundProBonus = row.netClaimableDelta - row.netGuaranteedDelta
+                    return (
+                      <tr key={row.externalKey}>
+                        <td>{rankNumber}</td>
+                        <td>
+                          <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => loadRecommendationRow(row)}
+                          >
+                            {row.name}
+                          </button>
+                          <br />
+                          <small className="table-sub">
+                            {row.sport} · {row.season}
+                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                          </small>
+                        </td>
+                        <td>
+                          <strong
+                            className={
+                              row.monthNetDelta > 0
+                                ? 'sale-positive'
+                                : row.monthNetDelta < 0
+                                  ? 'sale-negative'
+                                  : ''
+                            }
+                          >
+                            {formatSignedRax(displayRaxValue(row.monthNetDelta))}
+                          </strong>
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.monthGuaranteedNetDelta))}{' '}
+                            guaranteed
+                          </small>
+                        </td>
+                        <td>
+                          {dayProBonus > 0 ? (
+                            <>+{formatRax(displayRaxValue(dayProBonus))}</>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                          <br />
+                          <small className="table-sub">
+                            {formatSignedRax(displayRaxValue(row.netGuaranteedDelta))} guaranteed
+                            {yearRoundProBonus > 0
+                              ? ` · +${formatRax(displayRaxValue(yearRoundProBonus))} Pro`
+                              : ''}
+                          </small>
+                        </td>
+                        <td>{formatRax(displayRaxValue(row.monthGain))}</td>
+                        <td>
+                          {row.monthDisplaced > 0
+                            ? `−${formatRax(displayRaxValue(row.monthDisplaced))}`
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {dayBoostHasMore ? (
+              <div className="button-row">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={catalogAnalysisBusy}
+                  onClick={() =>
+                    setDayBoostVisibleCount((count) =>
+                      Math.min(count + MONTH_BOOST_PAGE_SIZE, dayBoostAllRows.length),
+                    )
+                  }
+                >
+                  Show next {Math.min(MONTH_BOOST_PAGE_SIZE, dayBoostAllRows.length - dayBoostVisibleCount)} (
+                  {dayBoostVisibleCount} of {dayBoostAllRows.length})
+                </button>
+              </div>
+            ) : dayBoostAllRows.length > MONTH_BOOST_PAGE_SIZE ? (
+              <p className="import-hint">
+                Showing all {dayBoostAllRows.length} ranked passes.
+              </p>
+            ) : null}
+          </>
+        ) : null}
       </CollapsiblePanel>
 
       <CollapsiblePanel
         id="iconic-20-checker"
         className="iconic-20-checker"
-        title="Iconic 20 potential checker"
-        description={`Bundle what-if at ${ICONIC_20_SIMULATED_RARITY} OTD — upgrade owned Iconic passes and/or preview new catalog cards. Nothing is saved.`}
+        title="Iconic 20 check"
+        description={`Bundle what-if at ${ICONIC_20_SIMULATED_RARITY} OTD — owned upgrades and/or new catalog cards. Nothing saved.`}
         badge={
           iconic20Selection.size > 0 ? `${iconic20Selection.size} selected` : undefined
         }
         defaultOpen={false}
       >
         <p className="import-hint">
-          <strong>What is analyzed:</strong> saved daily earnings (owned upgrades) or catalog base
-          stats (new cards), each at {ICONIC_20_SIMULATED_RARITY} multipliers, then Dashboard claim
-          rules (top 2 per sport per day, Pro bonus if enabled). Mix owned upgrades and new catalog
-          picks in one bundle — same-sport overlap is counted in bundle order.
+          Owned upgrades use saved earnings; new cards use catalog base stats — both at{' '}
+          {ICONIC_20_SIMULATED_RARITY}. Same claim rules as Dashboard. Mix in one bundle; same-sport
+          overlap counts in bundle order.
         </p>
 
         <CollapsiblePanel
           className="nested-panel iconic-20-checker-owned"
           title="From your collection"
-          description={`Upgrade owned Iconic passes below level 20 to ${ICONIC_20_SIMULATED_RARITY}.`}
+          description={`Owned Iconic below 20 → ${ICONIC_20_SIMULATED_RARITY}.`}
           defaultOpen={false}
         >
           {ownedIconic20EligibleCards.length > 0 ? (
@@ -4314,8 +4885,8 @@ export default function PotentialPage() {
 
         <CollapsiblePanel
           className="nested-panel iconic-20-checker-catalog"
-          title="From catalog (new card)"
-          description={`Search passes you do not own. Each pick is simulated as a new ${ICONIC_20_SIMULATED_RARITY} card — not saved to your collection.`}
+          title="From catalog"
+          description={`Passes you do not own, simulated as new ${ICONIC_20_SIMULATED_RARITY} — not saved.`}
           defaultOpen={false}
         >
           <div className="sort-controls">
@@ -4443,6 +5014,84 @@ export default function PotentialPage() {
           </p>
         )}
       </CollapsiblePanel>
+
+      <CollapsiblePanel
+        title="Saved profiles"
+        description="Saved what-if cards — load to re-run analysis."
+        badge={`${data.potentialCards.length} saved`}
+        defaultOpen={false}
+      >
+        {data.potentialCards.length === 0 ? (
+          <p className="empty">No saved profiles yet. Analyze in Check one pass, then Save.</p>
+        ) : (
+          <div className="list">
+            {data.potentialCards.map((saved) => (
+              <div className="list-row" key={saved.id}>
+                <span>
+                  <strong>{saved.name || 'Potential card'}</strong>
+                  <small>
+                    {saved.sport} · {saved.season || 'No season'} · {saved.rows.length} row
+                    {saved.rows.length === 1 ? '' : 's'}
+                    {saved.notes ? ` · ${saved.notes}` : ''}
+                  </small>
+                </span>
+                <span className="button-row compact-actions">
+                  <button className="button" type="button" onClick={() => loadProfile(saved.id)}>
+                    Load
+                  </button>
+                  <button
+                    className="button danger"
+                    type="button"
+                    onClick={() => {
+                      if (editingId === saved.id) resetForm()
+                      deletePotentialCard(saved.id)
+                    }}
+                  >
+                    Delete
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
+        className="help-section"
+        title="Manual JSON walkthrough"
+        description="Paste realapp.com earnings when catalog search is not enough."
+        defaultOpen={false}
+      >
+        <ol className="help-list ordered">
+          <li>
+            Open{' '}
+            <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
+              realapp.com
+            </a>{' '}
+            (desktop, Real Pro) → pass earnings.
+          </li>
+          <li>
+            DevTools (<kbd>F12</kbd>) → <strong>Network</strong> →{' '}
+            <code>userpassearnings</code> → copy Response JSON.
+          </li>
+          <li>
+            In <strong>Check one pass</strong>, fill name/sport/season, paste, then Analyze
+            ({RECOMMENDATION_SIMULATED_RARITY} OTD).
+          </li>
+        </ol>
+        <details className="help-details">
+          <summary>Browser tips</summary>
+          <ul className="help-list">
+            <li>
+              <strong>Safari:</strong> Develop → Web Inspector → Network; copy the JSON body.
+            </li>
+            <li>
+              <strong>Mobile:</strong> prefer desktop paste.
+            </li>
+          </ul>
+        </details>
+      </CollapsiblePanel>
+
     </div>
   )
 }

@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { realappToolsShutdownLabel, usernameImportDisabled } from '../lib/importShutdown'
+import {
+  realProviderImportEnabled,
+  realappToolsShutdownLabel,
+  usernameImportDisabled,
+} from '../lib/importShutdown'
 
 const DISMISS_KEY = 'real-rax-tracker:import-shutdown-dismissed'
 
@@ -24,22 +28,21 @@ export default function ImportShutdownNotice() {
   const [visible, setVisible] = useState(() => !isDismissed())
   if (!visible) return null
 
+  // Real username import is live — no shutdown banner needed.
+  if (realProviderImportEnabled()) return null
+
   const closed = usernameImportDisabled()
 
   return (
-    <section className="shutdown-notice" aria-label="Username import shutdown notice">
+    <section className="shutdown-notice" aria-label="Username import notice">
       <div>
         <p className="eyebrow">{closed ? 'Username import closed' : 'Username import ending'}</p>
-        <h2>realapp.tools / Meowbot import is shutting down</h2>
+        <h2>{closed ? 'Automatic username import is closed' : 'Username import ending soon'}</h2>
         <p>
-          Automatic username import {closed ? 'has stopped' : `will stop after ${realappToolsShutdownLabel()}`}.
-          Cards and earnings already imported into this browser stay saved locally and are included
-          in JSON backups. While imports still work, the tracker may cache pass metadata and player
-          earnings to make future manual Entry and Potential checks faster.
-        </p>
-        <p>
-          After shutdown, add new cards through <strong>Add card &amp; earnings</strong>, paste
-          realapp.com earnings JSON, or restore from an exported backup.
+          {closed
+            ? `Automatic import stopped after ${realappToolsShutdownLabel()}. Cards already in this browser stay saved.`
+            : `Automatic import stops after ${realappToolsShutdownLabel()}. Cards already in this browser stay saved.`}{' '}
+          Use catalog quick add, Manual add on Entry, or restore a backup.
         </p>
       </div>
       <div className="button-row shutdown-notice-actions">
@@ -47,7 +50,7 @@ export default function ImportShutdownNotice() {
           Open Entry
         </Link>
         <Link className="button" to="/help">
-          Read guide
+          Help
         </Link>
         <button
           className="button"

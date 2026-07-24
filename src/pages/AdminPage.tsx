@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
@@ -11,10 +11,26 @@ import {
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
 import { parseFetchJson } from '../lib/readResponseJson'
-
-function parseAdminUsernames(raw: string): string[] {
-  return [...new Set(raw.split(/[\s,]+/).map((value) => value.replace(/^@/, '').trim().toLowerCase()).filter(Boolean))]
-}
+import {
+  DEFAULT_SHOP_CRAWL_UI_MAX_PAGES,
+  SHOP_CRAWL_UI_MAX_PAGES_CAP,
+  SHOP_CRAWL_WAIT_LOG_INTERVAL_MS,
+  SHOP_CRAWL_WAIT_STATUS_INTERVAL_MS,
+  advanceShopCrawlBeforeByChunks,
+  advanceShopCrawlBeforeByPages,
+  clearShopCrawlResumeCursor,
+  estimateShopCrawlChunkTimeoutMs,
+  formatShopCrawlResumeCursor,
+  linkAbortTimeout,
+  loadShopCrawlResumeCursor,
+  saveShopCrawlResumeCursor,
+  shopCrawlChunkTimeoutMessage,
+  shopCrawlConfigsMatch,
+  shopCrawlWaitingMessage,
+  type ShopCrawlEntityType,
+  type ShopCrawlResumeConfig,
+  type ShopCrawlResumeCursor,
+} from '../lib/shopCrawlClient'
 
 type EventsResponse = {
   events: AdminEvent[]
@@ -53,49 +69,10 @@ type OwnershipLookupResponse = {
 
 type CatalogImportResponse = {
   ok: boolean
-  mode: 'saved-usernames' | 'usernames' | 'pass' | 'otd-table' | 'manual-upsert'
-  totals?: {
-    usernames: number
-    passesScanned: number
-    passesUpserted: number
-    rowsUpserted: number
-    passesWithNoEarnings: number
-    failures: number
-  }
-  usernamesImported?: Array<{
-    username: string
-    passesScanned: number
-    passesUpserted: number
-    rowsUpserted: number
-    passesWithNoEarnings: number
-    failures: string[]
-  }>
-  passesScanned?: number
+  mode: 'manual-upsert'
   passesUpserted?: number
   rowsUpserted?: number
-  passesWithNoEarnings?: number
-  failures?: string[]
   skippedRows?: number
-  error?: string
-}
-
-type UsernameOwnershipResponse = {
-  ok: boolean
-  usernamesSaved?: Array<{
-    username: string
-    passesSaved: number
-    rowsSaved: number
-    passesWithNoEarnings: number
-    failures: string[]
-    error?: string
-  }>
-  totals?: {
-    usernames: number
-    passesSaved: number
-    rowsSaved: number
-    passesWithNoEarnings: number
-    failures: number
-  }
   error?: string
 }
 
@@ -109,6 +86,55 @@ type TrackerProfileLookupResponse = {
   storageConfigured: boolean
   error?: string
 }
+
+type ShopCrawlLogEvent = {
+  type: string
+  message: string
+}
+
+type ShopCrawlLogLine = {
+  id: number
+  type: string
+  message: string
+}
+
+type ShopEarningsCrawlResponse = {
+  ok: boolean
+  upserted: number
+  pagesFetched: number
+  earningsFetched: number
+  earningsFailed: number
+  dailyRowsUpserted: number
+  nextBefore: number
+  done: boolean
+  jobsTotal: number
+  maxPages?: number
+  delayMs?: number
+  earningsConcurrency?: number
+  cursor: {
+    jobIndex: number
+    before: number
+    sport: string
+    season: number
+    entityType: 'player' | 'team'
+  }
+  skipped?: Array<{ sport: string; season: number; entityType: string; reason: string }>
+  failures?: string[]
+  log?: ShopCrawlLogEvent[]
+  error?: string
+}
+
+const LIVE_SHOP_CRAWL_SPORTS = [
+  { label: 'NBA', value: 'nba' },
+  { label: 'WNBA', value: 'wnba' },
+  { label: 'NFL', value: 'nfl' },
+  { label: 'CFB', value: 'ncaaf' },
+  { label: 'MLB', value: 'mlb' },
+  { label: 'NHL', value: 'nhl' },
+  { label: 'CBB', value: 'ncaam' },
+  { label: 'Golf', value: 'golf' },
+  { label: 'FC', value: 'soccer' },
+] as const
 
 const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
@@ -135,32 +161,9 @@ export default function AdminPage() {
   const [cloudProfileSummary, setCloudProfileSummary] = useState<
     TrackerProfileLookupResponse['profile']
   >(null)
-  const [catalogUsernames, setCatalogUsernames] = useState('')
-  const [ownershipSaveUsernames, setOwnershipSaveUsernames] = useState('')
-  const [ownershipSaveStatus, setOwnershipSaveStatus] = useState('')
-  const [ownershipSaving, setOwnershipSaving] = useState(false)
   const [ownershipSnapshots, setOwnershipSnapshots] = useState<OwnershipSnapshotSummary[]>([])
   const [ownershipSnapshotsLoading, setOwnershipSnapshotsLoading] = useState(false)
   const [ownershipSnapshotsError, setOwnershipSnapshotsError] = useState('')
-  const [catalogSavedLimit, setCatalogSavedLimit] = useState('25')
-  const [catalogStatus, setCatalogStatus] = useState('')
-  const [catalogImporting, setCatalogImporting] = useState(false)
-  const [otdImport, setOtdImport] = useState({
-    seasons: '2026,2025',
-    sport: '',
-    includePlayers: true,
-    includeTeams: true,
-    maxPasses: '250',
-  })
-  const [passImport, setPassImport] = useState({
-    entityId: '',
-    seasonYear: '',
-    sport: 'NBA',
-    passKind: 'player' as 'player' | 'team',
-    name: '',
-    rarityLabel: '',
-    seasonLabel: '',
-  })
   const [manualUpsert, setManualUpsert] = useState({
     externalKey: '',
     entityId: '',
@@ -175,6 +178,74 @@ export default function AdminPage() {
   const [manualUpsertLoadingKey, setManualUpsertLoadingKey] = useState('')
   const [manualUpsertBusy, setManualUpsertBusy] = useState(false)
   const [manualUpsertStatus, setManualUpsertStatus] = useState('')
+  const [shopCrawl, setShopCrawl] = useState({
+    seasons: '',
+    sports: LIVE_SHOP_CRAWL_SPORTS.map((sport) => sport.value),
+    includeUfc: false,
+    includePlayers: true,
+    includeTeams: true,
+    maxPages: String(DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
+    delayMs: '1500',
+  })
+  const [shopCrawlBusy, setShopCrawlBusy] = useState(false)
+  const [shopCrawlStatus, setShopCrawlStatus] = useState('')
+  const [shopCrawlAbort, setShopCrawlAbort] = useState<AbortController | null>(null)
+  const [shopCrawlLog, setShopCrawlLog] = useState<ShopCrawlLogLine[]>([])
+  const [shopCrawlResume, setShopCrawlResume] = useState<ShopCrawlResumeCursor | null>(() =>
+    loadShopCrawlResumeCursor(),
+  )
+  const [shopCrawlSkipChunks, setShopCrawlSkipChunks] = useState('1')
+  const [shopCrawlSkipPages, setShopCrawlSkipPages] = useState('1')
+  const [shopCrawlCursorJobIndex, setShopCrawlCursorJobIndex] = useState(() =>
+    String(loadShopCrawlResumeCursor()?.jobIndex ?? 0),
+  )
+  const [shopCrawlCursorBefore, setShopCrawlCursorBefore] = useState(() =>
+    String(loadShopCrawlResumeCursor()?.before ?? 0),
+  )
+  const shopCrawlLogIdRef = useRef(0)
+  const shopCrawlLogPanelRef = useRef<HTMLDivElement | null>(null)
+  const shopCrawlResumeRef = useRef<ShopCrawlResumeCursor | null>(shopCrawlResume)
+
+  const syncShopCrawlResume = useCallback((cursor: ShopCrawlResumeCursor | null) => {
+    shopCrawlResumeRef.current = cursor
+    setShopCrawlResume(cursor)
+    if (cursor) {
+      setShopCrawlCursorJobIndex(String(cursor.jobIndex))
+      setShopCrawlCursorBefore(String(cursor.before))
+      saveShopCrawlResumeCursor(cursor)
+    } else {
+      clearShopCrawlResumeCursor()
+    }
+  }, [])
+
+  const appendShopCrawlLog = useCallback((type: string, message: string) => {
+    shopCrawlLogIdRef.current += 1
+    const id = shopCrawlLogIdRef.current
+    setShopCrawlLog((current) => [...current, { id, type, message }])
+  }, [])
+
+  const appendShopCrawlLogEvents = useCallback((events: ShopCrawlLogEvent[] | undefined) => {
+    if (!events || events.length === 0) return
+    setShopCrawlLog((current) => {
+      let nextId = shopCrawlLogIdRef.current
+      const appended = events.map((event) => {
+        nextId += 1
+        return {
+          id: nextId,
+          type: event.type || 'info',
+          message: event.message,
+        }
+      })
+      shopCrawlLogIdRef.current = nextId
+      return [...current, ...appended]
+    })
+  }, [])
+
+  useEffect(() => {
+    const panel = shopCrawlLogPanelRef.current
+    if (!panel) return
+    panel.scrollTop = panel.scrollHeight
+  }, [shopCrawlLog])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -260,7 +331,7 @@ export default function AdminPage() {
       const body = (await response.json()) as OwnershipLookupResponse
       if (!body.ownership) {
         setOwnershipLookupStatus(
-          `No cached snapshot found for @${username}. Import this username before shutdown to seed fallback.`,
+          `No cached snapshot found for @${username}. Snapshots appear after a successful username import reports ownership.`,
         )
         return
       }
@@ -400,223 +471,17 @@ export default function AdminPage() {
     }
   }
 
-  const postCatalogImport = async (body: Record<string, unknown>): Promise<CatalogImportResponse> => {
-    const response = await fetch('/api/admin/catalog-import', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return parseFetchJson<CatalogImportResponse>(response, 'Catalog import failed')
-  }
-
-  const summarizeCatalogImport = (data: CatalogImportResponse): string => {
-    if (data.totals) {
-      return `Imported ${data.totals.usernames} username${data.totals.usernames === 1 ? '' : 's'}: ${data.totals.passesUpserted} pass${data.totals.passesUpserted === 1 ? '' : 'es'}, ${data.totals.rowsUpserted} RAX row${data.totals.rowsUpserted === 1 ? '' : 's'} saved to Supabase (${data.totals.passesWithNoEarnings} with no earnings, ${data.totals.failures} failure${data.totals.failures === 1 ? '' : 's'}).`
-    }
-    return `Imported pass: ${data.passesUpserted ?? 0} pass${data.passesUpserted === 1 ? '' : 'es'}, ${data.rowsUpserted ?? 0} RAX row${data.rowsUpserted === 1 ? '' : 's'} saved to Supabase (${data.passesWithNoEarnings ?? 0} with no earnings, ${(data.failures ?? []).length} failure${(data.failures ?? []).length === 1 ? '' : 's'}).`
-  }
-
-  const importSavedUsernames = async () => {
-    setCatalogImporting(true)
-    setCatalogStatus('Importing saved usernames into Supabase catalog…')
-    try {
-      const data = await postCatalogImport({
-        mode: 'saved-usernames',
-        limit: Number(catalogSavedLimit) || 25,
-      })
-      setCatalogStatus(summarizeCatalogImport(data))
-    } catch (error) {
-      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
-    } finally {
-      setCatalogImporting(false)
-    }
-  }
-
-  const importManualUsernames = async () => {
-    const usernames = parseAdminUsernames(catalogUsernames)
-    if (usernames.length === 0) {
-      setCatalogStatus('Enter at least one username.')
-      return
-    }
-
-    setCatalogImporting(true)
-    const aggregated: CatalogImportResponse = {
-      ok: true,
-      mode: 'usernames',
-      totals: {
-        usernames: 0,
-        passesScanned: 0,
-        passesUpserted: 0,
-        rowsUpserted: 0,
-        passesWithNoEarnings: 0,
-        failures: 0,
-      },
-      usernamesImported: [],
-    }
-
-    try {
-      for (let index = 0; index < usernames.length; index += 1) {
-        const username = usernames[index] ?? ''
-        setCatalogStatus(
-          `Importing @${username} into Supabase catalog (${index + 1}/${usernames.length})…`,
-        )
-        const data = await postCatalogImport({ mode: 'usernames', usernames: username })
-        const entry = data.usernamesImported?.[0]
-        if (entry) {
-          aggregated.usernamesImported?.push(entry)
-        }
-        const totals = data.totals
-        if (totals && aggregated.totals) {
-          aggregated.totals.usernames += totals.usernames
-          aggregated.totals.passesScanned += totals.passesScanned
-          aggregated.totals.passesUpserted += totals.passesUpserted
-          aggregated.totals.rowsUpserted += totals.rowsUpserted
-          aggregated.totals.passesWithNoEarnings += totals.passesWithNoEarnings
-          aggregated.totals.failures += totals.failures
-        }
-      }
-      setCatalogStatus(summarizeCatalogImport(aggregated))
-    } catch (error) {
-      const partial = aggregated.totals
-      const partialNote =
-        partial && partial.usernames > 0
-          ? ` Partial progress saved for ${partial.usernames} username${partial.usernames === 1 ? '' : 's'} before the failure.`
-          : ''
-      setCatalogStatus(
-        (error instanceof Error ? error.message : 'Catalog import failed.') + partialNote,
-      )
-    } finally {
-      setCatalogImporting(false)
-    }
-  }
-
-  const saveUsernameOwnership = async () => {
-    const usernames = parseAdminUsernames(ownershipSaveUsernames)
-    if (usernames.length === 0) {
-      setOwnershipSaveStatus('Enter at least one username.')
-      return
-    }
-
-    setOwnershipSaving(true)
-    const aggregated: UsernameOwnershipResponse = {
-      ok: true,
-      usernamesSaved: [],
-      totals: {
-        usernames: 0,
-        passesSaved: 0,
-        rowsSaved: 0,
-        passesWithNoEarnings: 0,
-        failures: 0,
-      },
-    }
-
-    try {
-      for (let index = 0; index < usernames.length; index += 1) {
-        const username = usernames[index] ?? ''
-        setOwnershipSaveStatus(
-          `Fetching passes and daily RAX from Meowbot for @${username} (${index + 1}/${usernames.length})…`,
-        )
-        const response = await fetch('/api/admin/username-ownership', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usernames: username }),
-        })
-        const data = await parseFetchJson<UsernameOwnershipResponse>(response, 'Ownership save failed')
-        const entry = data.usernamesSaved?.[0]
-        if (entry) {
-          aggregated.usernamesSaved?.push(entry)
-        }
-        const totals = data.totals
-        if (totals && aggregated.totals) {
-          aggregated.totals.usernames += totals.usernames
-          aggregated.totals.passesSaved += totals.passesSaved
-          aggregated.totals.rowsSaved += totals.rowsSaved
-          aggregated.totals.passesWithNoEarnings += totals.passesWithNoEarnings
-          aggregated.totals.failures += totals.failures
-        }
-        if (!data.ok && !entry?.error) {
-          throw new Error(`Ownership save failed for @${username}.`)
-        }
-      }
-
-      const totals = aggregated.totals
-      if (!totals) {
-        setOwnershipSaveStatus('Ownership save completed.')
-        return
-      }
-      const failed = (aggregated.usernamesSaved ?? []).filter((entry) => entry.error)
-      setOwnershipSaveStatus(
-        `Saved full Meowbot import for ${totals.usernames} username${totals.usernames === 1 ? '' : 's'} (${totals.passesSaved} pass${totals.passesSaved === 1 ? '' : 'es'}, ${totals.rowsSaved} RAX row${totals.rowsSaved === 1 ? '' : 's'}${totals.passesWithNoEarnings > 0 ? `, ${totals.passesWithNoEarnings} with no earnings` : ''}${totals.failures > 0 ? `, ${totals.failures} pass failure${totals.failures === 1 ? '' : 's'}` : ''}).` +
-          (failed.length > 0
-            ? ` Errors: ${failed.map((entry) => `@${entry.username}: ${entry.error}`).join('; ')}`
-            : ' Users can recover passes and RAX from Entry → Import from admin cached passes.'),
-      )
-    } catch (error) {
-      const partial = aggregated.totals
-      const partialNote =
-        partial && partial.usernames > 0
-          ? ` Partial progress saved for ${partial.usernames} username${partial.usernames === 1 ? '' : 's'} before the failure.`
-          : ''
-      setOwnershipSaveStatus(
-        (error instanceof Error ? error.message : 'Ownership save failed.') + partialNote,
-      )
-    } finally {
-      setOwnershipSaving(false)
-      void loadOwnershipSnapshots()
-    }
-  }
-
-  const importSpecificPass = async () => {
-    setCatalogImporting(true)
-    setCatalogStatus('Importing specific pass into Supabase catalog…')
-    try {
-      const data = await postCatalogImport({
-        mode: 'pass',
-        ...passImport,
-        entityId: Number(passImport.entityId),
-        seasonYear: Number(passImport.seasonYear),
-      })
-      setCatalogStatus(summarizeCatalogImport(data))
-    } catch (error) {
-      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
-    } finally {
-      setCatalogImporting(false)
-    }
-  }
-
-  const importOtdTable = async () => {
-    setCatalogImporting(true)
-    setCatalogStatus('Discovering passes from OTD tables and importing daily RAX into Supabase…')
-    try {
-      const data = await postCatalogImport({
-        mode: 'otd-table',
-        seasons: otdImport.seasons,
-        sport: otdImport.sport || undefined,
-        includePlayers: otdImport.includePlayers,
-        includeTeams: otdImport.includeTeams,
-        maxPasses: Number(otdImport.maxPasses) || 250,
-      })
-      setCatalogStatus(summarizeCatalogImport(data))
-    } catch (error) {
-      setCatalogStatus(error instanceof Error ? error.message : 'Catalog import failed.')
-    } finally {
-      setCatalogImporting(false)
-    }
-  }
-
   const loadManualUpsertPass = async (result: CatalogSearchResult, _rarityLabel = '') => {
     setManualUpsertLoadingKey(result.externalKey)
-    setManualUpsertStatus('Loading pass from shared catalog…')
+    setManualUpsertStatus('Loading pass from catalog…')
     try {
       const { profile, storageConfigured } = await fetchCatalogImportProfile(result.externalKey)
       if (!storageConfigured) {
-        setManualUpsertStatus('Shared catalog search is not configured yet.')
+        setManualUpsertStatus('Catalog search is not configured yet.')
         return
       }
       if (!profile) {
-        setManualUpsertStatus('That pass was not found in the shared catalog. Try searching again.')
+        setManualUpsertStatus('That pass was not found in the catalog. Try searching again.')
         return
       }
 
@@ -635,7 +500,7 @@ export default function AdminPage() {
             : '{\n  "earnings": []\n}',
       })
       setManualUpsertStatus(
-        `Loaded ${profile.name} (${profile.rowCount} existing RAX row${profile.rowCount === 1 ? '' : 's'}). Edit the JSON below, then upsert to Supabase without calling Meowbot.`,
+        `Loaded ${profile.name} (${profile.rowCount} existing RAX row${profile.rowCount === 1 ? '' : 's'}). Edit the JSON below, then upsert to Supabase.`,
       )
     } catch (error) {
       setManualUpsertStatus(error instanceof Error ? error.message : 'Could not load catalog pass.')
@@ -646,20 +511,26 @@ export default function AdminPage() {
 
   const submitManualUpsert = async () => {
     setManualUpsertBusy(true)
-    setManualUpsertStatus('Saving manual catalog override to Supabase…')
+    setManualUpsertStatus('Saving catalog override to Supabase…')
     try {
-      const data = await postCatalogImport({
-        mode: 'manual-upsert',
-        externalKey: manualUpsert.externalKey || undefined,
-        entityId: Number(manualUpsert.entityId),
-        seasonYear: Number(manualUpsert.seasonYear),
-        sport: manualUpsert.sport,
-        passKind: manualUpsert.passKind,
-        name: manualUpsert.name,
-        rarityLabel: manualUpsert.rarityLabel || undefined,
-        seasonLabel: manualUpsert.seasonLabel || undefined,
-        rawJson: manualUpsert.rawJson,
+      const response = await fetch('/api/admin/catalog-import', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'manual-upsert',
+          externalKey: manualUpsert.externalKey || undefined,
+          entityId: Number(manualUpsert.entityId),
+          seasonYear: Number(manualUpsert.seasonYear),
+          sport: manualUpsert.sport,
+          passKind: manualUpsert.passKind,
+          name: manualUpsert.name,
+          rarityLabel: manualUpsert.rarityLabel || undefined,
+          seasonLabel: manualUpsert.seasonLabel || undefined,
+          rawJson: manualUpsert.rawJson,
+        }),
       })
+      const data = await parseFetchJson<CatalogImportResponse>(response, 'Catalog upsert failed')
       const skipped = data.skippedRows ?? 0
       setManualUpsertStatus(
         `Saved ${data.passesUpserted ?? 0} pass with ${data.rowsUpserted ?? 0} RAX row${(data.rowsUpserted ?? 0) === 1 ? '' : 's'} to Supabase${skipped > 0 ? ` (${skipped} row${skipped === 1 ? '' : 's'} skipped in JSON)` : ''}.`,
@@ -671,6 +542,470 @@ export default function AdminPage() {
     }
   }
 
+  const stopShopCrawl = () => {
+    shopCrawlAbort?.abort()
+  }
+
+  const parseShopCrawlSeasons = () =>
+    shopCrawl.seasons
+      .split(/[\s,]+/)
+      .map((value) => Number(value))
+      .filter((season) => Number.isInteger(season) && season > 0)
+
+  const buildShopCrawlEntityTypes = (): ShopCrawlEntityType[] => {
+    const entityTypes: ShopCrawlEntityType[] = []
+    if (shopCrawl.includePlayers) entityTypes.push('player')
+    if (shopCrawl.includeTeams) entityTypes.push('team')
+    // UFC-only (or UFC with no live entity toggles): Real uses entity/team for fighters.
+    if (entityTypes.length === 0 && shopCrawl.includeUfc) {
+      entityTypes.push('team')
+    }
+    return entityTypes
+  }
+
+  const buildShopCrawlSportsForRequest = (): string[] =>
+    shopCrawl.sports.length > 0
+      ? shopCrawl.sports
+      : shopCrawl.includeUfc
+        ? ['ufc']
+        : shopCrawl.sports
+
+  const buildShopCrawlResumeConfig = (
+    seasons: number[],
+    sportsForCrawl: string[],
+    entityTypes: ShopCrawlEntityType[],
+  ): ShopCrawlResumeConfig => ({
+    seasons,
+    sports: sportsForCrawl,
+    entityTypes,
+    includeUfc: shopCrawl.includeUfc || sportsForCrawl.includes('ufc'),
+  })
+
+  const persistShopCrawlCursor = (
+    config: ShopCrawlResumeConfig,
+    jobIndex: number,
+    before: number,
+    meta?: {
+      sport?: string
+      season?: number
+      entityType?: ShopCrawlEntityType
+      jobsTotal?: number
+    },
+  ) => {
+    const next: ShopCrawlResumeCursor = {
+      ...config,
+      jobIndex,
+      before,
+      savedAt: new Date().toISOString(),
+    }
+    if (meta?.sport) next.sport = meta.sport
+    if (typeof meta?.season === 'number') next.season = meta.season
+    if (meta?.entityType) next.entityType = meta.entityType
+    if (typeof meta?.jobsTotal === 'number') next.jobsTotal = meta.jobsTotal
+    else if (shopCrawlResumeRef.current?.jobsTotal) {
+      next.jobsTotal = shopCrawlResumeRef.current.jobsTotal
+    }
+    // Keep last known job label when the server omits it (e.g. mid-abort).
+    if (!next.sport && shopCrawlResumeRef.current?.sport) {
+      next.sport = shopCrawlResumeRef.current.sport
+      next.season = shopCrawlResumeRef.current.season
+      next.entityType = shopCrawlResumeRef.current.entityType
+    }
+    syncShopCrawlResume(next)
+  }
+
+  const applyManualShopCrawlCursor = () => {
+    const seasons = parseShopCrawlSeasons()
+    if (seasons.length === 0) {
+      setShopCrawlStatus('Enter at least one season year before setting a cursor.')
+      return
+    }
+    const entityTypes = buildShopCrawlEntityTypes()
+    const sportsForCrawl = buildShopCrawlSportsForRequest()
+    if (sportsForCrawl.length === 0 && !shopCrawl.includeUfc) {
+      setShopCrawlStatus('Select at least one sport, or enable UFC, before setting a cursor.')
+      return
+    }
+    if (shopCrawl.sports.length > 0 && entityTypes.length === 0) {
+      setShopCrawlStatus('Select players and/or teams before setting a cursor.')
+      return
+    }
+    const jobIndex = Math.max(0, Math.floor(Number(shopCrawlCursorJobIndex)) || 0)
+    const before = Math.max(0, Math.floor(Number(shopCrawlCursorBefore)) || 0)
+    persistShopCrawlCursor(
+      buildShopCrawlResumeConfig(seasons, sportsForCrawl, entityTypes),
+      jobIndex,
+      before,
+    )
+    setShopCrawlStatus(
+      `Cursor set to ${formatShopCrawlResumeCursor({ jobIndex, before })}. Use Continue from saved to resume there.`,
+    )
+  }
+
+  const skipShopCrawlCursorByChunks = () => {
+    const base = shopCrawlResumeRef.current
+    const jobIndex = Math.max(
+      0,
+      Math.floor(Number(shopCrawlCursorJobIndex)) || base?.jobIndex || 0,
+    )
+    const before = Math.max(0, Math.floor(Number(shopCrawlCursorBefore)) || base?.before || 0)
+    const chunks = Math.max(0, Math.floor(Number(shopCrawlSkipChunks)) || 0)
+    const maxPages = Math.min(
+      SHOP_CRAWL_UI_MAX_PAGES_CAP,
+      Math.max(1, Number(shopCrawl.maxPages) || DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
+    )
+    const nextBefore = advanceShopCrawlBeforeByChunks(before, chunks, maxPages)
+    setShopCrawlCursorJobIndex(String(jobIndex))
+    setShopCrawlCursorBefore(String(nextBefore))
+    const seasons = parseShopCrawlSeasons()
+    const entityTypes = buildShopCrawlEntityTypes()
+    const sportsForCrawl = buildShopCrawlSportsForRequest()
+    if (seasons.length > 0 && (sportsForCrawl.length > 0 || shopCrawl.includeUfc)) {
+      persistShopCrawlCursor(
+        buildShopCrawlResumeConfig(seasons, sportsForCrawl, entityTypes),
+        jobIndex,
+        nextBefore,
+      )
+    }
+    setShopCrawlStatus(
+      `Skipped ${chunks} chunk${chunks === 1 ? '' : 's'} (maxPages=${maxPages}): now ${formatShopCrawlResumeCursor({ jobIndex, before: nextBefore })}.`,
+    )
+  }
+
+  const skipShopCrawlCursorByPages = () => {
+    const base = shopCrawlResumeRef.current
+    const jobIndex = Math.max(
+      0,
+      Math.floor(Number(shopCrawlCursorJobIndex)) || base?.jobIndex || 0,
+    )
+    const before = Math.max(0, Math.floor(Number(shopCrawlCursorBefore)) || base?.before || 0)
+    const pages = Math.max(0, Math.floor(Number(shopCrawlSkipPages)) || 0)
+    const nextBefore = advanceShopCrawlBeforeByPages(before, pages)
+    setShopCrawlCursorJobIndex(String(jobIndex))
+    setShopCrawlCursorBefore(String(nextBefore))
+    const seasons = parseShopCrawlSeasons()
+    const entityTypes = buildShopCrawlEntityTypes()
+    const sportsForCrawl = buildShopCrawlSportsForRequest()
+    if (seasons.length > 0 && (sportsForCrawl.length > 0 || shopCrawl.includeUfc)) {
+      persistShopCrawlCursor(
+        buildShopCrawlResumeConfig(seasons, sportsForCrawl, entityTypes),
+        jobIndex,
+        nextBefore,
+      )
+    }
+    setShopCrawlStatus(
+      `Skipped ahead ${pages} page${pages === 1 ? '' : 's'}: now ${formatShopCrawlResumeCursor({ jobIndex, before: nextBefore })}.`,
+    )
+  }
+
+  const clearSavedShopCrawlCursor = () => {
+    syncShopCrawlResume(null)
+    setShopCrawlCursorJobIndex('0')
+    setShopCrawlCursorBefore('0')
+    setShopCrawlStatus('Cleared saved crawl cursor.')
+  }
+
+  const ufcOnlySelected =
+    shopCrawl.includeUfc && shopCrawl.sports.length === 0
+  const liveSportsSelected = shopCrawl.sports.length > 0
+  const hasEntityTypeSelection = shopCrawl.includePlayers || shopCrawl.includeTeams
+  // UFC fighters use Real's entity/team path; player/team toggles only apply to live sports.
+  const canStartShopCrawl =
+    !shopCrawlBusy &&
+    (liveSportsSelected || shopCrawl.includeUfc) &&
+    (ufcOnlySelected || hasEntityTypeSelection)
+
+  let currentShopCrawlConfigPreview: ShopCrawlResumeConfig | null = null
+  {
+    const seasons = parseShopCrawlSeasons()
+    const entityTypes = buildShopCrawlEntityTypes()
+    const sportsForCrawl = buildShopCrawlSportsForRequest()
+    if (
+      seasons.length > 0 &&
+      (sportsForCrawl.length > 0 || shopCrawl.includeUfc) &&
+      (!liveSportsSelected || entityTypes.length > 0)
+    ) {
+      currentShopCrawlConfigPreview = buildShopCrawlResumeConfig(
+        seasons,
+        sportsForCrawl,
+        entityTypes,
+      )
+    }
+  }
+
+  const savedCursorMatchesConfig =
+    Boolean(shopCrawlResume) &&
+    Boolean(currentShopCrawlConfigPreview) &&
+    shopCrawlConfigsMatch(shopCrawlResume!, currentShopCrawlConfigPreview!)
+
+  const canContinueShopCrawl = canStartShopCrawl && savedCursorMatchesConfig
+  const savedCursorMismatch =
+    Boolean(shopCrawlResume) &&
+    Boolean(currentShopCrawlConfigPreview) &&
+    !savedCursorMatchesConfig
+
+  const runShopEarningsCrawl = async (mode: 'resume' | 'fresh' = 'fresh') => {
+    const seasons = parseShopCrawlSeasons()
+
+    if (seasons.length === 0) {
+      const msg = 'Enter at least one season year (e.g. 2025,2026). UFC shop is season 2023 only.'
+      setShopCrawlStatus(msg)
+      setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
+      shopCrawlLogIdRef.current = 1
+      return
+    }
+    if (shopCrawl.sports.length === 0 && !shopCrawl.includeUfc) {
+      const msg = 'Select at least one sport, or enable UFC.'
+      setShopCrawlStatus(msg)
+      setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
+      shopCrawlLogIdRef.current = 1
+      return
+    }
+    if (liveSportsSelected && !hasEntityTypeSelection) {
+      const msg = 'Select players and/or teams for live sports (UFC does not use these toggles).'
+      setShopCrawlStatus(msg)
+      setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
+      shopCrawlLogIdRef.current = 1
+      return
+    }
+
+    const controller = new AbortController()
+    setShopCrawlAbort(controller)
+    setShopCrawlBusy(true)
+
+    const entityTypes = buildShopCrawlEntityTypes()
+    const sportsForCrawl = buildShopCrawlSportsForRequest()
+    const resumeConfig = buildShopCrawlResumeConfig(seasons, sportsForCrawl, entityTypes)
+    const maxPages = Math.min(
+      SHOP_CRAWL_UI_MAX_PAGES_CAP,
+      Math.max(1, Number(shopCrawl.maxPages) || DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
+    )
+    const delayMs = Number(shopCrawl.delayMs) || 1500
+    const chunkTimeoutMs = estimateShopCrawlChunkTimeoutMs(maxPages, delayMs)
+
+    let jobIndex = 0
+    let before = 0
+    let resumed = false
+    if (mode === 'resume') {
+      const saved = shopCrawlResumeRef.current
+      if (!saved || !shopCrawlConfigsMatch(saved, resumeConfig)) {
+        const msg =
+          !saved
+            ? 'No saved crawl cursor to continue from. Use Start over, or set a cursor manually.'
+            : 'Saved crawl cursor is for a different season/sport/entity config. Match that config, or Start over / clear cursor.'
+        setShopCrawlBusy(false)
+        setShopCrawlAbort(null)
+        setShopCrawlStatus(msg)
+        setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
+        shopCrawlLogIdRef.current = 1
+        return
+      }
+      jobIndex = Math.max(0, Math.floor(Number(shopCrawlCursorJobIndex)) || saved.jobIndex)
+      before = Math.max(0, Math.floor(Number(shopCrawlCursorBefore)) || saved.before)
+      resumed = true
+    } else {
+      syncShopCrawlResume(null)
+      setShopCrawlCursorJobIndex('0')
+      setShopCrawlCursorBefore('0')
+    }
+
+    const startMsg = resumed
+      ? `Resuming crawl from ${formatShopCrawlResumeCursor({
+          jobIndex,
+          before,
+          sport: shopCrawlResumeRef.current?.sport,
+          season: shopCrawlResumeRef.current?.season,
+          entityType: shopCrawlResumeRef.current?.entityType,
+          jobsTotal: shopCrawlResumeRef.current?.jobsTotal,
+        })}: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
+          shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
+        }], entityTypes=[${entityTypes.join(',')}]${
+          shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
+        }, maxPages/chunk=${maxPages}, delayMs=${delayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+      : `Starting crawl: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
+          shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
+        }], entityTypes=[${entityTypes.join(',')}]${
+          shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
+        }, maxPages/chunk=${maxPages}, delayMs=${delayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+
+    shopCrawlLogIdRef.current = 1
+    setShopCrawlLog([{ id: 1, type: 'client_start', message: startMsg }])
+    setShopCrawlStatus(
+      resumed
+        ? `Resuming shop earningstotal crawl from jobIndex=${jobIndex}, before=${before}…`
+        : 'Starting shop earningstotal crawl…',
+    )
+    // Yield so React paints the first log line before the first network request.
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0)
+    })
+    if (controller.signal.aborted) {
+      setShopCrawlBusy(false)
+      setShopCrawlAbort(null)
+      return
+    }
+
+    let totalUpserted = 0
+    let totalPages = 0
+    let totalEarningsFetched = 0
+    let totalEarningsFailed = 0
+    let totalDailyRows = 0
+    let chunks = 0
+    const skippedNotes: string[] = []
+    const failureNotes: string[] = []
+
+    try {
+      while (!controller.signal.aborted) {
+        chunks += 1
+        appendShopCrawlLog(
+          'client_chunk',
+          `Requesting chunk ${chunks} (jobIndex=${jobIndex}, before=${before})…`,
+        )
+        setShopCrawlStatus(
+          `Chunk ${chunks}: shop + dailies (job ${jobIndex + 1}, before=${before})… ${totalUpserted} passes / ${totalEarningsFetched} earnings / ${totalDailyRows} daily rows so far.`,
+        )
+
+        const linked = linkAbortTimeout(chunkTimeoutMs, controller.signal)
+        const waitStarted = Date.now()
+        let lastWaitLogAt = 0
+        const waitTimer = window.setInterval(() => {
+          const elapsed = Date.now() - waitStarted
+          const waitMsg = shopCrawlWaitingMessage(chunks, elapsed)
+          setShopCrawlStatus(waitMsg)
+          if (elapsed - lastWaitLogAt >= SHOP_CRAWL_WAIT_LOG_INTERVAL_MS) {
+            lastWaitLogAt = elapsed
+            appendShopCrawlLog('client_wait', waitMsg)
+          }
+        }, SHOP_CRAWL_WAIT_STATUS_INTERVAL_MS)
+
+        let response: Response
+        try {
+          response = await fetch('/api/admin/shop-earnings-crawl', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            signal: linked.signal,
+            body: JSON.stringify({
+              seasons,
+              sports: sportsForCrawl,
+              includeUfc: shopCrawl.includeUfc || sportsForCrawl.includes('ufc'),
+              entityTypes,
+              jobIndex,
+              before,
+              maxPages,
+              delayMs,
+            }),
+          })
+        } catch (error) {
+          if (linked.timedOut()) {
+            throw new Error(shopCrawlChunkTimeoutMessage(chunks, chunkTimeoutMs, jobIndex, before))
+          }
+          throw error
+        } finally {
+          window.clearInterval(waitTimer)
+          linked.dispose()
+        }
+
+        const rawText = await response.text()
+        let data: ShopEarningsCrawlResponse
+        try {
+          data = rawText.trim()
+            ? (JSON.parse(rawText) as ShopEarningsCrawlResponse)
+            : ({} as ShopEarningsCrawlResponse)
+        } catch {
+          const snippet = rawText.trim().replace(/\s+/g, ' ').slice(0, 160)
+          throw new Error(
+            response.ok
+              ? `Server returned invalid JSON: ${snippet}`
+              : `Shop earnings crawl failed (${response.status}): ${snippet}`,
+          )
+        }
+
+        // Always surface server log lines, including first-chunk validation errors.
+        appendShopCrawlLogEvents(data.log)
+
+        if (!response.ok) {
+          throw new Error(
+            typeof data.error === 'string' && data.error.trim()
+              ? data.error.trim()
+              : `Shop earnings crawl failed (${response.status}).`,
+          )
+        }
+        if (!data.cursor || typeof data.cursor.jobIndex !== 'number') {
+          throw new Error(
+            data.error ||
+              'Shop earnings crawl returned an incomplete response (missing cursor). Check the activity log / server logs.',
+          )
+        }
+        totalUpserted += data.upserted ?? 0
+        totalPages += data.pagesFetched ?? 0
+        totalEarningsFetched += data.earningsFetched ?? 0
+        totalEarningsFailed += data.earningsFailed ?? 0
+        totalDailyRows += data.dailyRowsUpserted ?? 0
+        for (const skip of data.skipped ?? []) {
+          skippedNotes.push(`${skip.sport}/${skip.season}/${skip.entityType}`)
+        }
+        for (const failure of data.failures ?? []) {
+          failureNotes.push(failure)
+        }
+        jobIndex = data.cursor.jobIndex
+        before = data.nextBefore ?? 0
+        if (data.done) {
+          syncShopCrawlResume(null)
+          setShopCrawlCursorJobIndex('0')
+          setShopCrawlCursorBefore('0')
+        } else {
+          persistShopCrawlCursor(resumeConfig, jobIndex, before, {
+            sport: data.cursor.sport,
+            season: data.cursor.season,
+            entityType: data.cursor.entityType,
+            jobsTotal: data.jobsTotal,
+          })
+        }
+        setShopCrawlStatus(
+          `Chunk ${chunks}: ${data.cursor.sport} ${data.cursor.season} ${data.cursor.entityType} @${data.cursor.before} — ${totalUpserted} passes / ${totalPages} pages / ${totalEarningsFetched} earnings fetched` +
+            (totalEarningsFailed > 0 ? ` (${totalEarningsFailed} failed)` : '') +
+            ` / ${totalDailyRows} daily rows` +
+            (data.done ? ' (complete).' : '…'),
+        )
+        if (data.done) break
+      }
+
+      if (controller.signal.aborted) {
+        persistShopCrawlCursor(resumeConfig, jobIndex, before)
+        const stoppedMsg = `Crawl stopped by user. Partial: ${totalUpserted} passes, ${totalEarningsFetched} earnings, ${totalDailyRows} daily rows across ${totalPages} page${totalPages === 1 ? '' : 's'} (${chunks} chunk${chunks === 1 ? '' : 's'}). Resume ${formatShopCrawlResumeCursor({ jobIndex, before })}.`
+        setShopCrawlStatus(stoppedMsg)
+        appendShopCrawlLog('client_stopped', stoppedMsg)
+      } else {
+        const doneMsg =
+          `Crawl complete: ${totalUpserted} pass${totalUpserted === 1 ? '' : 'es'}, ${totalEarningsFetched} earnings fetched, ${totalDailyRows} daily row${totalDailyRows === 1 ? '' : 's'} from ${totalPages} page${totalPages === 1 ? '' : 's'} (${chunks} chunk${chunks === 1 ? '' : 's'}).` +
+          (totalEarningsFailed > 0 ? ` Earnings failures: ${totalEarningsFailed}.` : '') +
+          (skippedNotes.length > 0
+            ? ` Skipped empty/missing: ${[...new Set(skippedNotes)].join(', ')}.`
+            : '') +
+          (failureNotes.length > 0 ? ` Failures: ${failureNotes.slice(0, 5).join('; ')}.` : '')
+        setShopCrawlStatus(doneMsg)
+        appendShopCrawlLog('client_done', doneMsg)
+      }
+    } catch (error) {
+      persistShopCrawlCursor(resumeConfig, jobIndex, before)
+      if (controller.signal.aborted) {
+        const stoppedMsg = `Crawl stopped by user. Partial: ${totalUpserted} passes / ${totalPages} pages / ${totalEarningsFetched} earnings / ${totalDailyRows} daily rows. Resume ${formatShopCrawlResumeCursor({ jobIndex, before })}.`
+        setShopCrawlStatus(stoppedMsg)
+        appendShopCrawlLog('client_stopped', stoppedMsg)
+      } else {
+        const errMsg =
+          (error instanceof Error ? error.message : 'Shop earnings crawl failed.') +
+          ` Partial progress saved (${totalUpserted} upserted, ${totalEarningsFetched} earnings). Resume ${formatShopCrawlResumeCursor({ jobIndex, before })}.`
+        setShopCrawlStatus(errMsg)
+        appendShopCrawlLog('client_error', errMsg)
+      }
+    } finally {
+      setShopCrawlBusy(false)
+      setShopCrawlAbort(null)
+    }
+  }
+
   return (
     <div className="page-stack admin-page">
       <section className="hero-card">
@@ -678,8 +1013,8 @@ export default function AdminPage() {
           <p className="eyebrow">Operator</p>
           <h2>Admin</h2>
           <p>
-            Import activity reported from authenticated browsers. Use this to diagnose
-            realapp.tools passes that return no daily earnings.
+            Crawl Real shop earnings into the shared catalog, fix catalog rows, and manage cloud
+            profiles and import logs.
           </p>
         </div>
         <div className="button-row">
@@ -720,210 +1055,88 @@ export default function AdminPage() {
       ) : null}
 
       <CollapsiblePanel
-        title="Shared Meowbot catalog imports"
-        description="Seed Supabase, save username ownership failsafes, or override bad RAX"
+        title="Catalog / Real shop crawl"
+        description="Primary: crawl Real shop earningstotal into Supabase. Optional: override a catalog pass by hand."
         defaultOpen
       >
-        <section className="import-hint">
-          <p>
-            No known Meowbot action in this codebase enumerates every pass globally. These tools use
-            the reliable user/pass-specific Meowbot requests and save the results to Supabase for
-            future Entry search.
-          </p>
-        </section>
-        <div className="form-grid">
-          <label className="field">
-            <span>Saved usernames limit</span>
-            <input
-              type="number"
-              min="1"
-              max="50"
-              value={catalogSavedLimit}
-              disabled={catalogImporting}
-              onChange={(event) => setCatalogSavedLimit(event.target.value)}
-            />
-          </label>
-          <div className="field">
-            <span>Saved usernames</span>
-            <button
-              className="button primary"
-              type="button"
-              disabled={catalogImporting}
-              onClick={() => void importSavedUsernames()}
-            >
-              Import saved usernames
-            </button>
-          </div>
-        </div>
-        <label className="field">
-          <span>Manual usernames</span>
-          <textarea
-            className="bulk-import-textarea"
-            value={catalogUsernames}
-            placeholder="@user1, @user2, @user3"
-            disabled={catalogImporting}
-            onChange={(event) => setCatalogUsernames(event.target.value)}
-          />
-        </label>
-        <div className="button-row">
-          <button
-            className="button"
-            type="button"
-            disabled={catalogImporting || catalogUsernames.trim().length === 0}
-            onClick={() => void importManualUsernames()}
-          >
-            Import manual usernames
-          </button>
-        </div>
-
-        <div className="form-subsection">
+        <div className="form-subsection admin-primary-tools">
           <div className="section-heading">
             <div>
-              <h3>Username import failsafe</h3>
+              <h3>Shop earningstotal crawl</h3>
               <p className="subsection-note">
-                Full Meowbot import for @username: resolves passes, fetches daily RAX, and saves
-                everything to the ownership cache. Large collections import one username at a time
-                and may take several minutes each. Users recover passes and earnings from Entry →
-                Import from admin cached passes after Meowbot shuts down.
-              </p>
-            </div>
-          </div>
-          <label className="field">
-            <span>Usernames to save</span>
-            <textarea
-              className="bulk-import-textarea"
-              value={ownershipSaveUsernames}
-              placeholder="@friend, @anotheruser"
-              disabled={ownershipSaving || catalogImporting}
-              onChange={(event) => setOwnershipSaveUsernames(event.target.value)}
-            />
-          </label>
-          <div className="button-row">
-            <button
-              className="button primary"
-              type="button"
-              disabled={
-                ownershipSaving ||
-                catalogImporting ||
-                ownershipSaveUsernames.trim().length === 0
-              }
-              onClick={() => void saveUsernameOwnership()}
-            >
-              {ownershipSaving ? 'Importing from Meowbot…' : 'Import username from Meowbot'}
-            </button>
-          </div>
-          {ownershipSaveStatus ? <p className="import-status">{ownershipSaveStatus}</p> : null}
-        </div>
-
-        <div className="form-subsection">
-          <div className="section-heading">
-            <div>
-              <h3>Cached ownership snapshots</h3>
-              <p className="subsection-note">
-                All usernames currently saved in the ownership KV cache. Re-import a username after
-                code fixes to refresh its snapshot.
-              </p>
-            </div>
-            <button
-              className="button"
-              type="button"
-              disabled={ownershipSnapshotsLoading || ownershipSaving}
-              onClick={() => void loadOwnershipSnapshots()}
-            >
-              {ownershipSnapshotsLoading ? 'Refreshing…' : 'Refresh list'}
-            </button>
-          </div>
-          {ownershipSnapshotsError ? (
-            <p className="import-status import-status-error">{ownershipSnapshotsError}</p>
-          ) : null}
-          {ownershipSnapshots.length === 0 && !ownershipSnapshotsLoading ? (
-            <p className="empty">No ownership snapshots saved yet.</p>
-          ) : null}
-          {ownershipSnapshots.length > 0 ? (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Username</th>
-                    <th>Passes</th>
-                    <th>Legendary+</th>
-                    <th>RAX rows</th>
-                    <th>Imported</th>
-                    <th>Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ownershipSnapshots.map((snapshot) => (
-                    <tr key={snapshot.realUsername}>
-                      <td>@{snapshot.realUsername}</td>
-                      <td>{snapshot.passCount}</td>
-                      <td>{snapshot.legendaryPlusCount}</td>
-                      <td>{snapshot.raxRowCount.toLocaleString()}</td>
-                      <td>{new Date(snapshot.importedAt).toLocaleString()}</td>
-                      <td>{new Date(snapshot.updatedAt).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="form-subsection">
-          <div className="section-heading">
-            <div>
-              <h3>OTD table discovery import</h3>
-              <p className="subsection-note">
-                Uses realapp.tools OTD table endpoints to discover many player/team passes by
-                season, then fetches daily earnings for each discovered pass.
+                Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
+                Continue resumes without redoing finished pages.
               </p>
             </div>
           </div>
           <div className="form-grid">
             <label className="field">
-              <span>Seasons</span>
+              <span>Seasons (required)</span>
               <input
-                value={otdImport.seasons}
+                value={shopCrawl.seasons}
                 placeholder="2026,2025,2024"
-                disabled={catalogImporting}
+                disabled={shopCrawlBusy}
                 onChange={(event) =>
-                  setOtdImport((current) => ({ ...current, seasons: event.target.value }))
+                  setShopCrawl((current) => ({ ...current, seasons: event.target.value }))
                 }
               />
             </label>
-            <label className="field">
-              <span>Sport filter</span>
-              <input
-                value={otdImport.sport}
-                placeholder="Optional, e.g. NBA or mlb"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setOtdImport((current) => ({ ...current, sport: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Max passes this run</span>
-              <input
-                type="number"
-                min="1"
-                max="1000"
-                value={otdImport.maxPasses}
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setOtdImport((current) => ({ ...current, maxPasses: event.target.value }))
-                }
-              />
-            </label>
+          </div>
+          <div className="button-row admin-sport-toggles">
+            {LIVE_SHOP_CRAWL_SPORTS.map((sport) => {
+              const checked = shopCrawl.sports.includes(sport.value)
+              return (
+                <label className="inline-toggle" key={sport.value}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={shopCrawlBusy}
+                    onChange={(event) =>
+                      setShopCrawl((current) => ({
+                        ...current,
+                        sports: event.target.checked
+                          ? [...current.sports, sport.value]
+                          : current.sports.filter((value) => value !== sport.value),
+                      }))
+                    }
+                  />
+                  {sport.label}
+                </label>
+              )
+            })}
+            <button
+              className="button"
+              type="button"
+              disabled={shopCrawlBusy}
+              onClick={() =>
+                setShopCrawl((current) => ({
+                  ...current,
+                  sports: LIVE_SHOP_CRAWL_SPORTS.map((sport) => sport.value),
+                }))
+              }
+            >
+              All live sports
+            </button>
           </div>
           <div className="button-row">
             <label className="inline-toggle">
               <input
                 type="checkbox"
-                checked={otdImport.includePlayers}
-                disabled={catalogImporting}
+                checked={shopCrawl.includeUfc}
+                disabled={shopCrawlBusy}
                 onChange={(event) =>
-                  setOtdImport((current) => ({
+                  setShopCrawl((current) => ({ ...current, includeUfc: event.target.checked }))
+                }
+              />
+              UFC
+            </label>
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={shopCrawl.includePlayers}
+                disabled={shopCrawlBusy || ufcOnlySelected}
+                onChange={(event) =>
+                  setShopCrawl((current) => ({
                     ...current,
                     includePlayers: event.target.checked,
                   }))
@@ -934,10 +1147,10 @@ export default function AdminPage() {
             <label className="inline-toggle">
               <input
                 type="checkbox"
-                checked={otdImport.includeTeams}
-                disabled={catalogImporting}
+                checked={shopCrawl.includeTeams}
+                disabled={shopCrawlBusy || ufcOnlySelected}
                 onChange={(event) =>
-                  setOtdImport((current) => ({
+                  setShopCrawl((current) => ({
                     ...current,
                     includeTeams: event.target.checked,
                   }))
@@ -946,144 +1159,234 @@ export default function AdminPage() {
               Teams
             </label>
             <button
-              className="button"
+              className="button primary"
               type="button"
-              disabled={
-                catalogImporting ||
-                (!otdImport.includePlayers && !otdImport.includeTeams) ||
-                otdImport.seasons.trim().length === 0
-              }
-              onClick={() => void importOtdTable()}
+              disabled={!canContinueShopCrawl}
+              onClick={() => void runShopEarningsCrawl('resume')}
             >
-              Import from OTD tables
+              {shopCrawlBusy ? 'Crawling…' : 'Continue from saved'}
             </button>
-          </div>
-        </div>
-
-        <div className="form-subsection">
-          <div className="section-heading">
-            <div>
-              <h3>Specific pass import</h3>
-              <p className="subsection-note">
-                Use this when you know the player/team entity ID, season year, and sport.
-              </p>
-            </div>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>Entity ID</span>
-              <input
-                value={passImport.entityId}
-                placeholder="100"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, entityId: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Season year</span>
-              <input
-                value={passImport.seasonYear}
-                placeholder="2026"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, seasonYear: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sport</span>
-              <input
-                value={passImport.sport}
-                placeholder="NBA"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, sport: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Pass type</span>
-              <select
-                value={passImport.passKind}
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({
-                    ...current,
-                    passKind: event.target.value as 'player' | 'team',
-                  }))
-                }
-              >
-                <option value="player">Player</option>
-                <option value="team">Team</option>
-              </select>
-            </label>
-          </div>
-          <div className="form-grid">
-            <label className="field">
-              <span>Name override</span>
-              <input
-                value={passImport.name}
-                placeholder="Optional"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, name: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Rarity</span>
-              <input
-                value={passImport.rarityLabel}
-                placeholder="Optional"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, rarityLabel: event.target.value }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Season label</span>
-              <input
-                value={passImport.seasonLabel}
-                placeholder="Optional, e.g. 2025-26"
-                disabled={catalogImporting}
-                onChange={(event) =>
-                  setPassImport((current) => ({ ...current, seasonLabel: event.target.value }))
-                }
-              />
-            </label>
-          </div>
-          <div className="button-row">
             <button
               className="button"
               type="button"
-              disabled={
-                catalogImporting ||
-                !passImport.entityId.trim() ||
-                !passImport.seasonYear.trim() ||
-                !passImport.sport.trim()
-              }
-              onClick={() => void importSpecificPass()}
+              disabled={!canStartShopCrawl}
+              onClick={() => void runShopEarningsCrawl('fresh')}
             >
-              Import specific pass
+              Start over
             </button>
+            <button
+              className="button"
+              type="button"
+              disabled={!shopCrawlBusy}
+              onClick={stopShopCrawl}
+            >
+              Stop
+            </button>
+          </div>
+          <div className="shop-crawl-resume">
+            <p className="subsection-note">
+              {shopCrawlResume ? (
+                <>
+                  Saved cursor:{' '}
+                  <code>{formatShopCrawlResumeCursor(shopCrawlResume)}</code>
+                  {shopCrawlResume.savedAt
+                    ? ` · saved ${new Date(shopCrawlResume.savedAt).toLocaleString()}`
+                    : ''}
+                  {savedCursorMismatch
+                    ? ' · config mismatch (change seasons/sports/entity types to match, or Start over).'
+                    : savedCursorMatchesConfig
+                      ? ' · matches current config — Continue resumes without re-fetching completed pages.'
+                      : ''}
+                </>
+              ) : (
+                <>No saved cursor yet. Stop mid-crawl or finish a chunk to persist one.</>
+              )}
+            </p>
+            <div className="form-grid shop-crawl-cursor-grid">
+              <label className="field">
+                <span>jobIndex</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={shopCrawlCursorJobIndex}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) => setShopCrawlCursorJobIndex(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>before offset</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="20"
+                  value={shopCrawlCursorBefore}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) => setShopCrawlCursorBefore(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Skip N chunks</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={shopCrawlSkipChunks}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) => setShopCrawlSkipChunks(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Skip ahead N pages</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={shopCrawlSkipPages}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) => setShopCrawlSkipPages(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="button-row">
+              <button
+                className="button"
+                type="button"
+                disabled={shopCrawlBusy}
+                onClick={applyManualShopCrawlCursor}
+              >
+                Set cursor
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={shopCrawlBusy}
+                onClick={skipShopCrawlCursorByChunks}
+              >
+                Skip chunks
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={shopCrawlBusy}
+                onClick={skipShopCrawlCursorByPages}
+              >
+                Skip pages
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={shopCrawlBusy || !shopCrawlResume}
+                onClick={clearSavedShopCrawlCursor}
+              >
+                Clear saved
+              </button>
+            </div>
+          </div>
+          {ufcOnlySelected ? (
+            <p className="subsection-note">
+              UFC shop data is All-time under season <code>2023</code> only (other years return empty).
+              Fighters are crawled via Real&apos;s <code>entity/team</code> path automatically — enter{' '}
+              <code>2023</code> in Seasons above.
+            </p>
+          ) : shopCrawl.includeUfc ? (
+            <p className="subsection-note">
+              UFC is included alongside live sports. Use season <code>2023</code> for UFC (All-time
+              sentinel; other years are empty). Fighter jobs always use the team shop path;
+              player/team toggles apply only to the live sports above.
+            </p>
+          ) : null}
+          <details className="admin-advanced">
+            <summary>Advanced crawl settings</summary>
+            <p className="subsection-note">
+              Default is 1 page per chunk. Each page is 1 shop request + up to 20 earnings calls ×
+              delay (≈30–60s at 1500ms). Log lines arrive only when the chunk HTTP response returns —
+              keep max pages low (cap {SHOP_CRAWL_UI_MAX_PAGES_CAP}) so the UI does not look stuck.
+            </p>
+            <div className="form-grid">
+              <label className="field">
+                <span>Max pages per chunk (1–{SHOP_CRAWL_UI_MAX_PAGES_CAP})</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={SHOP_CRAWL_UI_MAX_PAGES_CAP}
+                  value={shopCrawl.maxPages}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) =>
+                    setShopCrawl((current) => ({ ...current, maxPages: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Delay between Real calls (ms)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="60000"
+                  value={shopCrawl.delayMs}
+                  disabled={shopCrawlBusy}
+                  onChange={(event) =>
+                    setShopCrawl((current) => ({ ...current, delayMs: event.target.value }))
+                  }
+                />
+              </label>
+            </div>
+          </details>
+          {shopCrawlStatus ? <p className="import-status">{shopCrawlStatus}</p> : null}
+          <div className="shop-crawl-log">
+            <div className="shop-crawl-log-header">
+              <span>Activity log</span>
+              <button
+                className="button"
+                type="button"
+                disabled={shopCrawlBusy || shopCrawlLog.length === 0}
+                onClick={() => {
+                  setShopCrawlLog([])
+                  shopCrawlLogIdRef.current = 0
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <div
+              className="shop-crawl-log-panel"
+              ref={shopCrawlLogPanelRef}
+              role="log"
+              aria-live="polite"
+              aria-relevant="additions"
+            >
+              {shopCrawlLog.length === 0 ? (
+                <p className="shop-crawl-log-empty">Crawl events appear here when you start.</p>
+              ) : (
+                shopCrawlLog.map((line) => (
+                  <div
+                    key={line.id}
+                    className={`shop-crawl-log-line${
+                      line.type === 'earnings_failure' ||
+                      line.type === 'page_failed' ||
+                      line.type === 'client_error'
+                        ? ' is-error'
+                        : line.type === 'job_skipped' || line.type === 'client_stopped'
+                          ? ' is-warn'
+                          : line.type === 'client_done' || line.type === 'chunk_complete'
+                            ? ' is-ok'
+                            : ''
+                    }`}
+                  >
+                    {line.message}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="form-subsection">
-          <div className="section-heading">
-            <div>
-              <h3>Manual catalog override</h3>
-              <p className="subsection-note">
-                Fix incorrect Meowbot earnings by loading an existing pass from the shared catalog,
-                editing its JSON (paste from realapp.com if needed), and upserting directly to
-                Supabase without calling Meowbot.
-              </p>
-            </div>
-          </div>
-
+        <CollapsiblePanel
+          className="nested-panel"
+          title="Manual catalog override"
+          description="Load a Supabase catalog pass, edit RAX JSON, upsert without upstream imports"
+          defaultOpen={false}
+        >
           <CatalogSearchPanel
             sectionId="admin-manual-upsert-search"
             title="Load existing pass"
@@ -1218,14 +1521,13 @@ export default function AdminPage() {
             </button>
           </div>
           {manualUpsertStatus ? <p className="import-status">{manualUpsertStatus}</p> : null}
-        </div>
-        {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
+        </CollapsiblePanel>
       </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Cloud profile sync"
         description="Reset a forgotten sync PIN or delete a user's cloud backup"
-        defaultOpen
+        defaultOpen={false}
       >
         <p className="import-hint">
           Cloud profiles are keyed by Real @username. PINs are stored as hashes — admins cannot read
@@ -1299,9 +1601,9 @@ export default function AdminPage() {
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="Ownership snapshot lookup"
-        description="Verify fallback import availability for a username"
-        defaultOpen
+        title="Ownership cache"
+        description="Lookup and list snapshots reported by username imports"
+        defaultOpen={false}
       >
         <div className="button-row">
           <label className="field inline-field rank-search-field">
@@ -1316,14 +1618,56 @@ export default function AdminPage() {
           <button className="button" type="button" onClick={() => void lookupOwnership()}>
             Check snapshot
           </button>
+          <button
+            className="button"
+            type="button"
+            disabled={ownershipSnapshotsLoading}
+            onClick={() => void loadOwnershipSnapshots()}
+          >
+            {ownershipSnapshotsLoading ? 'Refreshing…' : 'Refresh list'}
+          </button>
         </div>
         {ownershipLookupStatus ? <p className="import-status">{ownershipLookupStatus}</p> : null}
+        {ownershipSnapshotsError ? (
+          <p className="import-status import-status-error">{ownershipSnapshotsError}</p>
+        ) : null}
+        {ownershipSnapshots.length === 0 && !ownershipSnapshotsLoading ? (
+          <p className="empty">No ownership snapshots saved yet.</p>
+        ) : null}
+        {ownershipSnapshots.length > 0 ? (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Passes</th>
+                  <th>Legendary+</th>
+                  <th>RAX rows</th>
+                  <th>Imported</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownershipSnapshots.map((snapshot) => (
+                  <tr key={snapshot.realUsername}>
+                    <td>@{snapshot.realUsername}</td>
+                    <td>{snapshot.passCount}</td>
+                    <td>{snapshot.legendaryPlusCount}</td>
+                    <td>{snapshot.raxRowCount.toLocaleString()}</td>
+                    <td>{new Date(snapshot.importedAt).toLocaleString()}</td>
+                    <td>{new Date(snapshot.updatedAt).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Real usernames seen"
         description={`${summary.userCount} username${summary.userCount === 1 ? '' : 's'} · ${summary.noEarnings} no-earnings event${summary.noEarnings === 1 ? '' : 's'}`}
-        defaultOpen
+        defaultOpen={false}
       >
         {users.length === 0 ? (
           <p className="empty">No import activity logged yet.</p>
@@ -1358,7 +1702,7 @@ export default function AdminPage() {
       <CollapsiblePanel
         title="Event log"
         description={`${eventsTotal} matching event${eventsTotal === 1 ? '' : 's'}`}
-        defaultOpen
+        defaultOpen={false}
       >
         <div className="sort-controls">
           <label className="field inline-field rank-search-field">

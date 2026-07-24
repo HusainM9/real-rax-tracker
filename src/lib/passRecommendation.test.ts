@@ -7,6 +7,8 @@ import {
   applyRecommendationBaseline,
   catalogProfileToIconic20CheckerCandidate,
   catalogProfileToParsedRows,
+  defaultRankExcludedSportSeasonKeys,
+  DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
@@ -17,7 +19,9 @@ import {
   ownedCardToIconicUpgradeCandidate,
   passSeasonIncluded,
   prefilterRecommendationProfiles,
+  normalizeBestDayParam,
   rankCatalogRecommendations,
+  rankCatalogRecommendationsForDay,
   rankCatalogRecommendationsForMonth,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForAllSports,
@@ -27,6 +31,7 @@ import {
   sportSeasonFilterKey,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
+  topRecommendationRowsPerSport,
 } from './passRecommendation'
 import { type CatalogImportProfile, type CatalogSearchResult } from './catalogApi'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
@@ -261,6 +266,24 @@ describe('passRecommendation', () => {
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
   })
 
+  it('defaults Rank catalog exclusion to NFL 2022-23 season label key', () => {
+    expect(DEFAULT_RANK_EXCLUDED_SPORT_SEASONS).toEqual([{ sport: 'NFL', seasonLabel: '2022-23' }])
+    expect(defaultRankExcludedSportSeasonKeys()).toEqual(['NFL|2022-23'])
+    expect(sportSeasonFilterKey('NFL', '2022-23')).toBe('NFL|2022-23')
+    expect(
+      passSeasonIncluded(
+        { sport: 'NFL', seasonLabel: '2022-23', seasonYear: 2022 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'NFL', seasonLabel: '2023-24', seasonYear: 2023 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(true)
+  })
+
   it('filters NFL seasons independently when labels share a catalog year', () => {
     const current = {
       ...catalogProfile('current|2025|NFL', 'Current', [{ claimDay: '2026-03-01', baseRaxEarned: 10 }]),
@@ -343,6 +366,110 @@ describe('passRecommendation', () => {
     expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
   })
 
+  it('ignores catalog rarity_label and always scores at Iconic 1 (solo/rank parity)', () => {
+    // Shop/Meowbot leftovers: high-base fighter labeled General, lower-base labeled Iconic 1.
+    const silvaLike = {
+      ...catalogProfile('235|2023|UFC', 'Anderson Silva', [
+        { claimDay: '2023-06-01', baseRaxEarned: 100 },
+      ]),
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      passKind: 'team' as const,
+      rarityLabel: 'General',
+    }
+    const belfortLike = {
+      ...catalogProfile('295|2023|UFC', 'Vitor Belfort', [
+        { claimDay: '2023-06-01', baseRaxEarned: 60 },
+      ]),
+      sport: 'UFC',
+      seasonYear: 2023,
+      seasonLabel: '2023',
+      passKind: 'team' as const,
+      rarityLabel: 'Iconic 1',
+    }
+
+    const emptyUfc: RaxTrackerData = {
+      ...data,
+      cards: [],
+      performances: [],
+    }
+
+    const ranked = rankCatalogRecommendations(emptyUfc, [silvaLike, belfortLike])
+    expect(ranked.rows[0]?.name).toBe('Anderson Silva')
+    expect(ranked.rows[0]?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(ranked.rows[1]?.name).toBe('Vitor Belfort')
+    expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
+
+    const solo = analyzePotentialCard(
+      emptyUfc,
+      {
+        name: silvaLike.name,
+        sport: 'UFC',
+        season: silvaLike.seasonLabel,
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        passKind: 'player',
+      },
+      [{ claimDay: '2023-06-01', raxEarned: 100, baseRaxEarned: 100, note: '' }],
+    )
+    const rankedSilva = analyzeCatalogCandidate(emptyUfc, silvaLike)
+    expect(solo).not.toBeNull()
+    expect(rankedSilva).not.toBeNull()
+    expect(rankedSilva!.netClaimableDelta).toBe(netClaimableDelta(solo!))
+  })
+
+  it('keeps unowned and below-Iconic owned passes; only Iconic 1+ owned are skipped', () => {
+    const profiles = [
+      catalogProfile('unowned|2025|NBA', 'Unowned', [
+        { claimDay: '2026-03-01', baseRaxEarned: 40 },
+      ]),
+      {
+        ...catalogProfile('null-rarity|2025|NBA', 'Null rarity catalog', [
+          { claimDay: '2026-03-01', baseRaxEarned: 30 },
+        ]),
+        rarityLabel: undefined,
+      },
+      catalogProfile('owned-common|2025|NBA', 'Owned common', [
+        { claimDay: '2026-03-01', baseRaxEarned: 25 },
+      ]),
+      catalogProfile('owned-iconic|2025|NBA', 'Owned iconic', [
+        { claimDay: '2026-03-01', baseRaxEarned: 50 },
+      ]),
+    ]
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [
+        ...data.cards,
+        card('owned-common', 'Owned common', 'owned-common|2025|NBA', 'Common'),
+        card('owned-iconic', 'Owned iconic', 'owned-iconic|2025|NBA', 'Iconic 2'),
+      ],
+    }
+
+    expect(shouldSkipRecommendationPass(ownedData, profiles[0]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[1]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[2]!)).toBe(false)
+    expect(shouldSkipRecommendationPass(ownedData, profiles[3]!)).toBe(true)
+
+    const filtered = filterRecommendationProfiles(ownedData, profiles)
+    expect(filtered.skippedOwnedIconic).toBe(1)
+    expect(filtered.candidates.map((item) => item.externalKey).sort()).toEqual([
+      'null-rarity|2025|NBA',
+      'owned-common|2025|NBA',
+      'unowned|2025|NBA',
+    ])
+
+    const selected = selectSummariesForBulkFetch(
+      ownedData,
+      profiles.map((profile) => summary(profile.externalKey, profile.name, profile.totalBaseRax)),
+    )
+    expect(selected.skippedOwnedIconic).toBe(1)
+    expect(selected.keys.sort()).toEqual([
+      'null-rarity|2025|NBA',
+      'owned-common|2025|NBA',
+      'unowned|2025|NBA',
+    ])
+  })
+
   it('ranks candidates by net gain in a specific month', () => {
     const spreadData: RaxTrackerData = {
       ...data,
@@ -373,6 +500,60 @@ describe('passRecommendation', () => {
     expect(aprilRanked.rows[0]?.monthNetDelta).toBeGreaterThan(
       aprilRanked.rows[1]?.monthNetDelta ?? 0,
     )
+  })
+
+  it('ranks candidates by net gain on a specific claim day', () => {
+    const spreadData: RaxTrackerData = {
+      ...data,
+      performances: [
+        perf('p1', 'c1', 30, '2026-03-01'),
+        perf('p2', 'c2', 25, '2026-03-01'),
+        perf('p3', 'c3', 10, '2026-03-15'),
+        perf('p4', 'c1', 40, '2026-03-15'),
+        perf('p5', 'c2', 35, '2026-03-15'),
+      ],
+    }
+
+    const earlyStar = catalogProfile('early|2025|NBA', 'Early star', [
+      { claimDay: '2026-03-01', baseRaxEarned: 50 },
+    ])
+    const midStar = catalogProfile('mid|2025|NBA', 'Mid star', [
+      { claimDay: '2026-03-15', baseRaxEarned: 50 },
+    ])
+
+    const earlyRanked = rankCatalogRecommendationsForDay(spreadData, [earlyStar, midStar], '2026-03-01')
+    expect(earlyRanked.claimDay).toBe('03-01')
+    expect(earlyRanked.rows).toHaveLength(1)
+    expect(earlyRanked.rows[0]?.name).toBe('Early star')
+    expect(earlyRanked.rows[0]?.monthNetDelta).toBeGreaterThan(0)
+
+    const midRanked = rankCatalogRecommendationsForDay(spreadData, [earlyStar, midStar], '03-15')
+    expect(midRanked.claimDay).toBe('03-15')
+    expect(midRanked.rows).toHaveLength(1)
+    expect(midRanked.rows[0]?.name).toBe('Mid star')
+  })
+
+  it('normalizes best-day query params and keeps top N per sport', () => {
+    expect(normalizeBestDayParam('2026-03-15')).toBe('03-15')
+    expect(normalizeBestDayParam('03-15')).toBe('03-15')
+    expect(normalizeBestDayParam('bad')).toBeNull()
+
+    const rows = [
+      { sport: 'NBA' as const, name: 'a', monthNetDelta: 30 },
+      { sport: 'NBA' as const, name: 'b', monthNetDelta: 20 },
+      { sport: 'NBA' as const, name: 'c', monthNetDelta: 10 },
+      { sport: 'NFL' as const, name: 'd', monthNetDelta: 40 },
+      { sport: 'UFC' as const, name: 'e', monthNetDelta: 15 },
+      { sport: 'UFC' as const, name: 'f', monthNetDelta: 12 },
+      { sport: 'UFC' as const, name: 'g', monthNetDelta: 5 },
+    ]
+    expect(topRecommendationRowsPerSport(rows, 2).map((row) => row.name)).toEqual([
+      'a',
+      'b',
+      'd',
+      'e',
+      'f',
+    ])
   })
 
   it('greedy bundle re-evaluates after each pick', () => {
@@ -603,6 +784,12 @@ describe('passRecommendation', () => {
     expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
     expect(highImpact?.passClaimableRax).toBeGreaterThan(0)
     expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
+    // Per-pass contribution list: highest net RAX first.
+    expect(impacts.rows.map((row) => row.key)).toEqual(
+      [...impacts.rows]
+        .sort((a, b) => b.marginalNetDelta - a.marginalNetDelta)
+        .map((row) => row.key),
+    )
   })
 
   it('isIconicBelowLevel identifies sub-20 Iconic passes', () => {

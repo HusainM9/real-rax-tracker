@@ -1,5 +1,6 @@
 import { computeOtdRax } from './otdRax'
 import type { CatalogImportProfile } from './catalogApi'
+import { isUfcCatalogSport } from '../../lib/passKind'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 export type CatalogProfileImportResult = {
@@ -14,7 +15,7 @@ export function sportFromCatalog(sport: string): Sport {
 }
 
 function performanceNote(claimDay: string, playerBoxScoreId?: number | null): string {
-  return `Meowbot catalog source ${claimDay}${
+  return `Catalog source ${claimDay}${
     playerBoxScoreId ? ` · box score ${playerBoxScoreId}` : ''
   } · OTD adjusted`
 }
@@ -29,6 +30,8 @@ export function importCatalogProfileIntoData(
 ): { data: RaxTrackerData; result: CatalogProfileImportResult } {
   const timestamp = options.nowIso
   const sport = sportFromCatalog(profile.sport)
+  // UFC shop rows may still be pass_kind=team; treat as player locally.
+  const passKind = isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
   const existingCard = current.cards.find((card) => card.externalKey === profile.externalKey)
   const cardId = existingCard?.id ?? options.createId('card')
   const result: CatalogProfileImportResult = {
@@ -48,7 +51,7 @@ export function importCatalogProfileIntoData(
               season: profile.seasonLabel.trim() || card.season,
               externalKey: profile.externalKey,
               rarityLabel: profile.rarityLabel ?? card.rarityLabel,
-              passKind: profile.passKind,
+              passKind,
             }
           : card,
       )
@@ -59,10 +62,10 @@ export function importCatalogProfileIntoData(
           name: profile.name.trim() || 'Catalog player',
           sport,
           season: profile.seasonLabel.trim(),
-          notes: 'Imported from Meowbot catalog',
+          notes: 'Imported from shared catalog',
           externalKey: profile.externalKey,
           rarityLabel: profile.rarityLabel,
-          passKind: profile.passKind,
+          passKind,
           createdAt: timestamp,
         },
       ]
@@ -80,7 +83,7 @@ export function importCatalogProfileIntoData(
         incoming.baseRaxEarned,
         sport,
         profile.rarityLabel,
-        profile.passKind,
+        passKind,
       ),
       baseRaxEarned: incoming.baseRaxEarned,
       note: performanceNote(incoming.claimDay, incoming.playerBoxScoreId),
@@ -93,7 +96,7 @@ export function importCatalogProfileIntoData(
       id: options.createId('perf'),
       cardId,
       claimDay: row.claimDay,
-      raxEarned: computeOtdRax(row.baseRaxEarned, sport, profile.rarityLabel, profile.passKind),
+      raxEarned: computeOtdRax(row.baseRaxEarned, sport, profile.rarityLabel, passKind),
       baseRaxEarned: row.baseRaxEarned,
       note: performanceNote(row.claimDay, row.playerBoxScoreId),
       createdAt: timestamp,

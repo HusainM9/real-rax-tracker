@@ -1,5 +1,9 @@
+import { dedupeCatalogPassSummaries } from '../../lib/catalogPassIdentity'
 import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
+import { catalogCandidatePassKindsForSport } from '../../lib/passKind'
 import { readResponseJson } from './readResponseJson'
+
+export { catalogCandidatePassKindsForSport }
 
 export type CatalogPassKind = 'player' | 'team'
 
@@ -121,10 +125,10 @@ export async function fetchCatalogImportProfile(
   }
 }
 
-export async function fetchCatalogPassSummaries(
+async function fetchCatalogPassSummariesForKind(
   options: {
     sport: string
-    passKind?: CatalogPassKind
+    passKind: CatalogPassKind
     seasonYear?: number
     limit?: number
   },
@@ -135,7 +139,7 @@ export async function fetchCatalogPassSummaries(
 }> {
   const params = new URLSearchParams({
     sport: options.sport,
-    passKind: options.passKind ?? 'player',
+    passKind: options.passKind,
   })
   if (options.seasonYear !== undefined) {
     params.set('seasonYear', String(options.seasonYear))
@@ -159,6 +163,49 @@ export async function fetchCatalogPassSummaries(
     results: Array.isArray(data.results) ? data.results : [],
     storageConfigured: data.storageConfigured !== false,
   }
+}
+
+export async function fetchCatalogPassSummaries(
+  options: {
+    sport: string
+    /** When omitted, UFC fetches team+player (shop crawl + legacy) and dedupes. */
+    passKind?: CatalogPassKind
+    seasonYear?: number
+    limit?: number
+  },
+  signal?: AbortSignal,
+): Promise<{
+  results: CatalogSearchResult[]
+  storageConfigured: boolean
+}> {
+  const passKinds =
+    options.passKind !== undefined
+      ? [options.passKind]
+      : catalogCandidatePassKindsForSport(options.sport)
+
+  if (passKinds.length === 1) {
+    return fetchCatalogPassSummariesForKind(
+      { ...options, passKind: passKinds[0]! },
+      signal,
+    )
+  }
+
+  const batches = await Promise.all(
+    passKinds.map((passKind) =>
+      fetchCatalogPassSummariesForKind({ ...options, passKind }, signal),
+    ),
+  )
+  const storageConfigured = batches.every((batch) => batch.storageConfigured !== false)
+  const { items } = dedupeCatalogPassSummaries(batches.flatMap((batch) => batch.results))
+  items.sort(
+    (a, b) =>
+      b.totalBaseRax - a.totalBaseRax ||
+      a.name.localeCompare(b.name) ||
+      a.externalKey.localeCompare(b.externalKey),
+  )
+  const limited =
+    options.limit !== undefined ? items.slice(0, Math.max(1, options.limit)) : items
+  return { results: limited, storageConfigured }
 }
 
 export async function fetchCatalogImportProfilesBulk(
@@ -215,24 +262,46 @@ export async function fetchCatalogSeasonYears(
   seasonYears: CatalogSeasonYearOption[]
   storageConfigured: boolean
 }> {
-  const params = new URLSearchParams({
-    sport: options.sport,
-    passKind: options.passKind ?? 'player',
-  })
+  const passKinds =
+    options.passKind !== undefined
+      ? [options.passKind]
+      : catalogCandidatePassKindsForSport(options.sport)
 
-  const response = await fetch(`/api/catalog/season-years?${params}`, { signal })
-  const data = await readResponseJson<{
-    seasonYears?: CatalogSeasonYearOption[]
-    storageConfigured?: boolean
-    error?: string
-  }>(response)
+  const batches = await Promise.all(
+    passKinds.map(async (passKind) => {
+      const params = new URLSearchParams({
+        sport: options.sport,
+        passKind,
+      })
+      const response = await fetch(`/api/catalog/season-years?${params}`, { signal })
+      const data = await readResponseJson<{
+        seasonYears?: CatalogSeasonYearOption[]
+        storageConfigured?: boolean
+        error?: string
+      }>(response)
 
-  if (!response.ok) {
-    throw new Error(data.error || `Catalog season years failed (${response.status}).`)
+      if (!response.ok) {
+        throw new Error(data.error || `Catalog season years failed (${response.status}).`)
+      }
+
+      return {
+        seasonYears: Array.isArray(data.seasonYears) ? data.seasonYears : [],
+        storageConfigured: data.storageConfigured !== false,
+      }
+    }),
+  )
+
+  const byYear = new Map<number, CatalogSeasonYearOption>()
+  for (const batch of batches) {
+    for (const option of batch.seasonYears) {
+      if (!byYear.has(option.seasonYear)) {
+        byYear.set(option.seasonYear, option)
+      }
+    }
   }
 
   return {
-    seasonYears: Array.isArray(data.seasonYears) ? data.seasonYears : [],
-    storageConfigured: data.storageConfigured !== false,
+    seasonYears: [...byYear.values()].sort((a, b) => b.seasonYear - a.seasonYear),
+    storageConfigured: batches.every((batch) => batch.storageConfigured !== false),
   }
 }

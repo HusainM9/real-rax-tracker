@@ -1,4 +1,5 @@
 import type { CatalogPassKind } from './meowbotCatalogStore'
+import { isUfcCatalogSport } from './passKind'
 import { expectedSeasonLabelFromYear } from './seasonClaimWindow'
 
 export type CatalogPassIdentityFields = {
@@ -42,7 +43,7 @@ function normalizeSeasonLabelText(seasonLabel?: string): string {
   return seasonLabel?.replace(/\u2013|\u2014/g, '-').trim() ?? ''
 }
 
-/** Normalize `2024` vs `2023-24` so owned cards match catalog passes after end-year repair. */
+/** Normalize bare years vs split labels so owned cards match catalog passes after encoding repairs. */
 export function normalizeSeasonForIdentity(
   sport: string,
   seasonLabel?: string,
@@ -65,7 +66,8 @@ export function normalizeSeasonForIdentity(
 export function catalogPassIdentityKey(item: CatalogPassIdentityFields): string {
   const sport = item.sport.trim()
   const season = normalizeSeasonForIdentity(sport, item.seasonLabel, item.seasonYear)
-  if (item.passKind === 'team') {
+  // UFC fighters are shop-crawled as pass_kind=team but are player-like athletes.
+  if (item.passKind === 'team' && !isUfcCatalogSport(sport)) {
     const entityId = item.entityId ?? parseEntityIdFromExternalKey(item.externalKey)
     return `team|${sport}|${season}|${entityId ?? normalizePassName(item.name)}`
   }
