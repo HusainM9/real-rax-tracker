@@ -15,7 +15,7 @@ export function sportFromCatalog(sport: string): Sport {
 }
 
 function performanceNote(claimDay: string, playerBoxScoreId?: number | null): string {
-  return `Meowbot catalog source ${claimDay}${
+  return `Catalog source ${claimDay}${
     playerBoxScoreId ? ` · box score ${playerBoxScoreId}` : ''
   } · OTD adjusted`
 }
@@ -62,7 +62,7 @@ export function importCatalogProfileIntoData(
           name: profile.name.trim() || 'Catalog player',
           sport,
           season: profile.seasonLabel.trim(),
-          notes: 'Imported from Meowbot catalog',
+          notes: 'Imported from shared catalog',
           externalKey: profile.externalKey,
           rarityLabel: profile.rarityLabel,
           passKind,

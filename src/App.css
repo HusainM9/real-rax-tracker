@@ -1252,6 +1252,34 @@ label.button input.sr-only {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.day-boost-day-field .date-picker-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.date-picker-control .date-picker-input {
+  min-width: 9.5rem;
+  flex: 1 1 auto;
+}
+
+.date-picker-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.55rem;
+  min-width: 2.25rem;
+}
+
+.date-picker-icon {
+  display: block;
+}
+
+.calendar-day-actions {
+  margin: 0 0 0.85rem;
+}
+
 .rank-search-field {
   grid-column: 1 / -1;
 }
@@ -1265,30 +1293,17 @@ label.button input.sr-only {
 }
 
 .cloud-profile-panel {
-  border-color: rgba(228, 160, 36, 0.22);
+  border-color: var(--line);
 }
 
 .cloud-load-block {
   display: grid;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(228, 160, 36, 0.18);
-  background: rgba(228, 160, 36, 0.04);
+  gap: 0.85rem;
+  margin-bottom: 0.75rem;
 }
 
 .cloud-load-fields {
   margin-bottom: 0;
-}
-
-.cloud-load-button {
-  width: 100%;
-  min-height: 4rem;
-  padding: 1rem 1.5rem;
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
 }
 
 .cloud-load-meta {
@@ -1296,16 +1311,7 @@ label.button input.sr-only {
 }
 
 .cloud-sync-advanced {
-  margin-top: 1.25rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--line);
-}
-
-.cloud-sync-subheading {
-  margin: 0 0 0.85rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-soft);
+  margin-top: 0.75rem;
 }
 
 .cloud-save-actions .button {
@@ -2562,6 +2568,31 @@ button.calendar-day {
 
 .help-section a {
   color: var(--accent-soft);
+}
+
+.help-details {
+  margin: 0.75rem 0 0;
+}
+
+.help-details > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  width: fit-content;
+}
+
+.help-details[open] > summary {
+  margin-bottom: 0.55rem;
+}
+
+.help-details .help-list,
+.help-details .import-hint {
+  margin-top: 0.55rem;
+}
+
+.panel > .help-details:first-child,
+.form-subsection > .help-details:first-child {
+  margin-top: 0;
 }
 
 .sr-only {

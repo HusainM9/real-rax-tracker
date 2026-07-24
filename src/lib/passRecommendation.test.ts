@@ -17,7 +17,9 @@ import {
   ownedCardToIconicUpgradeCandidate,
   passSeasonIncluded,
   prefilterRecommendationProfiles,
+  normalizeBestDayParam,
   rankCatalogRecommendations,
+  rankCatalogRecommendationsForDay,
   rankCatalogRecommendationsForMonth,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationCapsForAllSports,
@@ -27,6 +29,7 @@ import {
   sportSeasonFilterKey,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
+  topRecommendationRowsPerSport,
 } from './passRecommendation'
 import { type CatalogImportProfile, type CatalogSearchResult } from './catalogApi'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
@@ -477,6 +480,60 @@ describe('passRecommendation', () => {
     expect(aprilRanked.rows[0]?.monthNetDelta).toBeGreaterThan(
       aprilRanked.rows[1]?.monthNetDelta ?? 0,
     )
+  })
+
+  it('ranks candidates by net gain on a specific claim day', () => {
+    const spreadData: RaxTrackerData = {
+      ...data,
+      performances: [
+        perf('p1', 'c1', 30, '2026-03-01'),
+        perf('p2', 'c2', 25, '2026-03-01'),
+        perf('p3', 'c3', 10, '2026-03-15'),
+        perf('p4', 'c1', 40, '2026-03-15'),
+        perf('p5', 'c2', 35, '2026-03-15'),
+      ],
+    }
+
+    const earlyStar = catalogProfile('early|2025|NBA', 'Early star', [
+      { claimDay: '2026-03-01', baseRaxEarned: 50 },
+    ])
+    const midStar = catalogProfile('mid|2025|NBA', 'Mid star', [
+      { claimDay: '2026-03-15', baseRaxEarned: 50 },
+    ])
+
+    const earlyRanked = rankCatalogRecommendationsForDay(spreadData, [earlyStar, midStar], '2026-03-01')
+    expect(earlyRanked.claimDay).toBe('03-01')
+    expect(earlyRanked.rows).toHaveLength(1)
+    expect(earlyRanked.rows[0]?.name).toBe('Early star')
+    expect(earlyRanked.rows[0]?.monthNetDelta).toBeGreaterThan(0)
+
+    const midRanked = rankCatalogRecommendationsForDay(spreadData, [earlyStar, midStar], '03-15')
+    expect(midRanked.claimDay).toBe('03-15')
+    expect(midRanked.rows).toHaveLength(1)
+    expect(midRanked.rows[0]?.name).toBe('Mid star')
+  })
+
+  it('normalizes best-day query params and keeps top N per sport', () => {
+    expect(normalizeBestDayParam('2026-03-15')).toBe('03-15')
+    expect(normalizeBestDayParam('03-15')).toBe('03-15')
+    expect(normalizeBestDayParam('bad')).toBeNull()
+
+    const rows = [
+      { sport: 'NBA' as const, name: 'a', monthNetDelta: 30 },
+      { sport: 'NBA' as const, name: 'b', monthNetDelta: 20 },
+      { sport: 'NBA' as const, name: 'c', monthNetDelta: 10 },
+      { sport: 'NFL' as const, name: 'd', monthNetDelta: 40 },
+      { sport: 'UFC' as const, name: 'e', monthNetDelta: 15 },
+      { sport: 'UFC' as const, name: 'f', monthNetDelta: 12 },
+      { sport: 'UFC' as const, name: 'g', monthNetDelta: 5 },
+    ]
+    expect(topRecommendationRowsPerSport(rows, 2).map((row) => row.name)).toEqual([
+      'a',
+      'b',
+      'd',
+      'e',
+      'f',
+    ])
   })
 
   it('greedy bundle re-evaluates after each pick', () => {

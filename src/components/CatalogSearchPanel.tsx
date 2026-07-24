@@ -130,38 +130,26 @@ export function CatalogSearchPanel({
             <h2>{title}</h2>
             <p>{description}</p>
             <p className="catalog-accuracy-disclaimer">
-              Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
-              totals look too low, add or correct earnings manually using JSON from{' '}
+              Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
               <a href="https://realapp.com" target="_blank" rel="noreferrer">
                 realapp.com
-              </a>
-              .
+              </a>{' '}
+              JSON if totals look low.
             </p>
           </div>
           <span className="badge">{badge}</span>
         </div>
       ) : (
         <p className="catalog-accuracy-disclaimer">
-          Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
-          totals look too low, add or correct earnings manually using JSON from{' '}
+          Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
           <a href="https://realapp.com" target="_blank" rel="noreferrer">
             realapp.com
-          </a>
-          .
+          </a>{' '}
+          JSON if totals look low.
         </p>
       )}
       {collectionAddEnabled ? (
-        <ol className="entry-quick-add-steps">
-          <li>
-            <strong>Search</strong> for a player pass by name
-          </li>
-          <li>
-            <strong>Pick rarity</strong> — defaults below; change per pass if needed
-          </li>
-          <li>
-            <strong>Add to collection</strong> — earnings import automatically when available
-          </li>
-        </ol>
+        <p className="import-hint">Search → rarity → add. Earnings import when available.</p>
       ) : null}
       {collectionAddEnabled && collectionAdd ? (
         <label className="field entry-default-rarity-field">
@@ -193,8 +181,8 @@ export function CatalogSearchPanel({
         <p className="card-picker-empty">
           {emptyHint ??
             (collectionAddEnabled
-              ? 'Type a player name to search the shared catalog — then click Add to collection. No JSON paste needed when daily earnings are available.'
-              : 'Start typing to search the shared catalog. Results include daily RAX row counts and total base RAX.')}
+              ? 'Type a player name, then Add to collection. No JSON needed when earnings exist.'
+              : 'Type to search. Results show row counts and base RAX.')}
         </p>
       ) : searching ? (
         <p className="import-progress">Searching shared catalog…</p>

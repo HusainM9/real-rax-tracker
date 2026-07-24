@@ -1064,10 +1064,8 @@ export default function AdminPage() {
             <div>
               <h3>Shop earningstotal crawl</h3>
               <p className="subsection-note">
-                Slow crawl of Real&apos;s shop leaderboard, then per-entity daily earnings. Upserts
-                catalog pass metadata, <code>total_base_rax</code>, and base daily rows. The UI
-                loops chunks until finished; Stop saves a cursor so Continue can skip completed
-                pages.
+                Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
+                Continue resumes without redoing finished pages.
               </p>
             </div>
           </div>

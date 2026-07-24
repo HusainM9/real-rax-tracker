@@ -105,7 +105,7 @@ export default function CardsPage() {
     <div className="page-stack">
       <CollapsiblePanel
         title="Player card totals"
-        description="Claimable RAX includes guaranteed top-two claims and any Pro bonus selections. Filter by sport and rarity, then sort by base RAX and a tie-breaker. Change rarity after a merge or upgrade — saved with cloud sync and JSON export. Edit player, sport, or season on Entry."
+        description="Guaranteed + Pro bonus claimable RAX. Filter, sort, edit rarity — saves with your collection."
         badge={`${sortedCards.length} card${sortedCards.length === 1 ? '' : 's'}`}
         actions={
           <>
