@@ -156,6 +156,8 @@ export type RaxTrackerData = {
   cachedPlayerEarnings?: CachedPlayerEarningsProfile[]
   savedSellRankings?: SavedSellRankings | null
   plannedPasses?: PlannedPass[]
+  /** Per-tracker-user pass keys skipped on username import (`entityId|seasonYear|Sport`). */
+  ignoredPassKeys?: string[]
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

@@ -230,6 +230,28 @@ describe('importFromUsername', () => {
     }
   })
 
+  it('skips ignored pass keys on username import and earnings backfill', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mockFetch as typeof fetch
+
+    try {
+      const baseline = {
+        ...createEmptyData(),
+        ignoredPassKeys: ['100|2026|NBA'],
+      }
+      const { data, result } = await importFromUsername(baseline, 'testuser')
+
+      expect(result.passesIgnored).toBe(1)
+      expect(result.passesFetched).toBe(1)
+      expect(result.cardsCreated).toBe(1)
+      expect(data.cards.map((card) => card.externalKey)).toEqual(['300|2023|UFC'])
+      expect(data.cards.some((card) => card.externalKey === '100|2026|NBA')).toBe(false)
+      expect(data.ignoredPassKeys).toEqual(['100|2026|NBA'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('forces calendar-year season labels for MLB imports', async () => {
     const originalFetch = globalThis.fetch
     const mlbFetch: typeof fetch = (input, init) => {

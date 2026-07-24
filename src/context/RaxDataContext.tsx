@@ -13,6 +13,7 @@ import {
   type RemoveCardFromCollectionOptions,
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
+import { ignorePassOnImport, removeIgnoredPassKey } from '../lib/ignoredPasses'
 import {
   createEmptyData,
   exportTrackerData,
@@ -84,6 +85,8 @@ type RaxDataContextValue = {
   setCardRarity: (id: string, targetRarity: string) => void
   deleteCard: (id: string) => void
   removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
+  ignorePassOnImport: (id: string) => boolean
+  unignorePassKey: (externalKey: string) => void
   addPerformance: (input: PerformanceInput) => void
   addPerformances: (inputs: PerformanceInput[]) => void
   updatePerformance: (id: string, patch: Partial<PerformanceInput>) => void
@@ -260,6 +263,19 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           return next
         })
         return removed
+      },
+      ignorePassOnImport: (id) => {
+        let ignored = false
+        setData((current) => {
+          const next = ignorePassOnImport(current, id)
+          if (!next) return current
+          ignored = true
+          return next
+        })
+        return ignored
+      },
+      unignorePassKey: (externalKey) => {
+        setData((current) => removeIgnoredPassKey(current, externalKey))
       },
       addPerformance: (input) => {
         setData((current) => ({

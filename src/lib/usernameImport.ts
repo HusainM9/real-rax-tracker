@@ -23,6 +23,7 @@ import {
   type DailyRaxBackfillResult,
   type EarningsBackfillPass,
 } from './realEarningsImport'
+import { ignoredPassKeySet } from './ignoredPasses'
 import { resolveImportPassKind } from './passKind'
 import { passMetadataKey } from './seasonLabel'
 import type {
@@ -58,6 +59,8 @@ export type UsernameImportResult = {
   skipped: number
   passesFetched: number
   passesSkipped: number
+  /** Legendary+ passes skipped because this tracker user marked them ignore-on-import. */
+  passesIgnored: number
   cachedPlayerPasses: number
   ownedPasses: OwnedPassSnapshot[]
   cachedProfiles: []
@@ -616,7 +619,7 @@ export async function importFromUsername(
   const allPasses = resolved.metadataAuthoritative
     ? providedPasses
     : providedPasses.map(withResolvedPassKind)
-  const selectedPasses = allPasses.filter((pass) =>
+  const legendaryPasses = allPasses.filter((pass) =>
     passMatchesRarityFilter(
       pass,
       resolved.rarities,
@@ -624,11 +627,25 @@ export async function importFromUsername(
       legendaryPlusRarityFilter(),
     ),
   )
-  const passesSkipped = allPasses.length - selectedPasses.length
+  const passesSkipped = allPasses.length - legendaryPasses.length
+  const ignoredKeys = ignoredPassKeySet(current)
+  const selectedPasses = legendaryPasses.filter((pass) => {
+    const sport = mapMeowbotSport(pass.sportRaw) as Sport
+    const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
+    return !ignoredKeys.has(externalKey)
+  })
+  const passesIgnored = legendaryPasses.length - selectedPasses.length
   const passesToFetch = uniquePasses(selectedPasses)
 
-  if (selectedPasses.length === 0) {
+  if (legendaryPasses.length === 0) {
     throw new Error('No Legendary+ passes found for this username.')
+  }
+  if (selectedPasses.length === 0) {
+    throw new Error(
+      passesIgnored > 0
+        ? 'All Legendary+ passes for this username are on your ignore list.'
+        : 'No Legendary+ passes found for this username.',
+    )
   }
 
   const seasonLabelByKey = new Map<string, string>()
@@ -894,6 +911,7 @@ export async function importFromUsername(
         skipped: skipped + fetchSkipped,
         passesFetched: selectedPasses.length,
         passesSkipped,
+        passesIgnored,
         cachedPlayerPasses: 0,
         ownedPasses,
         cachedProfiles: [],
@@ -959,6 +977,7 @@ export async function importFromUsername(
       skipped: skipped + fetchSkipped,
       passesFetched: selectedPasses.length,
       passesSkipped,
+      passesIgnored,
       cachedPlayerPasses: 0,
       ownedPasses,
       cachedProfiles: [],
@@ -997,13 +1016,29 @@ export async function importFromAdminOwnership(
       seasonLabel: pass.season,
     })
   })
-  const selectedPasses = allPasses.filter((pass) => isLegendaryPlusSnapshotPass(pass, rarities))
-  if (selectedPasses.length === 0) {
+  const legendaryPasses = allPasses.filter((pass) => isLegendaryPlusSnapshotPass(pass, rarities))
+  if (legendaryPasses.length === 0) {
     throw new Error('No Legendary+ passes found in admin ownership snapshot for this username.')
+  }
+
+  const ignoredKeys = ignoredPassKeySet(current)
+  const selectedPasses = legendaryPasses.filter((pass) => {
+    const externalKey = usernameImportExternalKey(pass.entityId, pass.season, pass.sportRaw)
+    return !ignoredKeys.has(externalKey)
+  })
+  const passesIgnored = legendaryPasses.length - selectedPasses.length
+  if (selectedPasses.length === 0) {
+    throw new Error(
+      passesIgnored > 0
+        ? 'All Legendary+ passes in this admin snapshot are on your ignore list.'
+        : 'No Legendary+ passes found in admin ownership snapshot for this username.',
+    )
   }
 
   const selectedSnapshotPasses = rawPasses.filter((pass) => {
     const sportRaw = rawSportFromDisplay(pass.sport)
+    const externalKey = usernameImportExternalKey(pass.entityId, pass.seasonYear, sportRaw)
+    if (ignoredKeys.has(externalKey)) return false
     return isLegendaryPlusSnapshotPass(
       {
         entityId: pass.entityId,
@@ -1078,7 +1113,8 @@ export async function importFromAdminOwnership(
       rowsImported: earningsAttach.rowsImported,
       skipped: 0,
       passesFetched: selectedPasses.length,
-      passesSkipped: allPasses.length - selectedPasses.length,
+      passesSkipped: allPasses.length - legendaryPasses.length,
+      passesIgnored,
       cachedPlayerPasses: 0,
       ownedPasses,
       cachedProfiles: [],
@@ -1107,7 +1143,11 @@ export async function retryFailedEarnings(
     ? createThrottledProgress(options.onProgress)
     : undefined
 
-  if (uniquePasses.length === 0) {
+  const ignoredKeys = ignoredPassKeySet(current)
+  const retryPasses = uniquePasses.filter((pass) => !ignoredKeys.has(pass.externalKey))
+  const passesIgnored = uniquePasses.length - retryPasses.length
+
+  if (retryPasses.length === 0) {
     return {
       data: current,
       result: {
@@ -1117,10 +1157,14 @@ export async function retryFailedEarnings(
         skipped: 0,
         passesFetched: 0,
         passesSkipped: 0,
+        passesIgnored,
         cachedPlayerPasses: 0,
         ownedPasses: [],
         cachedProfiles: [],
-        errors: ['No failed earnings passes to retry.'],
+        errors:
+          uniquePasses.length === 0
+            ? ['No failed earnings passes to retry.']
+            : ['All retry passes are on your ignore list.'],
         passesWithNoEarnings: [],
         passFetchErrors: [],
         retryableEarningsPasses: [],
@@ -1137,14 +1181,14 @@ export async function retryFailedEarnings(
   reportProgress?.({
     phase: 'earnings',
     current: 0,
-    total: uniquePasses.length,
+    total: retryPasses.length,
     label: 'Retrying failed daily RAX…',
   })
 
   let backfill: DailyRaxBackfillResult | null = null
   let backfillCancelled = false
   try {
-    backfill = await fetchDailyRaxRows(uniquePasses, {
+    backfill = await fetchDailyRaxRows(retryPasses, {
       signal: options?.signal,
       onProgress: ({ completed: done, total: passTotal }) =>
         reportProgress?.({
@@ -1171,7 +1215,7 @@ export async function retryFailedEarnings(
   const retryableEarningsPasses: EarningsBackfillPass[] = []
   const performanceDrafts: PerformanceDraft[] = []
 
-  for (const pass of uniquePasses) {
+  for (const pass of retryPasses) {
     const sport = mapMeowbotSport(pass.sportRaw) as Sport
     const passMeta = {
       name: pass.name,
@@ -1237,8 +1281,8 @@ export async function retryFailedEarnings(
 
   reportProgress?.({
     phase: 'earnings',
-    current: uniquePasses.length,
-    total: uniquePasses.length,
+    current: retryPasses.length,
+    total: retryPasses.length,
     label: 'Finished retry',
   })
 
@@ -1249,8 +1293,9 @@ export async function retryFailedEarnings(
       cardsUpdated: 0,
       rowsImported,
       skipped,
-      passesFetched: uniquePasses.length,
+      passesFetched: retryPasses.length,
       passesSkipped: 0,
+      passesIgnored,
       cachedPlayerPasses: 0,
       ownedPasses: [],
       cachedProfiles: [],
@@ -1258,7 +1303,7 @@ export async function retryFailedEarnings(
       passesWithNoEarnings,
       passFetchErrors,
       dailyRaxBackfill: {
-        passes: uniquePasses.length,
+        passes: retryPasses.length,
         cacheHits: backfill?.stats.cacheHits ?? 0,
         fetched: backfill?.stats.fetched ?? 0,
         upstreamRequests: backfill?.stats.upstreamRequests ?? 0,

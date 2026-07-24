@@ -16,6 +16,7 @@ import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearc
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
+import { formatIgnorePassConfirmMessage } from '../lib/ignoredPasses'
 import { CARD_RARITY_OPTIONS } from '../lib/cardRarity'
 import {
   getFailedPlayerPasses,
@@ -121,6 +122,7 @@ export default function EntryPage() {
     updateCard,
     setCardRarity,
     removeCardFromCollection,
+    ignorePassOnImport,
     addPerformance,
     addPerformances,
     updatePerformance,
@@ -499,6 +501,10 @@ export default function EntryPage() {
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} by rarity`
           : ''
+      const ignoreNote =
+        result.passesIgnored > 0
+          ? ` · skipped ${result.passesIgnored} ignored pass${result.passesIgnored === 1 ? '' : 'es'}`
+          : ''
       setUsernameImportFailedPasses(failedPlayerPasses)
       setRetryableEarningsPasses(result.retryableEarningsPasses)
       void reportImportAdminEvents(username, result)
@@ -515,7 +521,7 @@ export default function EntryPage() {
           result.passesFetched
         } pass${result.passesFetched === 1 ? '' : 'es'} (${result.cardsCreated} new card${
           result.cardsCreated === 1 ? '' : 's'
-        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${issueNote}.`,
+        }, ${result.cardsUpdated} updated)${result.skipped ? ` · skipped ${result.skipped} duplicate/invalid row${result.skipped === 1 ? '' : 's'}` : ''}${skipNote}${ignoreNote}${issueNote}.`,
       )
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
         setShowHeavyTables(false)
@@ -603,6 +609,10 @@ export default function EntryPage() {
         result.passesSkipped > 0
           ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
           : ''
+      const ignoreNote =
+        result.passesIgnored > 0
+          ? ` · skipped ${result.passesIgnored} ignored pass${result.passesIgnored === 1 ? '' : 'es'}`
+          : ''
       const raxNote =
         result.rowsImported > 0
           ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from admin snapshot (OTD adjusted from saved rarity)`
@@ -612,7 +622,7 @@ export default function EntryPage() {
           ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
           : ''
       setUsernameImportStatus(
-        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${issueNote}.`,
+        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${ignoreNote}${issueNote}.`,
       )
       setCardsPage(1)
       if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
@@ -1371,18 +1381,36 @@ export default function EntryPage() {
                       <input value={card.notes} onChange={(event) => updateCard(card.id, { notes: event.target.value })} />
                     </td>
                     <td>
-                      <button
-                        className="button danger"
-                        type="button"
-                        onClick={() => {
-                          if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
-                          removeCardFromCollection(card.id, {
-                            removedNote: `Removed ${new Date().toISOString().slice(0, 10)}`,
-                          })
-                        }}
-                      >
-                        Remove
-                      </button>
+                      <span className="button-row compact-actions">
+                        {card.externalKey ? (
+                          <button
+                            className="button compact"
+                            type="button"
+                            onClick={() => {
+                              if (!window.confirm(formatIgnorePassConfirmMessage(card))) return
+                              if (ignorePassOnImport(card.id)) {
+                                setCardEntryStatus(
+                                  `Ignored ${card.name || 'pass'} on import. Manage under Cards → Ignored passes.`,
+                                )
+                              }
+                            }}
+                          >
+                            Ignore on import
+                          </button>
+                        ) : null}
+                        <button
+                          className="button danger compact"
+                          type="button"
+                          onClick={() => {
+                            if (!window.confirm(formatRemoveCardConfirmMessage(card))) return
+                            removeCardFromCollection(card.id, {
+                              removedNote: `Removed ${new Date().toISOString().slice(0, 10)}`,
+                            })
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))
