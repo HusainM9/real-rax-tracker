@@ -2803,6 +2803,27 @@ button.calendar-day {
     text-align: center;
   }
 
+  .day-boost-day-field .date-picker-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
+  }
+
+  .date-picker-control .date-picker-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .date-picker-control .button:not(.date-picker-icon-button) {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .cloud-save-actions .button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .compact-actions {
     flex-direction: row;
     flex-wrap: wrap;
