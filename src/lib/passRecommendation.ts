@@ -535,6 +535,15 @@ export function defaultRankExcludedSportSeasonKeys(): string[] {
   )
 }
 
+/** Drop UFC from Rank catalog sports when Include UFC is off (default on). */
+export function filterRankCatalogSports(
+  sports: readonly Sport[],
+  includeUfc = true,
+): Sport[] {
+  if (includeUfc) return [...sports]
+  return sports.filter((sport) => sport !== 'UFC')
+}
+
 export function passSeasonIncluded(
   item: { sport: string; seasonLabel: string; seasonYear: number },
   excludedSportSeasonKeys?: string[],

@@ -32,6 +32,7 @@ import {
   catalogProfileToIconic20CheckerCandidate,
   countAppliedBaselineAdjustments,
   DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
+  filterRankCatalogSports,
   iconic20CatalogSelectionKey,
   iconic20OwnedSelectionKey,
   ICONIC_20_SIMULATED_RARITY,
@@ -889,6 +890,8 @@ export default function PotentialPage() {
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
+  /** Rank catalog only — default on; turn off when max UFC already held. */
+  const [includeRankUfc, setIncludeRankUfc] = useState(true)
   const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>(
     createDefaultExcludedSportSeasons,
   )
@@ -2029,8 +2032,12 @@ export default function PotentialPage() {
   )
 
   const includedRankSports = useMemo(
-    () => SPORTS.filter((sport) => !excludedRankSports.includes(sport)),
-    [excludedRankSports],
+    () =>
+      filterRankCatalogSports(
+        SPORTS.filter((sport) => !excludedRankSports.includes(sport)),
+        includeRankUfc,
+      ),
+    [excludedRankSports, includeRankUfc],
   )
 
   const excludedRankSportOptions = useMemo(
@@ -2240,8 +2247,14 @@ export default function PotentialPage() {
       setRankAdjustments(nextAdjustments)
 
       const baselineAfterClaim = applyRecommendationBaseline(data, profileByKey, nextAdjustments)
+      const rankSports: Sport[] = rankAllSports
+        ? includedRankSports
+        : filterRankCatalogSports([rankSport as Sport], includeRankUfc)
+      const profilesForRank = includeRankUfc
+        ? rankCatalogProfiles
+        : rankCatalogProfiles.filter((profile) => sportFromCatalog(profile.sport) !== 'UFC')
       const caps = rankAllSports
-        ? recommendationCapsForSports(includedRankSports)
+        ? recommendationCapsForSports(rankSports)
         : recommendationCapsForSport(rankSport as Sport)
       const baselineAdjustmentCount = countAppliedBaselineAdjustments(
         profileByKey,
@@ -2256,7 +2269,7 @@ export default function PotentialPage() {
       setRankStatus('Recalculating rankings and greedy recommendations…')
       const { ranked, bundle } = await rankAndRecommendAsync(
         baselineAfterClaim,
-        rankCatalogProfiles,
+        profilesForRank,
         bundleSize,
         {
           ...seasonFilter,
@@ -2281,10 +2294,12 @@ export default function PotentialPage() {
         prefilterTrimmed: ranked.prefilterTrimmed,
         baselineAdjustmentCount,
       }))
-      const rankSports: Sport[] = rankAllSports ? includedRankSports : [rankSport as Sport]
+      const allEligibleCount = includeRankUfc ? SPORTS.length : SPORTS.length - 1
       const sportLabel = rankAllSports
-        ? rankSports.length === SPORTS.length
-          ? 'all sports'
+        ? rankSports.length === allEligibleCount
+          ? includeRankUfc
+            ? 'all sports'
+            : 'all sports except UFC'
           : rankSports.join(', ')
         : rankSport
       setRankStatus(
@@ -2338,11 +2353,17 @@ export default function PotentialPage() {
     setBundleClaimSelection(new Set())
     setRankingClaimSelection(new Set())
 
-    const rankSports: Sport[] = rankAllSports ? includedRankSports : [rankSport]
+    const rankSports: Sport[] = rankAllSports
+      ? includedRankSports
+      : filterRankCatalogSports([rankSport as Sport], includeRankUfc)
 
     try {
-      if (rankAllSports && rankSports.length === 0) {
-        setRankStatus('Select at least one sport to rank.')
+      if (rankSports.length === 0) {
+        setRankStatus(
+          !includeRankUfc && rankSport === 'UFC'
+            ? 'Include UFC to rank UFC catalog passes.'
+            : 'Select at least one sport to rank.',
+        )
         return
       }
 
@@ -2469,9 +2490,12 @@ export default function PotentialPage() {
         prefilterTrimmed: ranked.prefilterTrimmed,
         baselineAdjustmentCount,
       })
+      const allEligibleCount = includeRankUfc ? SPORTS.length : SPORTS.length - 1
       const sportLabel = rankAllSports
-        ? rankSports.length === SPORTS.length
-          ? 'all sports'
+        ? rankSports.length === allEligibleCount
+          ? includeRankUfc
+            ? 'all sports'
+            : 'all sports except UFC'
           : rankSports.join(', ')
         : rankSport
       setRankStatus(
@@ -3408,6 +3432,229 @@ export default function PotentialPage() {
           )}
         </CollapsiblePanel>
 
+        <div className="sort-controls rank-catalog-controls">
+          <label className="field inline-field">
+            <span>Sport</span>
+            <select
+              value={rankSport}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => {
+                const next = event.target.value
+                setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+                if (next !== ALL_SPORTS_RANK) {
+                  setExcludedRankSports([])
+                }
+              }}
+            >
+              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
+              {SPORTS.map((sport) => (
+                <option key={sport} value={sport}>
+                  {sport}
+                </option>
+              ))}
+            </select>
+          </label>
+          {rankAllSports ? (
+            <div className="field inline-field season-multi-select-field">
+              <SeasonMultiSelect
+                options={rankSportOptions}
+                excludedValues={
+                  includeRankUfc || excludedRankSports.includes('UFC')
+                    ? excludedRankSports
+                    : [...excludedRankSports, 'UFC']
+                }
+                onExcludedValuesChange={(values) => {
+                  const next = values as Sport[]
+                  setExcludedRankSports(next.filter((sport) => sport !== 'UFC'))
+                  setIncludeRankUfc(!next.includes('UFC'))
+                }}
+                disabled={catalogAnalysisBusy}
+                label="Sports"
+                menuTitle="Sports"
+                allOptionLabel="All sports"
+                emptyTriggerLabel="No sports"
+                countUnit="sports"
+              />
+              {excludedRankSportOptions.length > 0 || !includeRankUfc ? (
+                <p className="season-filter-summary">
+                  <span>
+                    Including:{' '}
+                    {includedRankSports.length > 0 ? includedRankSports.join(', ') : 'none'}
+                  </span>
+                  {' · '}
+                  <span>
+                    Excluding:{' '}
+                    {[
+                      ...excludedRankSportOptions.map((option) => option.label),
+                      ...(!includeRankUfc && !excludedRankSports.includes('UFC') ? ['UFC'] : []),
+                    ].join(', ') || 'none'}
+                  </span>
+                </p>
+              ) : (
+                <p className="season-filter-summary">Including all sports</p>
+              )}
+            </div>
+          ) : null}
+          <label className="field inline-field">
+            <span>Bundle size</span>
+            <input
+              type="number"
+              min={1}
+              max={RECOMMENDATION_MAX_BUNDLE_SIZE}
+              value={bundleSize}
+              disabled={catalogAnalysisBusy}
+              onChange={(event) => {
+                const next = Number(event.target.value)
+                if (Number.isFinite(next)) {
+                  setBundleSize(
+                    Math.max(1, Math.min(RECOMMENDATION_MAX_BUNDLE_SIZE, Math.floor(next))),
+                  )
+                }
+              }}
+            />
+          </label>
+          <div className="rank-include-ufc">
+            <button
+              type="button"
+              className="switch"
+              role="switch"
+              aria-checked={includeRankUfc}
+              aria-label="Include UFC"
+              disabled={catalogAnalysisBusy}
+              onClick={() => setIncludeRankUfc((current) => !current)}
+            >
+              <span className="switch-label">Include UFC</span>
+              <span className="switch-track" aria-hidden="true">
+                <span className="switch-thumb" />
+              </span>
+              <span className="switch-state" aria-hidden="true">
+                {includeRankUfc ? 'On' : 'Off'}
+              </span>
+            </button>
+            <span className="field-hint">Off if you already hold max UFC.</span>
+          </div>
+        </div>
+
+        <CollapsiblePanel
+          className="nested-panel recommendation-exclusions"
+          title="Exclude sport + season"
+          description="Skip catalog passes for a sport/season. NFL 2022-23 starts excluded by default; remove it below if you want it ranked."
+          badge={
+            excludedSportSeasons.length > 0
+              ? `${excludedSportSeasons.length} excluded`
+              : undefined
+          }
+          defaultOpen={false}
+        >
+          <div className="sort-controls">
+            <label className="field inline-field">
+              <span>Sport</span>
+              <select
+                value={excludeFormSport}
+                disabled={catalogAnalysisBusy}
+                onChange={(event) => setExcludeFormSport(event.target.value as Sport)}
+              >
+                {SPORTS.map((sport) => (
+                  <option key={sport} value={sport}>
+                    {sport}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field inline-field">
+              <span>Season</span>
+              {excludeFormSeasonOptions.length > 0 ? (
+                <select
+                  value={excludeFormSeasonLabel}
+                  disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
+                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
+                >
+                  {excludeFormSeasonOptions.map((option) => (
+                    <option key={option.seasonLabel} value={option.seasonLabel}>
+                      {option.seasonLabel}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={excludeFormSeasonLabel}
+                  disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
+                  placeholder="e.g. 2022-23"
+                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
+                />
+              )}
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={
+                catalogAnalysisBusy ||
+                excludeFormSeasonsLoading ||
+                !excludeFormSeasonLabel.trim() ||
+                excludedSportSeasons.some(
+                  (entry) =>
+                    entry.key ===
+                    sportSeasonFilterKey(excludeFormSport, excludeFormSeasonLabel.trim()),
+                )
+              }
+              onClick={addExcludedSportSeason}
+            >
+              Exclude pair
+            </button>
+          </div>
+          {excludeFormSeasonsLoading ? (
+            <p className="import-hint">Loading seasons for {excludeFormSport}…</p>
+          ) : null}
+          {excludedSportSeasons.length > 0 ? (
+            <div className="list recommendation-adjustment-list">
+              {excludedSportSeasons.map((entry) => (
+                <div className="list-row" key={entry.key}>
+                  <span>
+                    <strong>{formatExcludedSportSeason(entry)}</strong>
+                  </span>
+                  <button
+                    className="button danger compact"
+                    type="button"
+                    disabled={catalogAnalysisBusy}
+                    onClick={() => removeExcludedSportSeason(entry.key)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty">No exclusions — all catalog sport + season pairs are eligible.</p>
+          )}
+        </CollapsiblePanel>
+
+        <div className="button-row">
+          <button
+            className="button primary"
+            type="button"
+            disabled={
+              catalogAnalysisBusy ||
+              (rankAllSports
+                ? includedRankSports.length === 0
+                : rankSport === 'UFC' && !includeRankUfc)
+            }
+            onClick={() => void runCatalogRanking()}
+          >
+            {rankingInProgress ? 'Ranking…' : 'Rank catalog'}
+          </button>
+          {rankingInProgress ? (
+            <button className="button" type="button" onClick={cancelRanking}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+        {rankProgress ? (
+          <p className="import-progress">
+            Analyzing pass {rankProgress.current}/{rankProgress.total} — {rankProgress.label}
+          </p>
+        ) : null}
+        {rankStatus ? <p className="import-status">{rankStatus}</p> : null}
+
         <CollapsiblePanel
           id="sport-opportunity-scan"
           className="nested-panel"
@@ -3548,195 +3795,6 @@ export default function PotentialPage() {
             </>
           ) : null}
         </CollapsiblePanel>
-
-        <div className="sort-controls">
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={rankSport}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = event.target.value
-                setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                if (next !== ALL_SPORTS_RANK) {
-                  setExcludedRankSports([])
-                }
-              }}
-            >
-              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
-          {rankAllSports ? (
-            <div className="field inline-field season-multi-select-field">
-              <SeasonMultiSelect
-                options={rankSportOptions}
-                excludedValues={excludedRankSports}
-                onExcludedValuesChange={(values) => setExcludedRankSports(values as Sport[])}
-                disabled={catalogAnalysisBusy}
-                label="Sports"
-                menuTitle="Sports"
-                allOptionLabel="All sports"
-                emptyTriggerLabel="No sports"
-                countUnit="sports"
-              />
-              {excludedRankSportOptions.length > 0 ? (
-                <p className="season-filter-summary">
-                  <span>
-                    Including:{' '}
-                    {includedRankSports.length > 0 ? includedRankSports.join(', ') : 'none'}
-                  </span>
-                  {' · '}
-                  <span>
-                    Excluding: {excludedRankSportOptions.map((option) => option.label).join(', ')}
-                  </span>
-                </p>
-              ) : (
-                <p className="season-filter-summary">Including all sports</p>
-              )}
-            </div>
-          ) : null}
-          <label className="field inline-field">
-            <span>Bundle size</span>
-            <input
-              type="number"
-              min={1}
-              max={RECOMMENDATION_MAX_BUNDLE_SIZE}
-              value={bundleSize}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = Number(event.target.value)
-                if (Number.isFinite(next)) {
-                  setBundleSize(
-                    Math.max(1, Math.min(RECOMMENDATION_MAX_BUNDLE_SIZE, Math.floor(next))),
-                  )
-                }
-              }}
-            />
-          </label>
-        </div>
-
-        <CollapsiblePanel
-          className="nested-panel recommendation-exclusions"
-          title="Exclude sport + season"
-          description="Skip catalog passes for a sport/season. NFL 2022-23 starts excluded by default; remove it below if you want it ranked."
-          badge={
-            excludedSportSeasons.length > 0
-              ? `${excludedSportSeasons.length} excluded`
-              : undefined
-          }
-          defaultOpen={excludedSportSeasons.length > 0}
-        >
-          <div className="sort-controls">
-            <label className="field inline-field">
-              <span>Sport</span>
-              <select
-                value={excludeFormSport}
-                disabled={catalogAnalysisBusy}
-                onChange={(event) => setExcludeFormSport(event.target.value as Sport)}
-              >
-                {SPORTS.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field inline-field">
-              <span>Season</span>
-              {excludeFormSeasonOptions.length > 0 ? (
-                <select
-                  value={excludeFormSeasonLabel}
-                  disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
-                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
-                >
-                  {excludeFormSeasonOptions.map((option) => (
-                    <option key={option.seasonLabel} value={option.seasonLabel}>
-                      {option.seasonLabel}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  value={excludeFormSeasonLabel}
-                  disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
-                  placeholder="e.g. 2022-23"
-                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
-                />
-              )}
-            </label>
-            <button
-              className="button"
-              type="button"
-              disabled={
-                catalogAnalysisBusy ||
-                excludeFormSeasonsLoading ||
-                !excludeFormSeasonLabel.trim() ||
-                excludedSportSeasons.some(
-                  (entry) =>
-                    entry.key ===
-                    sportSeasonFilterKey(excludeFormSport, excludeFormSeasonLabel.trim()),
-                )
-              }
-              onClick={addExcludedSportSeason}
-            >
-              Exclude pair
-            </button>
-          </div>
-          {excludeFormSeasonsLoading ? (
-            <p className="import-hint">Loading seasons for {excludeFormSport}…</p>
-          ) : null}
-          {excludedSportSeasons.length > 0 ? (
-            <div className="list recommendation-adjustment-list">
-              {excludedSportSeasons.map((entry) => (
-                <div className="list-row" key={entry.key}>
-                  <span>
-                    <strong>{formatExcludedSportSeason(entry)}</strong>
-                  </span>
-                  <button
-                    className="button danger compact"
-                    type="button"
-                    disabled={catalogAnalysisBusy}
-                    onClick={() => removeExcludedSportSeason(entry.key)}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="empty">No exclusions — all catalog sport + season pairs are eligible.</p>
-          )}
-        </CollapsiblePanel>
-
-        <div className="button-row">
-          <button
-            className="button primary"
-            type="button"
-            disabled={
-              catalogAnalysisBusy ||
-              (rankAllSports && includedRankSports.length === 0)
-            }
-            onClick={() => void runCatalogRanking()}
-          >
-            {rankingInProgress ? 'Ranking…' : 'Rank catalog'}
-          </button>
-          {rankingInProgress ? (
-            <button className="button" type="button" onClick={cancelRanking}>
-              Cancel
-            </button>
-          ) : null}
-        </div>
-        {rankProgress ? (
-          <p className="import-progress">
-            Analyzing pass {rankProgress.current}/{rankProgress.total} — {rankProgress.label}
-          </p>
-        ) : null}
-        {rankStatus ? <p className="import-status">{rankStatus}</p> : null}
 
         {recommendationBundle ? (
           <CollapsiblePanel
