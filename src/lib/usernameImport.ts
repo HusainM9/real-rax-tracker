@@ -232,12 +232,10 @@ function snapshotEarningsToDrafts(
   sport: Sport,
   earnings: NonNullable<OwnershipSnapshotPass['earnings']>,
 ): PerformanceDraft[] {
-  const passKind = resolveImportPassKind({
-    passKind: pass.passKind,
-    name: pass.playerName ?? passLabel(pass),
-    sportRaw: pass.sportRaw,
-    sport,
-  })
+  // Trust pass.passKind: Real entityType is authoritative; Meowbot already ran
+  // withResolvedPassKind. Re-running the name heuristic here misclassified initials
+  // names (e.g. "DJ Giddens") as team and applied 6× instead of 150×.
+  const passKind = pass.passKind ?? 'player'
   const parsed = parseRealAppToolsDailyRows(
     earnings.map((row) => ({
       day: row.claimDay,
