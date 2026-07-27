@@ -3,19 +3,19 @@ import { sportFromCatalog } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
 import { isUfcCatalogSport } from '../../lib/passKind'
 import {
-  analyzeCatalogBundleImpacts,
-  analyzeCatalogCandidate,
-  applyRecommendationBaseline,
-  estimateIconic1TotalRax,
+  analyzeCatalogBundleImpactsAtProfileRarities,
+  analyzeCatalogCandidateAtRarity,
+  analyzeOwnedCardUpgradeAtRarity,
+  applyCatalogProfilesAtOwnRarities,
+  estimateTotalRaxAtRarity,
   isAtLeastIconic1Rarity,
   isRecommendationPassOwnedAtIconic,
   profileAtSimulatedRarity,
   RECOMMENDATION_SIMULATED_RARITY,
   type OwnedIconicUpgradeImpactResult,
   type PassRecommendationRow,
-  type RecommendationPassAdjustment,
 } from './passRecommendation'
-import type { PlannedPass, RaxTrackerData } from '../types/rax'
+import type { PlayerCard, PlannedPass, RaxTrackerData } from '../types/rax'
 
 export type PlannedPassInput = Pick<
   PlannedPass,
@@ -36,6 +36,7 @@ export type PlannedPassCardAnalysis = {
   profile: CatalogImportProfile | null
   solo: PassRecommendationRow | null
   ownedAtIconic: boolean
+  ownedBelowIconic: boolean
   missingProfile: boolean
   missingRows: boolean
 }
@@ -89,13 +90,28 @@ export function plannedPassFromRecommendationRow(
   }
 }
 
-export function plannedPassToAdjustment(pass: PlannedPass): RecommendationPassAdjustment {
+export function plannedPassFromOwnedCard(
+  card: PlayerCard,
+  options?: {
+    simulatedRarityLabel?: string
+    totalBaseRax?: number
+    rowCount?: number
+  },
+): PlannedPassInput | null {
+  const externalKey = card.externalKey?.trim()
+  if (!externalKey) return null
   return {
-    externalKey: pass.externalKey,
-    name: pass.name,
-    sport: pass.sport,
-    season: pass.season,
-    mode: 'assume-iconic-1',
+    externalKey,
+    name: card.name,
+    sport: card.sport,
+    season: card.season,
+    passKind: card.passKind === 'team' ? 'team' : 'player',
+    simulatedRarityLabel:
+      options?.simulatedRarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
+    totalBaseRax: options?.totalBaseRax ?? 0,
+    rowCount: options?.rowCount ?? 0,
+    notes: '',
+    source: 'manual',
   }
 }
 
@@ -106,6 +122,16 @@ export function profileForPlannedPass(
   const profile = profilesByKey.get(pass.externalKey)
   if (!profile) return null
   return profileAtSimulatedRarity(profile, pass.simulatedRarityLabel)
+}
+
+function findOwnedBelowIconicCard(
+  data: RaxTrackerData,
+  externalKey: string,
+): PlayerCard | undefined {
+  return data.cards.find(
+    (card) =>
+      card.externalKey === externalKey && !isAtLeastIconic1Rarity(card.rarityLabel),
+  )
 }
 
 export function analyzePlanCollection(
@@ -125,12 +151,17 @@ export function analyzePlanCollection(
           (card) =>
             card.externalKey === pass.externalKey && isAtLeastIconic1Rarity(card.rarityLabel),
         )
+    const ownedCard = findOwnedBelowIconicCard(data, pass.externalKey)
+    const ownedBelowIconic = Boolean(ownedCard) && !ownedAtIconic
     const missingProfile = !profile
     const missingRows = !profile || profile.rows.length === 0
     let solo: PassRecommendationRow | null = null
 
     if (profile && profile.rows.length > 0 && !ownedAtIconic) {
-      solo = analyzeCatalogCandidate(data, profile)
+      const rarity = pass.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
+      solo = ownedCard
+        ? analyzeOwnedCardUpgradeAtRarity(data, ownedCard, profile, rarity)
+        : analyzeCatalogCandidateAtRarity(data, profile, rarity)
       if (solo) activeProfiles.push(profile)
     }
 
@@ -139,6 +170,7 @@ export function analyzePlanCollection(
       profile,
       solo,
       ownedAtIconic,
+      ownedBelowIconic,
       missingProfile,
       missingRows,
     })
@@ -151,16 +183,11 @@ export function analyzePlanCollection(
   let combinedGuaranteedNetDelta = 0
 
   if (activeProfiles.length > 0) {
-    const simulatedRarity =
-      activeProfiles[0]?.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY
-    bundle = analyzeCatalogBundleImpacts(data, activeProfiles, simulatedRarity)
+    bundle = analyzeCatalogBundleImpactsAtProfileRarities(data, activeProfiles)
     combinedNetDelta = bundle.combinedNetDelta
     combinedGuaranteedNetDelta = bundle.combinedGuaranteedNetDelta
 
-    const adjustments = plannedPasses
-      .filter((pass) => activeProfiles.some((profile) => profile.externalKey === pass.externalKey))
-      .map(plannedPassToAdjustment)
-    const withPlanData = applyRecommendationBaseline(data, profilesByKey, adjustments)
+    const withPlanData = applyCatalogProfilesAtOwnRarities(data, activeProfiles)
     const withPlanRollup = computeYearRollup(withPlanData)
     withPlanClaimable = withPlanRollup.totalClaimableRax
     withPlanGuaranteed = withPlanRollup.totalGuaranteedRax
@@ -179,12 +206,23 @@ export function analyzePlanCollection(
   }
 }
 
-export function plannedPassIconic1TotalRax(
+export function plannedPassSimulatedTotalRax(
   pass: PlannedPass,
   profile: CatalogImportProfile | null,
 ): number {
   if (profile && profile.rows.length > 0) {
-    return estimateIconic1TotalRax(profile)
+    return estimateTotalRaxAtRarity(
+      profile,
+      pass.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY,
+    )
   }
   return pass.totalBaseRax
+}
+
+/** @deprecated Prefer plannedPassSimulatedTotalRax — kept for callers that still expect Iconic 1 naming. */
+export function plannedPassIconic1TotalRax(
+  pass: PlannedPass,
+  profile: CatalogImportProfile | null,
+): number {
+  return plannedPassSimulatedTotalRax(pass, profile)
 }
