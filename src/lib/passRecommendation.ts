@@ -663,12 +663,11 @@ export function analyzeCatalogCandidate(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
 ): PassRecommendationRow | null {
-  const analysis = analyzeCatalogProfilePotential(data, profile)
-  if (!analysis) return null
-  return buildPassRecommendationRow(profileAsIconic1(profile), analysis)
+  // Same import / in-place upgrade path as Plan + Check-one collection deltas.
+  return analyzeCatalogImportAtRarity(data, profile, RECOMMENDATION_SIMULATED_RARITY)
 }
 
-/** Score a catalog pass at an explicit OTD rarity (Plan page / mixed-rarity what-ifs). */
+/** Score a catalog pass at an explicit OTD rarity via potential phantom-card analysis. */
 export function analyzeCatalogCandidateAtRarity(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
@@ -678,6 +677,43 @@ export function analyzeCatalogCandidateAtRarity(
   const analysis = analyzeCatalogProfilePotentialAtRarity(data, profile, rarity)
   if (!analysis) return null
   return buildPassRecommendationRow(profileAtSimulatedRarity(profile, rarity), analysis)
+}
+
+/**
+ * Score adding/upgrading a catalog profile at a rarity via the same import path the plan
+ * bundle uses (in-place upgrade when already owned). Prefer this for Plan page nets.
+ */
+export function analyzeCatalogImportAtRarity(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): PassRecommendationRow | null {
+  if (profile.rows.length === 0) return null
+  const rarity = rarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
+  const simulated = profileAtSimulatedRarity(profile, rarity)
+  const after = addProfileToDataAtRarity(data, profile, rarity)
+  const deltas = collectionNetDeltas(data, after)
+  const cardId = after.cards.find((card) => card.externalKey === simulated.externalKey)?.id
+  const totals = cardId ? cardClaimableTotals(after, cardId) : { claimable: 0, guaranteed: 0 }
+  const sport = sportFromCatalog(simulated.sport)
+  const passKind = recommendationPassKind(simulated)
+  return {
+    externalKey: simulated.externalKey,
+    name: simulated.name,
+    sport,
+    season: simulated.seasonLabel || String(simulated.seasonYear),
+    seasonYear: simulated.seasonYear,
+    rarityLabel: rarity,
+    passKind,
+    totalBaseRax: simulated.totalBaseRax,
+    iconic1TotalRax: estimateTotalRaxAtRarity(simulated, rarity),
+    rowCount: simulated.rows.length,
+    newClaimableRax: totals.claimable,
+    displacedRax: Math.max(0, totals.claimable - deltas.withPro),
+    overlapRax: 0,
+    netClaimableDelta: deltas.withPro,
+    netGuaranteedDelta: deltas.guaranteed,
+  }
 }
 
 /**
@@ -938,7 +974,8 @@ function withProBonusAnalysisData(data: RaxTrackerData): RaxTrackerData {
 }
 
 function collectionClaimableTotal(data: RaxTrackerData): number {
-  return computeYearRollup(data).totalClaimableRax
+  // Match collectionNetDeltas / ranking what-ifs: always score with Pro enabled.
+  return computeYearRollup(withProBonusAnalysisData(data)).totalClaimableRax
 }
 
 function collectionGuaranteedTotal(data: RaxTrackerData): number {

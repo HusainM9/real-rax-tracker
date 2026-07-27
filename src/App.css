@@ -2577,6 +2577,74 @@ button.calendar-day {
   font-size: 0.92rem;
 }
 
+.otd-claim-calendar {
+  width: min(720px, 100%);
+  padding: 1rem 1.1rem 1.1rem;
+}
+
+.otd-claim-calendar .otd-claim-calendar-header {
+  padding-right: 4.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.otd-date-range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1rem;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.otd-claim-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.otd-claim-calendar-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.otd-claim-month-list {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.otd-claim-month h4 {
+  margin: 0 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.otd-claim-month ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.otd-claim-month li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.3rem 0;
+  font-size: 0.92rem;
+}
+
+.otd-claim-month li:last-child {
+  border-bottom: none;
+}
+
 .link-button {
   background: none;
   border: none;

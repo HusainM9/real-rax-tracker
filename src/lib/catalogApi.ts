@@ -22,6 +22,8 @@ export type CatalogSearchResult = {
   rowCount: number
   totalBaseRax: number
   latestClaimDay?: string
+  /** Sum of base RAX in an active startDate–endDate browse window. */
+  rangeBaseRax?: number
 }
 
 export type CatalogImportProfile = CatalogSearchResult & {
@@ -303,5 +305,63 @@ export async function fetchCatalogSeasonYears(
   return {
     seasonYears: [...byYear.values()].sort((a, b) => b.seasonYear - a.seasonYear),
     storageConfigured: batches.every((batch) => batch.storageConfigured !== false),
+  }
+}
+
+export type BrowseOtdPassesOptions = {
+  query?: string
+  sports?: string[]
+  seasonYears?: number[]
+  passKind?: CatalogPassKind | 'all'
+  monthDay?: string
+  otdMonth?: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  offset?: number
+}
+
+export async function browseOtdPasses(
+  options: BrowseOtdPassesOptions,
+  signal?: AbortSignal,
+): Promise<{
+  results: CatalogSearchResult[]
+  total: number
+  storageConfigured: boolean
+}> {
+  const params = new URLSearchParams()
+  if (options.query?.trim()) params.set('q', options.query.trim())
+  if (options.sports && options.sports.length > 0) {
+    params.set('sports', options.sports.join(','))
+  }
+  if (options.seasonYears && options.seasonYears.length > 0) {
+    params.set('seasonYears', options.seasonYears.join(','))
+  }
+  if (options.passKind && options.passKind !== 'all') {
+    params.set('passKind', options.passKind)
+  }
+  if (options.monthDay?.trim()) params.set('monthDay', options.monthDay.trim())
+  if (options.otdMonth?.trim()) params.set('otdMonth', options.otdMonth.trim())
+  if (options.startDate?.trim()) params.set('startDate', options.startDate.trim())
+  if (options.endDate?.trim()) params.set('endDate', options.endDate.trim())
+  if (options.limit !== undefined) params.set('limit', String(options.limit))
+  if (options.offset !== undefined) params.set('offset', String(options.offset))
+
+  const response = await fetch(`/api/catalog/otd-browse?${params}`, { signal })
+  const data = await readResponseJson<{
+    results?: CatalogSearchResult[]
+    total?: number
+    storageConfigured?: boolean
+    error?: string
+  }>(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || `Catalog OTD browse failed (${response.status}).`)
+  }
+
+  return {
+    results: Array.isArray(data.results) ? data.results : [],
+    total: Number.isFinite(data.total) ? Number(data.total) : 0,
+    storageConfigured: data.storageConfigured !== false,
   }
 }

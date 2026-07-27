@@ -10,6 +10,7 @@ const links = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/entry', label: 'Entry' },
   { to: '/calendar', label: 'Calendar' },
+  { to: '/otd', label: 'OTD' },
   { to: '/overlaps', label: 'Overlaps' },
   { to: '/potential', label: 'Potential' },
   { to: '/plan', label: 'Plan' },
