@@ -265,8 +265,24 @@ export function shopCrawlChunkTimeoutMessage(
   return (
     `Chunk ${chunk} timed out after ${timeoutSec}s with no response. ` +
     `The platform may have killed a long request, or Real is slow. ` +
-    `Lower max pages per chunk or retry. Resume jobIndex=${jobIndex}, before=${before}.`
+    `Lower Delay ms (try 250–400), keep max pages at 1, then retry. Resume jobIndex=${jobIndex}, before=${before}.`
   )
+}
+
+/** Turn Vercel platform / non-JSON bodies into an actionable Admin error. */
+export function formatShopCrawlHttpFailure(status: number, bodySnippet: string): string {
+  const snippet = bodySnippet.trim().replace(/\s+/g, ' ').slice(0, 200)
+  if (/FUNCTION_INVOCATION_FAILED|FUNCTION_INVOCATION_TIMEOUT/i.test(snippet)) {
+    return (
+      `Shop earnings crawl failed (${status}): Vercel killed the function before it returned JSON. ` +
+      `Usually a timeout — lower Delay ms (try 250–400), keep max pages/chunk at 1, and confirm REAL_IMPORT_ENABLED + REAL_AUTH_* + SUPABASE_* are set on Vercel (then redeploy). ` +
+      `(${snippet.slice(0, 80)}…)`
+    )
+  }
+  if (!snippet) {
+    return `Shop earnings crawl failed (${status}).`
+  }
+  return `Shop earnings crawl failed (${status}): ${snippet}`
 }
 
 export type LinkedAbort = {

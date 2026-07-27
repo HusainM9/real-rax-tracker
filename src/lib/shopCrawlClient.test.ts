@@ -9,6 +9,7 @@ import {
   advanceShopCrawlBeforeByPages,
   clearShopCrawlResumeCursor,
   estimateShopCrawlChunkTimeoutMs,
+  formatShopCrawlHttpFailure,
   formatShopCrawlResumeCursor,
   linkAbortTimeout,
   loadShopCrawlResumeCursor,
@@ -45,6 +46,16 @@ describe('shop crawl client helpers', () => {
     expect(shopCrawlWaitingMessage(1, 12_400)).toContain('12s elapsed')
     expect(shopCrawlChunkTimeoutMessage(1, 55_000, 0, 0)).toContain('timed out after 55s')
     expect(shopCrawlChunkTimeoutMessage(1, 55_000, 2, 40)).toContain('jobIndex=2, before=40')
+  })
+
+  it('explains Vercel FUNCTION_INVOCATION_FAILED platform bodies', () => {
+    const message = formatShopCrawlHttpFailure(
+      500,
+      'A server error has occurred FUNCTION_INVOCATION_FAILED lhr1::qpz6m-1785186113165-7df9a4e0a9a5',
+    )
+    expect(message).toContain('Vercel killed the function')
+    expect(message).toContain('Delay ms')
+    expect(message).toContain('REAL_IMPORT_ENABLED')
   })
 
   it('linkAbortTimeout aborts on timeout without parent abort', async () => {

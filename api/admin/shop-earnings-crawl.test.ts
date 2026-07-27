@@ -174,7 +174,7 @@ describe('POST /api/admin/shop-earnings-crawl', () => {
       dailyRowsUpserted: 2,
       done: true,
       nextBefore: 0,
-      earningsConcurrency: 1,
+      earningsConcurrency: 2,
     })
     expect(Array.isArray(body.log)).toBe(true)
     expect(body.log?.some((event) => event.type === 'page_fetched')).toBe(true)

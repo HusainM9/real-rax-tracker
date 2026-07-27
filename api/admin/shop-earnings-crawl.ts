@@ -10,6 +10,7 @@ import {
   MAX_SHOP_CRAWL_MAX_PAGES,
   buildShopCrawlJobs,
   crawlShopEarningsTotalChunk,
+  resolveShopCrawlBudgetMs,
   resolveShopCrawlDelayMs,
   resolveShopCrawlEarningsConcurrency,
   resolveShopCrawlMaxPages,
@@ -19,10 +20,14 @@ import {
 import { meowbotCatalogConfigured } from '../../lib/meowbotCatalogStore'
 import { requireAdminSession } from './_helpers'
 
-/** Node runtime + long maxDuration: one chunk can still take minutes if maxPages is raised. */
+/**
+ * Edge (not Node): Hobby Edge allows ~30s vs Hobby Node ~10s. hashids / fetch already work on
+ * Edge via other Real import routes. Soft budget in the crawl returns JSON before the platform
+ * hard-kills the invocation (FUNCTION_INVOCATION_FAILED).
+ */
 export const config = {
-  runtime: 'nodejs',
-  maxDuration: 300,
+  runtime: 'edge',
+  maxDuration: 60,
 }
 
 type RequestBody = {
@@ -36,6 +41,7 @@ type RequestBody = {
   maxBefore?: unknown
   delayMs?: unknown
   earningsConcurrency?: unknown
+  budgetMs?: unknown
 }
 
 function parseSeasons(input: unknown): number[] {
@@ -107,13 +113,18 @@ function errorResponse(error: unknown): Response {
     )
   }
   const message = error instanceof Error ? error.message : 'Shop earnings crawl failed.'
+  const lower = message.toLowerCase()
+  const missingSupabase =
+    lower.includes('supabase') && (lower.includes('not configured') || lower.includes('is not configured'))
+  const status = missingSupabase ? 503 : 502
+  const code = missingSupabase ? 'supabase_not_configured' : 'shop_crawl_failed'
   return Response.json(
-    { error: message, log: [{ type: 'client_error', message }] },
-    { status: 500 },
+    { error: message, code, log: [{ type: 'client_error', message }] },
+    { status },
   )
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handleShopEarningsCrawl(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
@@ -124,8 +135,16 @@ export default async function handler(request: Request): Promise<Response> {
   if (!meowbotCatalogConfigured()) {
     return Response.json(
       {
-        error: 'Supabase catalog is not configured.',
-        log: [{ type: 'client_error', message: 'Supabase catalog is not configured.' }],
+        error:
+          'Supabase catalog is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on Vercel, then redeploy.',
+        code: 'supabase_not_configured',
+        log: [
+          {
+            type: 'client_error',
+            message:
+              'Supabase catalog is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on Vercel, then redeploy.',
+          },
+        ],
       },
       { status: 503 },
     )
@@ -133,16 +152,16 @@ export default async function handler(request: Request): Promise<Response> {
 
   const realConfig = resolveRealApiConfig()
   if (!realConfig) {
-    console.warn('shop-earnings-crawl: Real import not configured', realImportConfigStatus())
+    const status = realImportConfigStatus()
+    console.warn('shop-earnings-crawl: Real import not configured', status)
+    const message =
+      'Real import is not configured in this environment. On Vercel set REAL_IMPORT_ENABLED=true plus REAL_AUTH_INFO, REAL_SESSION_TOKEN, and REAL_DEVICE_UUID, then redeploy.'
     return Response.json(
       {
-        error: 'Real import is not configured in this environment.',
-        log: [
-          {
-            type: 'client_error',
-            message: 'Real import is not configured in this environment.',
-          },
-        ],
+        error: message,
+        code: 'real_import_not_configured',
+        configStatus: status,
+        log: [{ type: 'client_error', message }],
       },
       { status: 503 },
     )
@@ -152,7 +171,7 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     body = (await request.json()) as RequestBody
   } catch {
-    return Response.json({ error: 'Invalid request body' }, { status: 400 })
+    return Response.json({ error: 'Invalid request body', code: 'invalid_body' }, { status: 400 })
   }
 
   const seasons = parseSeasons(body.seasons)
@@ -160,6 +179,7 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json(
       {
         error: 'Enter at least one season year.',
+        code: 'missing_seasons',
         log: [{ type: 'client_error', message: 'Enter at least one season year.' }],
       },
       { status: 400 },
@@ -169,6 +189,7 @@ export default async function handler(request: Request): Promise<Response> {
   const defaultMaxPages = resolveShopCrawlMaxPages()
   const defaultDelayMs = resolveShopCrawlDelayMs()
   const defaultEarningsConcurrency = resolveShopCrawlEarningsConcurrency()
+  const defaultBudgetMs = resolveShopCrawlBudgetMs()
   const maxPages = Math.min(
     MAX_SHOP_CRAWL_MAX_PAGES,
     Math.max(1, Math.floor(numberOrUndefined(body.maxPages) ?? defaultMaxPages)),
@@ -180,6 +201,10 @@ export default async function handler(request: Request): Promise<Response> {
       1,
       Math.floor(numberOrUndefined(body.earningsConcurrency) ?? defaultEarningsConcurrency),
     ),
+  )
+  const budgetMs = Math.max(
+    5_000,
+    Math.floor(numberOrUndefined(body.budgetMs) ?? defaultBudgetMs),
   )
 
   const input: ShopCrawlChunkInput = {
@@ -193,6 +218,7 @@ export default async function handler(request: Request): Promise<Response> {
     maxBefore: numberOrUndefined(body.maxBefore),
     delayMs,
     earningsConcurrency,
+    budgetMs,
   }
 
   // Reject empty job lists before hitting Real (clear error for Admin activity log).
@@ -203,6 +229,7 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json(
       {
         error: message,
+        code: 'no_crawl_jobs',
         log: [{ type: 'client_error', message }],
       },
       { status: 400 },
@@ -211,22 +238,28 @@ export default async function handler(request: Request): Promise<Response> {
 
   const context: RealApiContext = { config: realConfig, signal: request.signal }
 
+  const result = await crawlShopEarningsTotalChunk(input, {
+    fetchPage: (query) => getShopEarningsTotal(query, context),
+    fetchEarnings: (query) => getPassEarnings(query, context),
+    signal: request.signal,
+  })
+  return Response.json({
+    ok: true,
+    ...result,
+    // Structured activity lines for the Admin crawl log panel (client appends per chunk).
+    log: result.log ?? [],
+    maxPages,
+    delayMs,
+    earningsConcurrency,
+    budgetMs,
+  })
+}
+
+export default async function handler(request: Request): Promise<Response> {
   try {
-    const result = await crawlShopEarningsTotalChunk(input, {
-      fetchPage: (query) => getShopEarningsTotal(query, context),
-      fetchEarnings: (query) => getPassEarnings(query, context),
-      signal: request.signal,
-    })
-    return Response.json({
-      ok: true,
-      ...result,
-      // Structured activity lines for the Admin crawl log panel (client appends per chunk).
-      log: result.log ?? [],
-      maxPages,
-      delayMs,
-      earningsConcurrency,
-    })
+    return await handleShopEarningsCrawl(request)
   } catch (error) {
+    console.error('shop-earnings-crawl failed', error)
     return errorResponse(error)
   }
 }

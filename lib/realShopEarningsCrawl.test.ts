@@ -21,6 +21,14 @@ describe('shop crawl defaults', () => {
     expect(MAX_SHOP_CRAWL_MAX_PAGES).toBe(5)
     expect(resolveShopCrawlMaxPages({})).toBe(1)
   })
+
+  it('uses Vercel-safe delay and concurrency defaults', async () => {
+    const { DEFAULT_SHOP_CRAWL_DELAY_MS, DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY, DEFAULT_SHOP_CRAWL_BUDGET_MS } =
+      await import('./realShopEarningsCrawl')
+    expect(DEFAULT_SHOP_CRAWL_DELAY_MS).toBe(300)
+    expect(DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY).toBe(2)
+    expect(DEFAULT_SHOP_CRAWL_BUDGET_MS).toBe(22_000)
+  })
 })
 
 const job: ShopCrawlJob = { realSport: 'ncaam', season: 2026, entityType: 'player' }
@@ -496,5 +504,58 @@ describe('buildShopCrawlJobs', () => {
       { realSport: 'nba', season: 2025, entityType: 'player' },
       { realSport: 'nba', season: 2025, entityType: 'team' },
     ])
+  })
+})
+
+describe('crawlShopEarningsTotalChunk budget', () => {
+  it('returns early with upserts when the wall-clock budget is exhausted mid-page', async () => {
+    let clock = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    const items = Array.from({ length: 8 }, (_, index) => ({
+      id: index + 1,
+      value: String(10 + index),
+      label: `P${index + 1}`,
+      entityType: 'player',
+      sport: 'nba',
+    }))
+    const fetchPage = vi.fn(async (): Promise<RealShopEarningsTotalPage> => ({ items }))
+    const fetchEarnings = vi.fn(async () => {
+      clock += 3_000
+      return {
+        rows: [{ day: '2025-01-10', earnings: 5 }],
+        info: { total: 5 },
+      } satisfies RealPassEarnings
+    })
+    const savePasses = vi.fn(async (passes: unknown[]) => passes.length)
+    const saveDailyEarnings = vi.fn(async (rows: unknown[]) => rows.length)
+
+    const result = await crawlShopEarningsTotalChunk(
+      {
+        sports: ['nba'],
+        seasons: [2025],
+        entityTypes: ['player'],
+        maxPages: 1,
+        delayMs: 0,
+        earningsConcurrency: 1,
+        budgetMs: 8_000,
+      },
+      {
+        fetchPage,
+        fetchEarnings,
+        savePasses,
+        saveDailyEarnings,
+        sleep: async () => undefined,
+        now: () => '2026-01-01T00:00:00.000Z',
+      },
+    )
+
+    // Soft budget should stop before finishing all 8 entities, but still upsert what ran.
+    expect(result.done).toBe(false)
+    expect(result.nextBefore).toBe(0)
+    expect(result.earningsFetched).toBeGreaterThan(0)
+    expect(result.earningsFetched).toBeLessThan(8)
+    expect(result.upserted).toBeGreaterThan(0)
+    expect(savePasses).toHaveBeenCalled()
+    expect(result.log.some((event) => /budget/i.test(event.message))).toBe(true)
   })
 })
