@@ -4,8 +4,7 @@ import { computeYearRollup } from './claimOptimizer'
 import { isUfcCatalogSport } from '../../lib/passKind'
 import {
   analyzeCatalogBundleImpactsAtProfileRarities,
-  analyzeCatalogCandidateAtRarity,
-  analyzeOwnedCardUpgradeAtRarity,
+  analyzeCatalogImportAtRarity,
   applyCatalogProfilesAtOwnRarities,
   estimateTotalRaxAtRarity,
   isAtLeastIconic1Rarity,
@@ -139,19 +138,24 @@ export function analyzePlanCollection(
   plannedPasses: PlannedPass[],
   profilesByKey: Map<string, CatalogImportProfile>,
 ): PlanCollectionAnalysis {
-  const currentRollup = computeYearRollup(data)
+  // Plan nets always assume Pro (same as Potential ranking / bundle what-ifs).
+  const analysisData: RaxTrackerData = {
+    ...data,
+    settings: { ...data.settings, proBonusEnabled: true },
+  }
+  const currentRollup = computeYearRollup(analysisData)
   const passes: PlannedPassCardAnalysis[] = []
   const activeProfiles: CatalogImportProfile[] = []
 
   for (const pass of plannedPasses) {
     const profile = profileForPlannedPass(pass, profilesByKey)
     const ownedAtIconic = profile
-      ? isRecommendationPassOwnedAtIconic(data, profile)
-      : data.cards.some(
+      ? isRecommendationPassOwnedAtIconic(analysisData, profile)
+      : analysisData.cards.some(
           (card) =>
             card.externalKey === pass.externalKey && isAtLeastIconic1Rarity(card.rarityLabel),
         )
-    const ownedCard = findOwnedBelowIconicCard(data, pass.externalKey)
+    const ownedCard = findOwnedBelowIconicCard(analysisData, pass.externalKey)
     const ownedBelowIconic = Boolean(ownedCard) && !ownedAtIconic
     const missingProfile = !profile
     const missingRows = !profile || profile.rows.length === 0
@@ -159,9 +163,8 @@ export function analyzePlanCollection(
 
     if (profile && profile.rows.length > 0 && !ownedAtIconic) {
       const rarity = pass.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
-      solo = ownedCard
-        ? analyzeOwnedCardUpgradeAtRarity(data, ownedCard, profile, rarity)
-        : analyzeCatalogCandidateAtRarity(data, profile, rarity)
+      // Same import/upgrade-in-place path as the plan bundle (not Potential phantom-card scoring).
+      solo = analyzeCatalogImportAtRarity(analysisData, profile, rarity)
       if (solo) activeProfiles.push(profile)
     }
 
@@ -183,14 +186,44 @@ export function analyzePlanCollection(
   let combinedGuaranteedNetDelta = 0
 
   if (activeProfiles.length > 0) {
-    bundle = analyzeCatalogBundleImpactsAtProfileRarities(data, activeProfiles)
-    combinedNetDelta = bundle.combinedNetDelta
-    combinedGuaranteedNetDelta = bundle.combinedGuaranteedNetDelta
-
-    const withPlanData = applyCatalogProfilesAtOwnRarities(data, activeProfiles)
+    const greedyBundle = analyzeCatalogBundleImpactsAtProfileRarities(analysisData, activeProfiles)
+    const withPlanData = applyCatalogProfilesAtOwnRarities(analysisData, activeProfiles)
     const withPlanRollup = computeYearRollup(withPlanData)
     withPlanClaimable = withPlanRollup.totalClaimableRax
     withPlanGuaranteed = withPlanRollup.totalGuaranteedRax
+    combinedNetDelta = withPlanClaimable - currentRollup.totalClaimableRax
+    combinedGuaranteedNetDelta = withPlanGuaranteed - currentRollup.totalGuaranteedRax
+
+    // Per-pass plan net = leave-one-out contribution (not greedy add order).
+    // leaveOneOut(P) = net(all) − net(all without P) — matches Check one / Rank vs the rest of the plan.
+    const leaveOneOutByKey = new Map<string, number>()
+    for (const profile of activeProfiles) {
+      const others = activeProfiles.filter((item) => item.externalKey !== profile.externalKey)
+      const withoutProfile =
+        others.length > 0
+          ? applyCatalogProfilesAtOwnRarities(analysisData, others)
+          : analysisData
+      const withoutClaimable = computeYearRollup(withoutProfile).totalClaimableRax
+      const withoutNet = withoutClaimable - currentRollup.totalClaimableRax
+      leaveOneOutByKey.set(profile.externalKey, combinedNetDelta - withoutNet)
+    }
+
+    bundle = {
+      ...greedyBundle,
+      combinedNetDelta,
+      combinedGuaranteedNetDelta,
+      rows: greedyBundle.rows.map((row) => {
+        const externalKey = row.key.startsWith('catalog:')
+          ? row.key.slice('catalog:'.length)
+          : row.key.startsWith('owned:')
+            ? row.key.slice('owned:'.length)
+            : row.key
+        return {
+          ...row,
+          marginalNetDelta: leaveOneOutByKey.get(externalKey) ?? row.marginalNetDelta,
+        }
+      }),
+    }
   }
 
   return {

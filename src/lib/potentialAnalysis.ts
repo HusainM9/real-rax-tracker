@@ -1,6 +1,6 @@
 import { CALENDAR_MONTH_NAMES } from './calendarView'
 import { monthIndexFromClaimDay } from './claimDayKey'
-import { computeClaimDayResults } from './claimOptimizer'
+import { computeClaimDayResults, computeYearRollup } from './claimOptimizer'
 import type { ParsedRealAppToolsRow } from './realAppToolsImport'
 import type {
   ClaimCandidate,
@@ -87,6 +87,13 @@ export type PotentialAnalysisResult = {
   monthlyNet: PotentialMonthlyNet[]
   /** Per OTD day sport ladder — same rules as the Calendar page. */
   claimDayBreakdowns: PotentialClaimDayBreakdown[]
+  /**
+   * True collection claimable delta (with Pro): after − before year rollup.
+   * Prefer this over claimableRax − displacedRax when Pro reshuffles other cards.
+   */
+  collectionNetDelta: number
+  /** True guaranteed-only collection delta (with Pro enabled on both sides). */
+  collectionGuaranteedNetDelta: number
 }
 
 function withProBonusEnabled(data: RaxTrackerData): RaxTrackerData {
@@ -97,11 +104,11 @@ function withProBonusEnabled(data: RaxTrackerData): RaxTrackerData {
 }
 
 export function netGuaranteedDelta(result: PotentialAnalysisResult): number {
-  return result.guaranteedRax - result.displacedGuaranteedRax
+  return result.collectionGuaranteedNetDelta
 }
 
 export function netWithProDelta(result: PotentialAnalysisResult): number {
-  return result.claimableRax - result.displacedRax
+  return result.collectionNetDelta
 }
 
 export type PotentialClaimLadderEntry = {
@@ -500,6 +507,11 @@ export function analyzePotentialCard(
     displacedExisting,
   )
 
+  const beforeClaimable = computeYearRollup(analysisData).totalClaimableRax
+  const afterClaimable = computeYearRollup(potentialData).totalClaimableRax
+  const beforeGuaranteed = computeYearRollup(analysisData).totalGuaranteedRax
+  const afterGuaranteed = computeYearRollup(potentialData).totalGuaranteedRax
+
   return {
     candidates: potentialCandidates,
     claimableRax: potentialCandidates
@@ -524,5 +536,7 @@ export function analyzePotentialCard(
     displacedByCardGuaranteed: summarizeDisplacedByCard(displacedGuaranteedExisting),
     monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting),
     claimDayBreakdowns,
+    collectionNetDelta: afterClaimable - beforeClaimable,
+    collectionGuaranteedNetDelta: afterGuaranteed - beforeGuaranteed,
   }
 }

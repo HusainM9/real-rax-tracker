@@ -8,6 +8,8 @@ import {
 import {
   analyzeCatalogBundleImpacts,
   analyzeCatalogBundleImpactsAtProfileRarities,
+  analyzeCatalogImportAtRarity,
+  applyCatalogProfilesAtOwnRarities,
   profileAtSimulatedRarity,
   RECOMMENDATION_SIMULATED_RARITY,
 } from './passRecommendation'
@@ -200,6 +202,78 @@ describe('plannedPasses', () => {
     expect(
       plannedPassSimulatedTotalRax(passes[0]!, profileAtSimulatedRarity(profile, RECOMMENDATION_SIMULATED_RARITY)),
     ).toBeGreaterThan(0)
+  })
+
+  it('plan net gain: leave-one-out matches Rank/Check one against the rest of the plan', () => {
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('c-other', 'Other', '99|2025|NBA', 'Legendary 1')],
+      performances: [perf('p-other', 'c-other', 50, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+
+    // Four NBA earners on one day → contested slots even with Pro (top 2 + 1 Pro).
+    const passA = catalogProfile('1|2025|NBA', 'Pass A', [
+      { claimDay: '2026-03-01', baseRaxEarned: 3 },
+    ])
+    const passB = catalogProfile('2|2025|NBA', 'Pass B', [
+      { claimDay: '2026-03-01', baseRaxEarned: 2.5 },
+    ])
+    const passC = catalogProfile('3|2025|NBA', 'Pass C', [
+      { claimDay: '2026-03-01', baseRaxEarned: 2 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-1',
+        externalKey: '1|2025|NBA',
+        name: 'Pass A',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+      plannedPass({
+        id: 'plan-2',
+        externalKey: '2|2025|NBA',
+        name: 'Pass B',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+      plannedPass({
+        id: 'plan-3',
+        externalKey: '3|2025|NBA',
+        name: 'Pass C',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+    ]
+
+    const profilesByKey = new Map([
+      [passA.externalKey, passA],
+      [passB.externalKey, passB],
+      [passC.externalKey, passC],
+    ])
+
+    const analysis = analyzePlanCollection(data, passes, profilesByKey)
+    expect(analysis.bundle).not.toBeNull()
+    expect(analysis.withPlanClaimable - analysis.currentClaimable).toBe(analysis.combinedNetDelta)
+
+    // Leave-one-out for Pass C === scoring C alone against collection + A + B.
+    const withAb = applyCatalogProfilesAtOwnRarities(
+      {
+        ...data,
+        settings: { ...data.settings, proBonusEnabled: true },
+      },
+      [
+        profileAtSimulatedRarity(passA, RECOMMENDATION_SIMULATED_RARITY),
+        profileAtSimulatedRarity(passB, RECOMMENDATION_SIMULATED_RARITY),
+      ],
+    )
+    const soloVsRest = analyzeCatalogImportAtRarity(
+      withAb,
+      passC,
+      RECOMMENDATION_SIMULATED_RARITY,
+    )
+    const planRowC = analysis.bundle!.rows.find((row) => row.key.includes('3|2025|NBA'))
+    expect(planRowC?.marginalNetDelta).toBe(soloVsRest?.netClaimableDelta)
   })
 
   it('skips owned Iconic 1+ passes from the active bundle', () => {

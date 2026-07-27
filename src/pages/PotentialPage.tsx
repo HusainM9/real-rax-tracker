@@ -497,8 +497,8 @@ function PotentialAnalysisResults({
   return (
     <>
       <p className="import-hint">
-        Net gain from top 2 per sport plus any Pro bonus slots this pass would earn. Pro bonus is
-        always simulated here.
+        Net gain is the change in collection claimable RAX (top 2 per sport + Pro), always simulated
+        with Pro on.
         {previewAs ? (
           <>
             {' '}
@@ -554,7 +554,7 @@ function PotentialAnalysisResults({
           <strong className={signedRaxClass(netCollectionDelta)}>
             {formatSignedRax(displayRaxValue(netCollectionDelta))}
           </strong>
-          <small className="table-sub">New claimable − displaced</small>
+          <small className="table-sub">Collection claimable change (with Pro)</small>
         </article>
       </div>
 
@@ -833,6 +833,8 @@ export default function PotentialPage() {
   const [potentialBundleRarity, setPotentialBundleRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [catalogRankOpen, setCatalogRankOpen] = useState(false)
   const [checkOnePassOpen, setCheckOnePassOpen] = useState(false)
+  /** Catalog externalKey for the pass loaded into Check one pass (needed for baseline add). */
+  const [checkOneExternalKey, setCheckOneExternalKey] = useState<string | null>(null)
   const [monthBoostOpen, setMonthBoostOpen] = useState(false)
   const [monthBoostSport, setMonthBoostSport] = useState<RankSportChoice>('FC')
   const [monthBoostExcludedSports, setMonthBoostExcludedSports] = useState<Sport[]>([])
@@ -1088,7 +1090,43 @@ export default function PotentialPage() {
     setForm(EMPTY_FORM)
     setPotentialRows([])
     setEditingId(null)
+    setCheckOneExternalKey(null)
     setStatus('')
+  }
+
+  const checkOneBaselinePass = useMemo(() => {
+    if (!checkOneExternalKey || !form.name.trim()) return null
+    return {
+      externalKey: checkOneExternalKey,
+      name: form.name.trim(),
+      sport: form.sport,
+      seasonLabel: form.season,
+      seasonYear: Number.parseInt(form.season, 10) || 0,
+    }
+  }, [checkOneExternalKey, form.name, form.season, form.sport])
+
+  const checkOneAlreadyInBaseline = Boolean(
+    checkOneBaselinePass &&
+      isPassInRecommendationAdjustments(checkOneBaselinePass, rankAdjustments),
+  )
+
+  const addCheckOnePassToBaseline = (
+    mode: RecommendationPassAdjustmentMode = 'assume-iconic-1',
+  ) => {
+    if (!checkOneBaselinePass) {
+      setStatus('Load a catalog pass first to add it to baseline adjustments.')
+      return
+    }
+    if (isPassInRecommendationAdjustments(checkOneBaselinePass, rankAdjustments)) {
+      setStatus(`${checkOneBaselinePass.name} is already in the baseline list.`)
+      return
+    }
+    addRankAdjustment(checkOneBaselinePass, mode)
+    setStatus(
+      mode === 'assume-iconic-1'
+        ? `Added ${checkOneBaselinePass.name} to baseline — assume ${RECOMMENDATION_SIMULATED_RARITY}.`
+        : `Added ${checkOneBaselinePass.name} to baseline — exclude from ranking.`,
+    )
   }
 
   const togglePotentialBundle = (result: CatalogSearchResult) => {
@@ -1207,6 +1245,7 @@ export default function PotentialPage() {
         setStatus('That pass was not found in the shared catalog. Try searching again.')
         return
       }
+      setCheckOneExternalKey(profile.externalKey)
       applyCatalogProfileToForm(
         profile,
         {
@@ -1231,6 +1270,7 @@ export default function PotentialPage() {
       return
     }
     const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
+    setCheckOneExternalKey(profile.externalKey)
     applyCatalogProfileToForm(
       profile,
       {
@@ -3026,6 +3066,42 @@ export default function PotentialPage() {
               ))}
             </select>
           </label>
+          {checkOneBaselinePass ? (
+            <span className="button-row compact-actions">
+              <button
+                className="button"
+                type="button"
+                disabled={checkOneAlreadyInBaseline}
+                title={
+                  checkOneAlreadyInBaseline
+                    ? 'Already in ranking baseline'
+                    : `Assume ${RECOMMENDATION_SIMULATED_RARITY} for ranking and what-if`
+                }
+                onClick={() => addCheckOnePassToBaseline('assume-iconic-1')}
+              >
+                {checkOneAlreadyInBaseline
+                  ? 'In baseline'
+                  : `Assume ${RECOMMENDATION_SIMULATED_RARITY}`}
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={checkOneAlreadyInBaseline}
+                title={
+                  checkOneAlreadyInBaseline
+                    ? 'Already in ranking baseline'
+                    : 'Exclude from Rank catalog without adding to baseline collection'
+                }
+                onClick={() => addCheckOnePassToBaseline('exclude')}
+              >
+                Exclude from ranking
+              </button>
+            </span>
+          ) : (
+            <p className="import-hint">
+              Load a catalog pass to add it as a baseline adjustment.
+            </p>
+          )}
         </div>
         <CatalogSearchPanel
           embedded
@@ -3201,6 +3277,31 @@ export default function PotentialPage() {
         {potentialAnalysis ? (
           <div className="potential-analysis-inline">
             <h3 className="mini-heading potential-section-divider">Analysis result</h3>
+            {checkOneBaselinePass ? (
+              <div className="button-row wrap-row potential-baseline-from-check">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={checkOneAlreadyInBaseline}
+                  onClick={() => addCheckOnePassToBaseline('assume-iconic-1')}
+                >
+                  {checkOneAlreadyInBaseline
+                    ? `Already in baseline`
+                    : `Add to baseline as ${RECOMMENDATION_SIMULATED_RARITY}`}
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={checkOneAlreadyInBaseline}
+                  onClick={() => addCheckOnePassToBaseline('exclude')}
+                >
+                  Exclude from ranking
+                </button>
+                <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
+                  View baseline
+                </button>
+              </div>
+            ) : null}
             <PotentialAnalysisResults
               analysis={potentialAnalysis}
               previewAs={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}

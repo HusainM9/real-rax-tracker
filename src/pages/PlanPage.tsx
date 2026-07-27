@@ -6,12 +6,10 @@ import { useRaxData } from '../context/RaxDataContext'
 import type { CatalogImportProfile } from '../lib/catalogApi'
 import { fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
 import { displayRaxValue } from '../lib/displayRax'
-import { formatRax } from '../lib/format'
 import { isPlayerPass } from '../lib/passKind'
 import {
   analyzePlanCollection,
   plannedPassFromOwnedCard,
-  plannedPassSimulatedTotalRax,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
 import {
@@ -48,15 +46,15 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
 
 function PlanPassCard({
   entry,
-  marginalNet,
+  planNetGain,
   onRemove,
 }: {
   entry: PlannedPassCardAnalysis
-  marginalNet: number | null
+  planNetGain: number | null
   onRemove: () => void
 }) {
-  const { pass, solo, ownedAtIconic, ownedBelowIconic, missingProfile, missingRows } = entry
-  const simulatedTotal = plannedPassSimulatedTotalRax(pass, entry.profile)
+  const { pass, ownedAtIconic, ownedBelowIconic, missingProfile, missingRows } = entry
+  const net = planNetGain
 
   return (
     <article className="plan-pass-card panel">
@@ -80,52 +78,14 @@ function PlanPassCard({
         <p className="import-hint plan-pass-status warning">Catalog profile not loaded yet</p>
       ) : missingRows ? (
         <p className="import-hint plan-pass-status warning">No catalog earnings rows for this pass</p>
-      ) : solo ? (
+      ) : net != null ? (
         <div className="plan-pass-metrics">
           <div className="plan-pass-metric highlight">
-            <span>Solo net gain</span>
-            <strong className={signedRaxClass(solo.netClaimableDelta)}>
-              {formatSignedRax(displayRaxValue(solo.netClaimableDelta))}
+            <span>Plan net gain</span>
+            <strong className={signedRaxClass(net)}>
+              {formatSignedRax(displayRaxValue(net))}
             </strong>
-            <small>
-              {formatSignedRax(displayRaxValue(solo.netGuaranteedDelta))} guaranteed
-            </small>
-          </div>
-          {marginalNet != null ? (
-            <div className="plan-pass-metric">
-              <span>In full plan</span>
-              <strong className={signedRaxClass(marginalNet)}>
-                {formatSignedRax(displayRaxValue(marginalNet))}
-              </strong>
-              <small>marginal after overlap</small>
-            </div>
-          ) : null}
-          <div className="plan-pass-metric">
-            <span>Claimable</span>
-            <strong>{formatRax(displayRaxValue(solo.newClaimableRax))}</strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Displaced</span>
-            <strong>
-              {solo.displacedRax > 0
-                ? `−${formatRax(displayRaxValue(solo.displacedRax))}`
-                : '—'}
-            </strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Overlap</span>
-            <strong>
-              {solo.overlapRax > 0 ? formatRax(displayRaxValue(solo.overlapRax)) : '—'}
-            </strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Base RAX</span>
-            <strong>{formatRax(displayRaxValue(pass.totalBaseRax))}</strong>
-            <small>{pass.rowCount} row{pass.rowCount === 1 ? '' : 's'}</small>
-          </div>
-          <div className="plan-pass-metric">
-            <span>{pass.simulatedRarityLabel} total</span>
-            <strong>{formatRax(displayRaxValue(simulatedTotal))}</strong>
+            <small>contribution vs rest of plan</small>
           </div>
         </div>
       ) : (
@@ -349,24 +309,9 @@ export default function PlanPage() {
 
       <section className="stats-grid plan-summary-grid">
         <StatCard
-          label="Collection now"
-          value={formatRax(displayRaxValue(analysis.currentClaimable))}
-          hint={`${formatRax(displayRaxValue(analysis.currentGuaranteed))} guaranteed`}
-        />
-        <StatCard
-          label="With full plan"
-          value={formatRax(displayRaxValue(analysis.withPlanClaimable))}
-          hint={`${formatRax(displayRaxValue(analysis.withPlanGuaranteed))} guaranteed`}
-        />
-        <StatCard
           label="Plan net gain"
           value={formatSignedRax(displayRaxValue(analysis.combinedNetDelta))}
-          hint={`${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${plannedPasses.length} pass${plannedPasses.length === 1 ? '' : 'es'}`}
-        />
-        <StatCard
-          label="Active in plan"
-          value={String(analysis.activeProfiles.length)}
-          hint={`${plannedPasses.length - analysis.activeProfiles.length} skipped (owned or missing rows)`}
+          hint={`${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`}
         />
       </section>
 
@@ -459,7 +404,7 @@ export default function PlanPage() {
             <CollapsiblePanel
               className="nested-panel"
               title="Combined plan order"
-              description="Same-sport overlap counted in plan order (best solo net first within each sport). Each pass uses its planned rarity."
+              description="Each pass’s plan net is what it adds on top of the rest of the plan (leave-one-out), after collection overlap."
               defaultOpen={false}
             >
               <div className="table-wrap">
@@ -468,13 +413,17 @@ export default function PlanPage() {
                     <tr>
                       <th>#</th>
                       <th>Pass</th>
-                      <th>Marginal net</th>
-                      <th>Solo net</th>
-                      <th>Claimable</th>
+                      <th>Plan net gain</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {analysis.bundle.rows.map((row, index) => (
+                    {[...analysis.bundle.rows]
+                      .sort(
+                        (a, b) =>
+                          b.marginalNetDelta - a.marginalNetDelta ||
+                          a.name.localeCompare(b.name),
+                      )
+                      .map((row, index) => (
                         <tr key={row.key}>
                           <td>{index + 1}</td>
                           <td>
@@ -489,8 +438,6 @@ export default function PlanPage() {
                               {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
                             </strong>
                           </td>
-                          <td>{formatSignedRax(displayRaxValue(row.isolatedNetDelta))}</td>
-                          <td>{formatRax(displayRaxValue(row.passClaimableRax))}</td>
                         </tr>
                       ))}
                   </tbody>
@@ -504,7 +451,7 @@ export default function PlanPage() {
               <PlanPassCard
                 key={entry.pass.id}
                 entry={entry}
-                marginalNet={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
+                planNetGain={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
                 onRemove={() => removePlannedPass(entry.pass.id)}
               />
             ))}
