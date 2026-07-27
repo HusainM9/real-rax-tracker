@@ -343,14 +343,21 @@ export function recommendationPassKind(profile: Pick<CatalogImportProfile, 'spor
   return isUfcCatalogSport(profile.sport) ? 'player' : profile.passKind
 }
 
-export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
+export function estimateTotalRaxAtRarity(
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): number {
   const sport = sportFromCatalog(profile.sport)
   const passKind = recommendationPassKind(profile)
+  const rarity = rarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
   return profile.rows.reduce(
-    (sum, row) =>
-      sum + computeOtdRax(row.baseRaxEarned, sport, RECOMMENDATION_SIMULATED_RARITY, passKind),
+    (sum, row) => sum + computeOtdRax(row.baseRaxEarned, sport, rarity, passKind),
     0,
   )
+}
+
+export function estimateIconic1TotalRax(profile: CatalogImportProfile): number {
+  return estimateTotalRaxAtRarity(profile, RECOMMENDATION_SIMULATED_RARITY)
 }
 
 /** Normalize `bestDay` / `day` query values to an OTD month-day key (MM-DD). */
@@ -661,14 +668,71 @@ export function analyzeCatalogCandidate(
   return buildPassRecommendationRow(profileAsIconic1(profile), analysis)
 }
 
+/** Score a catalog pass at an explicit OTD rarity (Plan page / mixed-rarity what-ifs). */
+export function analyzeCatalogCandidateAtRarity(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): PassRecommendationRow | null {
+  const rarity = rarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
+  const analysis = analyzeCatalogProfilePotentialAtRarity(data, profile, rarity)
+  if (!analysis) return null
+  return buildPassRecommendationRow(profileAtSimulatedRarity(profile, rarity), analysis)
+}
+
+/**
+ * Net gain from upgrading an owned card to a target rarity (Plan page owned auto-adds).
+ * Uses the same in-place upgrade path as the plan bundle.
+ */
+export function analyzeOwnedCardUpgradeAtRarity(
+  data: RaxTrackerData,
+  card: PlayerCard,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): PassRecommendationRow | null {
+  if (profile.rows.length === 0) return null
+  const rarity = rarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
+  const simulated = profileAtSimulatedRarity(profile, rarity)
+  const after = applyOwnedCardRarityUpgrade(data, card, rarity)
+  const deltas = collectionNetDeltas(data, after)
+  const totals = cardClaimableTotals(after, card.id)
+  const sport = sportFromCatalog(simulated.sport)
+  const passKind = recommendationPassKind(simulated)
+  return {
+    externalKey: simulated.externalKey,
+    name: simulated.name,
+    sport,
+    season: simulated.seasonLabel || String(simulated.seasonYear),
+    seasonYear: simulated.seasonYear,
+    rarityLabel: rarity,
+    passKind,
+    totalBaseRax: simulated.totalBaseRax,
+    iconic1TotalRax: estimateTotalRaxAtRarity(simulated, rarity),
+    rowCount: simulated.rows.length,
+    newClaimableRax: totals.claimable,
+    displacedRax: Math.max(0, totals.claimable - deltas.withPro),
+    overlapRax: 0,
+    netClaimableDelta: deltas.withPro,
+    netGuaranteedDelta: deltas.guaranteed,
+  }
+}
+
 function analyzeCatalogProfilePotential(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
 ): PotentialAnalysisResult | null {
+  // Rank/solo parity: always score at Iconic 1, never the catalog's stored rarity_label.
+  return analyzeCatalogProfilePotentialAtRarity(data, profile, RECOMMENDATION_SIMULATED_RARITY)
+}
+
+function analyzeCatalogProfilePotentialAtRarity(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+): PotentialAnalysisResult | null {
   if (profile.rows.length === 0) return null
 
-  // Rank/solo parity: always score at Iconic 1, never the catalog's stored rarity_label.
-  const simulated = profileAsIconic1(profile)
+  const simulated = profileAtSimulatedRarity(profile, rarityLabel)
   const rows = catalogProfileToParsedRows(simulated)
   if (rows.length === 0) return null
 
@@ -679,7 +743,7 @@ function analyzeCatalogProfilePotential(
       name: simulated.name,
       sport,
       season: simulated.seasonLabel || String(simulated.seasonYear),
-      simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      simulatedRarityLabel: simulated.rarityLabel,
       passKind: simulated.passKind,
     },
     rows,
@@ -692,16 +756,17 @@ function buildPassRecommendationRow(
 ): PassRecommendationRow {
   const sport = sportFromCatalog(profile.sport)
   const passKind = recommendationPassKind(profile)
+  const rarityLabel = profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY
   return {
     externalKey: profile.externalKey,
     name: profile.name,
     sport,
     season: profile.seasonLabel || String(profile.seasonYear),
     seasonYear: profile.seasonYear,
-    rarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    rarityLabel,
     passKind,
     totalBaseRax: profile.totalBaseRax,
-    iconic1TotalRax: estimateIconic1TotalRax(profile),
+    iconic1TotalRax: estimateTotalRaxAtRarity(profile, rarityLabel),
     rowCount: profile.rows.length,
     newClaimableRax: analysis.claimableRax,
     displacedRax: analysis.displacedRax,
@@ -720,7 +785,7 @@ export function analyzeCatalogCandidateForMonth(
   if (!analysis) return null
 
   const monthly = analysis.monthlyNet.find((row) => row.monthIdx === monthIdx)
-  const base = buildPassRecommendationRow(profile, analysis)
+  const base = buildPassRecommendationRow(profileAsIconic1(profile), analysis)
 
   return {
     ...base,
@@ -746,7 +811,7 @@ export function analyzeCatalogCandidateForDay(
   if (!analysis) return null
 
   const metrics = dayMetricsFromAnalysis(analysis, normalizedDay)
-  const base = buildPassRecommendationRow(profile, analysis)
+  const base = buildPassRecommendationRow(profileAsIconic1(profile), analysis)
   const monthIdx = monthIndexFromMonthDay(normalizedDay)
 
   return {
@@ -795,7 +860,7 @@ function addProfileToData(data: RaxTrackerData, profile: CatalogImportProfile): 
   return nextData
 }
 
-function addProfileToDataAtRarity(
+export function addProfileToDataAtRarity(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
   rarityLabel: string,
@@ -809,6 +874,27 @@ function addProfileToDataAtRarity(
     },
   )
   return nextData
+}
+
+/** Apply each profile at its own `rarityLabel` (Plan page mixed-rarity with-plan totals). */
+export function applyCatalogProfilesAtOwnRarities(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+): RaxTrackerData {
+  const appliedIdentities = new Set<string>()
+  let workingData = data
+  for (const profile of profiles) {
+    if (profile.rows.length === 0) continue
+    const identity = catalogPassIdentityKey(profile)
+    if (appliedIdentities.has(identity)) continue
+    appliedIdentities.add(identity)
+    workingData = addProfileToDataAtRarity(
+      workingData,
+      profile,
+      profile.rarityLabel?.trim() || RECOMMENDATION_SIMULATED_RARITY,
+    )
+  }
+  return workingData
 }
 
 export type OwnedIconicUpgradeCandidate = {
@@ -1072,6 +1158,15 @@ export function catalogProfileToIconic20CheckerCandidate(
   }
 }
 
+function resolveCheckerCandidateRarity(
+  candidate: Iconic20CheckerCandidate,
+  fallbackRarity: string,
+): string {
+  const fromProfile = candidate.profile?.rarityLabel?.trim()
+  if (fromProfile) return fromProfile
+  return fallbackRarity.trim() || RECOMMENDATION_SIMULATED_RARITY
+}
+
 function applySimulatedRarityCheckerCandidate(
   data: RaxTrackerData,
   candidate: Iconic20CheckerCandidate,
@@ -1086,10 +1181,10 @@ function applySimulatedRarityCheckerCandidate(
   return data
 }
 
-export function analyzeSimulatedRarityCheckerImpacts(
+function analyzeCheckerImpactsWithRarityResolver(
   data: RaxTrackerData,
   candidates: Iconic20CheckerCandidate[],
-  simulatedRarity: string,
+  resolveRarity: (candidate: Iconic20CheckerCandidate) => string,
 ): OwnedIconicUpgradeImpactResult {
   const eligible = candidates.filter(
     (candidate) =>
@@ -1108,7 +1203,8 @@ export function analyzeSimulatedRarityCheckerImpacts(
   const isolatedByKey = new Map<string, number>()
   const passClaimableByKey = new Map<string, { claimable: number; guaranteed: number }>()
   for (const candidate of eligible) {
-    const upgraded = applySimulatedRarityCheckerCandidate(data, candidate, simulatedRarity)
+    const rarity = resolveRarity(candidate)
+    const upgraded = applySimulatedRarityCheckerCandidate(data, candidate, rarity)
     const before = collectionClaimableTotal(data)
     const after = collectionClaimableTotal(upgraded)
     isolatedByKey.set(candidate.key, after - before)
@@ -1133,7 +1229,11 @@ export function analyzeSimulatedRarityCheckerImpacts(
     )
     for (const candidate of ordered) {
       const before = collectionClaimableTotal(workingData)
-      workingData = applySimulatedRarityCheckerCandidate(workingData, candidate, simulatedRarity)
+      workingData = applySimulatedRarityCheckerCandidate(
+        workingData,
+        candidate,
+        resolveRarity(candidate),
+      )
       const after = collectionClaimableTotal(workingData)
       rows.push({
         key: candidate.key,
@@ -1158,6 +1258,14 @@ export function analyzeSimulatedRarityCheckerImpacts(
   }
 }
 
+export function analyzeSimulatedRarityCheckerImpacts(
+  data: RaxTrackerData,
+  candidates: Iconic20CheckerCandidate[],
+  simulatedRarity: string,
+): OwnedIconicUpgradeImpactResult {
+  return analyzeCheckerImpactsWithRarityResolver(data, candidates, () => simulatedRarity)
+}
+
 export function analyzeIconic20CheckerImpacts(
   data: RaxTrackerData,
   candidates: Iconic20CheckerCandidate[],
@@ -1174,6 +1282,19 @@ export function analyzeCatalogBundleImpacts(
     .map(catalogProfileToIconic20CheckerCandidate)
     .filter((candidate): candidate is Iconic20CheckerCandidate => candidate !== null)
   return analyzeSimulatedRarityCheckerImpacts(data, candidates, simulatedRarity)
+}
+
+/** Bundle impacts using each profile's own `rarityLabel` (Plan page mixed rarities). */
+export function analyzeCatalogBundleImpactsAtProfileRarities(
+  data: RaxTrackerData,
+  profiles: CatalogImportProfile[],
+): OwnedIconicUpgradeImpactResult {
+  const candidates = profiles
+    .map(catalogProfileToIconic20CheckerCandidate)
+    .filter((candidate): candidate is Iconic20CheckerCandidate => candidate !== null)
+  return analyzeCheckerImpactsWithRarityResolver(data, candidates, (candidate) =>
+    resolveCheckerCandidateRarity(candidate, RECOMMENDATION_SIMULATED_RARITY),
+  )
 }
 
 function rankCandidatesSync(

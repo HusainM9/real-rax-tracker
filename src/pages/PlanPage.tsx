@@ -7,14 +7,20 @@ import type { CatalogImportProfile } from '../lib/catalogApi'
 import { fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRax } from '../lib/format'
+import { isPlayerPass } from '../lib/passKind'
 import {
   analyzePlanCollection,
-  plannedPassIconic1TotalRax,
+  plannedPassFromOwnedCard,
+  plannedPassSimulatedTotalRax,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
-import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
+import {
+  isAtLeastIconic1Rarity,
+  RECOMMENDATION_SIMULATED_RARITY,
+} from '../lib/passRecommendation'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
+import type { PlayerCard } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
 
@@ -22,6 +28,12 @@ function signedRaxClass(value: number): string {
   if (value > 0) return 'sale-positive'
   if (value < 0) return 'sale-negative'
   return ''
+}
+
+function sourceBadgeLabel(source: PlannedPassCardAnalysis['pass']['source']): string {
+  if (source === 'ranking') return 'From ranking'
+  if (source === 'manual') return 'From collection'
+  return 'Catalog'
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -43,8 +55,8 @@ function PlanPassCard({
   marginalNet: number | null
   onRemove: () => void
 }) {
-  const { pass, solo, ownedAtIconic, missingProfile, missingRows } = entry
-  const iconic1Total = plannedPassIconic1TotalRax(pass, entry.profile)
+  const { pass, solo, ownedAtIconic, ownedBelowIconic, missingProfile, missingRows } = entry
+  const simulatedTotal = plannedPassSimulatedTotalRax(pass, entry.profile)
 
   return (
     <article className="plan-pass-card panel">
@@ -54,6 +66,7 @@ function PlanPassCard({
           <p className="plan-pass-meta">
             {pass.passKind === 'team' ? 'Team' : 'Player'} · {pass.sport} · {pass.season} ·{' '}
             {pass.simulatedRarityLabel}
+            {ownedBelowIconic ? ' · upgrade' : ''}
           </p>
         </div>
         <button className="button danger compact" type="button" onClick={onRemove}>
@@ -101,7 +114,9 @@ function PlanPassCard({
           </div>
           <div className="plan-pass-metric">
             <span>Overlap</span>
-            <strong>{formatRax(displayRaxValue(solo.overlapRax))}</strong>
+            <strong>
+              {solo.overlapRax > 0 ? formatRax(displayRaxValue(solo.overlapRax)) : '—'}
+            </strong>
           </div>
           <div className="plan-pass-metric">
             <span>Base RAX</span>
@@ -110,7 +125,7 @@ function PlanPassCard({
           </div>
           <div className="plan-pass-metric">
             <span>{pass.simulatedRarityLabel} total</span>
-            <strong>{formatRax(displayRaxValue(iconic1Total))}</strong>
+            <strong>{formatRax(displayRaxValue(simulatedTotal))}</strong>
           </div>
         </div>
       ) : (
@@ -118,7 +133,7 @@ function PlanPassCard({
       )}
 
       <div className="plan-pass-footer">
-        <span className="badge">{pass.source === 'ranking' ? 'From ranking' : 'Catalog'}</span>
+        <span className="badge">{sourceBadgeLabel(pass.source)}</span>
         <Link className="link-button" to="/potential">
           Analyze in Potential
         </Link>
@@ -128,7 +143,7 @@ function PlanPassCard({
 }
 
 export default function PlanPage() {
-  const { data, addPlannedPassFromCatalog, removePlannedPass } = useRaxData()
+  const { data, addPlannedPass, addPlannedPassFromCatalog, removePlannedPass } = useRaxData()
   const [profilesByKey, setProfilesByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [profilesStatus, setProfilesStatus] = useState('')
@@ -136,11 +151,55 @@ export default function PlanPage() {
   const [catalogStatus, setCatalogStatus] = useState('')
   const [defaultRarity, setDefaultRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [rarityByKey, setRarityByKey] = useState<Record<string, string>>({})
+  const [ownedQuickAddFilter, setOwnedQuickAddFilter] = useState('')
+  const [ownedAddStatus, setOwnedAddStatus] = useState('')
+  const [ownedAddRarity, setOwnedAddRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
 
   const plannedPasses = data.plannedPasses ?? []
   const plannedExternalKeys = useMemo(
     () => new Set(plannedPasses.map((pass) => pass.externalKey)),
     [plannedPasses],
+  )
+
+  const ownedAdjustableCards = useMemo(
+    () =>
+      [...data.cards]
+        .filter(
+          (card) => isPlayerPass(card) && !isAtLeastIconic1Rarity(card.rarityLabel),
+        )
+        .sort(
+          (a, b) =>
+            a.name.localeCompare(b.name) ||
+            a.sport.localeCompare(b.sport) ||
+            a.season.localeCompare(b.season),
+        ),
+    [data.cards],
+  )
+
+  const filteredOwnedQuickAddCards = useMemo(() => {
+    const query = ownedQuickAddFilter.trim().toLowerCase()
+    if (!query) return ownedAdjustableCards
+    return ownedAdjustableCards.filter((card) => {
+      const haystack = [
+        card.name,
+        card.sport,
+        card.season,
+        card.rarityLabel ?? '',
+        card.externalKey ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [ownedAdjustableCards, ownedQuickAddFilter])
+
+  const addableFilteredOwnedCards = useMemo(
+    () =>
+      filteredOwnedQuickAddCards.filter(
+        (card): card is PlayerCard & { externalKey: string } =>
+          Boolean(card.externalKey) && !plannedExternalKeys.has(card.externalKey!),
+      ),
+    [filteredOwnedQuickAddCards, plannedExternalKeys],
   )
 
   useEffect(() => {
@@ -187,11 +246,72 @@ export default function PlanPage() {
     for (const row of analysis.bundle.rows) {
       const externalKey = row.key.startsWith('catalog:')
         ? row.key.slice('catalog:'.length)
-        : row.key
+        : row.key.startsWith('owned:')
+          ? row.key.slice('owned:'.length)
+          : row.key
       map.set(externalKey, row.marginalNetDelta)
     }
     return map
   }, [analysis.bundle])
+
+  const ownedCardEarnings = (card: PlayerCard) => {
+    const performances = data.performances.filter((row) => row.cardId === card.id)
+    return {
+      totalBaseRax: performances.reduce(
+        (sum, row) => sum + (row.baseRaxEarned ?? row.raxEarned),
+        0,
+      ),
+      rowCount: performances.length,
+    }
+  }
+
+  const addOwnedCardToPlan = (card: PlayerCard) => {
+    const earnings = ownedCardEarnings(card)
+    const input = plannedPassFromOwnedCard(card, {
+      simulatedRarityLabel: ownedAddRarity,
+      ...earnings,
+    })
+    if (!input) {
+      setOwnedAddStatus('That card has no catalog link.')
+      return
+    }
+    const id = addPlannedPass(input)
+    if (!id) {
+      setOwnedAddStatus(`${card.name} is already on your plan.`)
+      return
+    }
+    setOwnedAddStatus(
+      `Added ${card.name} to your plan as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY}.`,
+    )
+  }
+
+  const addAllFilteredOwnedToPlan = () => {
+    if (addableFilteredOwnedCards.length === 0) {
+      setOwnedAddStatus(
+        'No eligible passes to add — they may already be on the plan, lack a catalog link, or not match the filter.',
+      )
+      return
+    }
+
+    let added = 0
+    for (const card of addableFilteredOwnedCards) {
+      const earnings = ownedCardEarnings(card)
+      const input = plannedPassFromOwnedCard(card, {
+        simulatedRarityLabel: ownedAddRarity,
+        ...earnings,
+      })
+      if (!input) continue
+      addPlannedPass(input)
+      added += 1
+    }
+
+    const skipped = filteredOwnedQuickAddCards.length - added
+    setOwnedAddStatus(
+      `Added ${added} pass${added === 1 ? '' : 'es'} to your plan as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY}.${
+        skipped > 0 ? ` Skipped ${skipped} without catalog link or already listed.` : ''
+      }`,
+    )
+  }
 
   const handleCatalogSelect = async (
     result: Parameters<typeof addPlannedPassFromCatalog>[0],
@@ -253,6 +373,85 @@ export default function PlanPage() {
       {profilesLoading ? <p className="import-progress">{profilesStatus || 'Loading plan…'}</p> : null}
       {profilesStatus && !profilesLoading ? <p className="import-status">{profilesStatus}</p> : null}
       {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
+      {ownedAddStatus ? <p className="import-status">{ownedAddStatus}</p> : null}
+
+      {ownedAdjustableCards.length > 0 ? (
+        <CollapsiblePanel
+          className="nested-panel"
+          title="From your collection"
+          description={`Auto-add non-Iconic player passes as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY} upgrades — same idea as baseline adjustments.`}
+          badge={`${ownedAdjustableCards.length} eligible`}
+          defaultOpen={false}
+        >
+          <div className="sort-controls">
+            <label className="field inline-field">
+              <span>Assume rarity</span>
+              <select
+                value={ownedAddRarity}
+                onChange={(event) => setOwnedAddRarity(event.target.value)}
+              >
+                {PLAN_RARITY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field inline-field recommendation-adjustment-owned-search">
+              <span>Filter your collection</span>
+              <input
+                value={ownedQuickAddFilter}
+                placeholder="Name, sport, season, or rarity"
+                onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
+              />
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={addableFilteredOwnedCards.length === 0}
+              onClick={addAllFilteredOwnedToPlan}
+            >
+              Add all
+              {addableFilteredOwnedCards.length > 0
+                ? ` (${addableFilteredOwnedCards.length})`
+                : ''}
+            </button>
+          </div>
+          {filteredOwnedQuickAddCards.length > 0 ? (
+            <div className="recommendation-adjustment-owned-list button-row wrap-row">
+              {filteredOwnedQuickAddCards.map((card) => {
+                const alreadyAdded = Boolean(
+                  card.externalKey && plannedExternalKeys.has(card.externalKey),
+                )
+                const missingCatalogLink = !card.externalKey
+                return (
+                  <button
+                    className="button compact"
+                    type="button"
+                    key={card.id}
+                    disabled={missingCatalogLink || alreadyAdded}
+                    title={
+                      missingCatalogLink
+                        ? 'No catalog link on this card'
+                        : alreadyAdded
+                          ? 'Already on your plan'
+                          : `Add as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY}`
+                    }
+                    onClick={() => addOwnedCardToPlan(card)}
+                  >
+                    {card.name}
+                    {card.season ? ` · ${card.season}` : ''}
+                    {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                    {alreadyAdded ? ' · on plan' : ''}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="empty">No collection passes match that filter.</p>
+          )}
+        </CollapsiblePanel>
+      ) : null}
 
       {plannedPasses.length > 0 ? (
         <>
@@ -260,7 +459,7 @@ export default function PlanPage() {
             <CollapsiblePanel
               className="nested-panel"
               title="Combined plan order"
-              description="Same-sport overlap counted in plan order (best solo net first within each sport)."
+              description="Same-sport overlap counted in plan order (best solo net first within each sport). Each pass uses its planned rarity."
               defaultOpen={false}
             >
               <div className="table-wrap">
@@ -313,7 +512,7 @@ export default function PlanPage() {
         </>
       ) : (
         <section className="panel plan-empty">
-          <p className="empty">No passes yet. Search below or add from Rank catalog on Potential.</p>
+          <p className="empty">No passes yet. Search below, add from your collection, or use Rank catalog on Potential.</p>
         </section>
       )}
 
