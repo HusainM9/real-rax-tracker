@@ -889,6 +889,7 @@ export default function PotentialPage() {
   } | null>(null)
   const dayBoostDayInputRef = useRef<HTMLInputElement>(null)
   const dayBoostDeepLinkHandledRef = useRef<string | null>(null)
+  const planBaselineDeepLinkHandledRef = useRef(false)
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
@@ -1901,6 +1902,107 @@ export default function PotentialPage() {
     setAdjustmentSearchStatus(
       `Added ${addableFilteredOwnedCards.length} pass${addableFilteredOwnedCards.length === 1 ? '' : 'es'} as assume ${RECOMMENDATION_SIMULATED_RARITY}.${
         skipped > 0 ? ` Skipped ${skipped} without catalog link or already listed.` : ''
+      }`,
+    )
+  }
+
+  const plannedPasses = data.plannedPasses ?? []
+
+  const addablePlannedPasses = useMemo(
+    () =>
+      plannedPasses.filter(
+        (pass) =>
+          Boolean(pass.externalKey?.trim()) &&
+          !isPassInRecommendationAdjustments(
+            {
+              externalKey: pass.externalKey,
+              name: pass.name,
+              sport: pass.sport,
+              season: pass.season,
+              seasonYear: 0,
+              passKind: pass.passKind,
+            },
+            rankAdjustments,
+          ),
+      ),
+    [plannedPasses, rankAdjustments],
+  )
+
+  const addPlannedPassToBaseline = (pass: (typeof plannedPasses)[number]) => {
+    if (
+      isPassInRecommendationAdjustments(
+        {
+          externalKey: pass.externalKey,
+          name: pass.name,
+          sport: pass.sport,
+          season: pass.season,
+          seasonYear: 0,
+          passKind: pass.passKind,
+        },
+        rankAdjustments,
+      )
+    ) {
+      setAdjustmentSearchStatus('That plan pass is already in the baseline list.')
+      return
+    }
+    setRankAdjustments((current) => [
+      ...current,
+      {
+        externalKey: pass.externalKey,
+        name: pass.name,
+        sport: pass.sport,
+        season: pass.season,
+        mode: 'assume-iconic-1',
+      },
+    ])
+    setAdjustmentSearchStatus(
+      `Added ${pass.name} from plan — assume ${RECOMMENDATION_SIMULATED_RARITY}.`,
+    )
+  }
+
+  const addAllPlannedPassesToBaseline = () => {
+    if (addablePlannedPasses.length === 0) {
+      setAdjustmentSearchStatus(
+        plannedPasses.length === 0
+          ? 'No passes on your plan yet.'
+          : 'All plan passes are already in the baseline list.',
+      )
+      return
+    }
+
+    setRankAdjustments((current) => {
+      const next = [...current]
+      for (const pass of addablePlannedPasses) {
+        if (
+          isPassInRecommendationAdjustments(
+            {
+              externalKey: pass.externalKey,
+              name: pass.name,
+              sport: pass.sport,
+              season: pass.season,
+              seasonYear: 0,
+              passKind: pass.passKind,
+            },
+            next,
+          )
+        ) {
+          continue
+        }
+        next.push({
+          externalKey: pass.externalKey,
+          name: pass.name,
+          sport: pass.sport,
+          season: pass.season,
+          mode: 'assume-iconic-1',
+        })
+      }
+      return next
+    })
+
+    const skipped = plannedPasses.length - addablePlannedPasses.length
+    setAdjustmentSearchStatus(
+      `Added ${addablePlannedPasses.length} plan pass${addablePlannedPasses.length === 1 ? '' : 'es'} as assume ${RECOMMENDATION_SIMULATED_RARITY}.${
+        skipped > 0 ? ` Skipped ${skipped} already listed.` : ''
       }`,
     )
   }
@@ -2997,6 +3099,86 @@ export default function PotentialPage() {
   }, [searchParams])
 
   useEffect(() => {
+    if (searchParams.get('addPlanToBaseline') !== '1') {
+      planBaselineDeepLinkHandledRef.current = false
+      return
+    }
+    if (planBaselineDeepLinkHandledRef.current) return
+    planBaselineDeepLinkHandledRef.current = true
+
+    const planPasses = data.plannedPasses ?? []
+    const toAdd = planPasses.filter(
+      (pass) =>
+        Boolean(pass.externalKey?.trim()) &&
+        !isPassInRecommendationAdjustments(
+          {
+            externalKey: pass.externalKey,
+            name: pass.name,
+            sport: pass.sport,
+            season: pass.season,
+            seasonYear: 0,
+            passKind: pass.passKind,
+          },
+          rankAdjustments,
+        ),
+    )
+
+    if (toAdd.length > 0) {
+      setRankAdjustments((current) => {
+        const next = [...current]
+        for (const pass of toAdd) {
+          if (
+            isPassInRecommendationAdjustments(
+              {
+                externalKey: pass.externalKey,
+                name: pass.name,
+                sport: pass.sport,
+                season: pass.season,
+                seasonYear: 0,
+                passKind: pass.passKind,
+              },
+              next,
+            )
+          ) {
+            continue
+          }
+          next.push({
+            externalKey: pass.externalKey,
+            name: pass.name,
+            sport: pass.sport,
+            season: pass.season,
+            mode: 'assume-iconic-1',
+          })
+        }
+        return next
+      })
+    }
+
+    setCatalogRankOpen(true)
+    setBaselineAdjustmentsOpen(true)
+    setAdjustmentSearchStatus(
+      planPasses.length === 0
+        ? 'No passes on your plan to add.'
+        : toAdd.length > 0
+          ? `Added ${toAdd.length} plan pass${toAdd.length === 1 ? '' : 'es'} as assume ${RECOMMENDATION_SIMULATED_RARITY}.`
+          : 'All plan passes were already in the baseline list.',
+    )
+
+    const next = new URLSearchParams(searchParams)
+    next.delete('addPlanToBaseline')
+    setSearchParams(next, { replace: true })
+
+    window.setTimeout(() => {
+      document.getElementById('recommendation-adjustments')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+    // Deep-link bootstrap only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per addPlanToBaseline=1
+  }, [searchParams])
+
+  useEffect(() => {
     if (!dayBoostPendingAutoRun || !dayBoostBestDay) return
     setDayBoostPendingAutoRun(false)
     void runDayBoostRanking()
@@ -3432,6 +3614,74 @@ export default function PotentialPage() {
               ) : (
                 <p className="empty">No collection passes match that filter.</p>
               )}
+            </div>
+          ) : null}
+
+          {plannedPasses.length > 0 ? (
+            <div className="recommendation-adjustment-owned">
+              <div className="section-heading recommendation-adjustment-owned-heading">
+                <div>
+                  <h4>From your plan</h4>
+                  <p className="import-hint">
+                    Add saved Plan passes as assume {RECOMMENDATION_SIMULATED_RARITY} for ranking and
+                    what-if.{' '}
+                    <Link className="link-button" to="/plan">
+                      Open Plan
+                    </Link>
+                  </p>
+                </div>
+                <span className="badge">
+                  {plannedPasses.length} on plan
+                  {addablePlannedPasses.length !== plannedPasses.length
+                    ? ` · ${addablePlannedPasses.length} new`
+                    : ''}
+                </span>
+              </div>
+              <div className="sort-controls">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={catalogAnalysisBusy || addablePlannedPasses.length === 0}
+                  onClick={addAllPlannedPassesToBaseline}
+                >
+                  Add all from plan
+                  {addablePlannedPasses.length > 0 ? ` (${addablePlannedPasses.length})` : ''}
+                </button>
+              </div>
+              <div className="recommendation-adjustment-owned-list button-row wrap-row">
+                {plannedPasses.map((pass) => {
+                  const alreadyAdded = isPassInRecommendationAdjustments(
+                    {
+                      externalKey: pass.externalKey,
+                      name: pass.name,
+                      sport: pass.sport,
+                      season: pass.season,
+                      seasonYear: 0,
+                      passKind: pass.passKind,
+                    },
+                    rankAdjustments,
+                  )
+                  return (
+                    <button
+                      className="button compact"
+                      type="button"
+                      key={pass.id}
+                      disabled={catalogAnalysisBusy || alreadyAdded}
+                      title={
+                        alreadyAdded
+                          ? 'Already in ranking baseline'
+                          : `Add as assume ${RECOMMENDATION_SIMULATED_RARITY}`
+                      }
+                      onClick={() => addPlannedPassToBaseline(pass)}
+                    >
+                      {pass.name}
+                      {pass.season ? ` · ${pass.season}` : ''}
+                      {pass.sport ? ` · ${pass.sport}` : ''}
+                      {alreadyAdded ? ' · baseline' : ''}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           ) : null}
 

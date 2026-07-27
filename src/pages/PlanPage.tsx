@@ -301,6 +301,11 @@ export default function PlanPage() {
           <Link className="button" to="/potential">
             Rank catalog
           </Link>
+          {plannedPasses.length > 0 ? (
+            <Link className="button" to="/potential?addPlanToBaseline=1">
+              Add all to ranking baseline
+            </Link>
+          ) : null}
           <Link className="button" to="/entry">
             Add to collection
           </Link>
