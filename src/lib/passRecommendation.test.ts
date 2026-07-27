@@ -9,6 +9,7 @@ import {
   catalogProfileToParsedRows,
   defaultRankExcludedSportSeasonKeys,
   DEFAULT_RANK_EXCLUDED_SPORT_SEASONS,
+  filterRankCatalogSports,
   filterRecommendationProfiles,
   greedyPickBundle,
   isAtLeastIconic1Rarity,
@@ -282,6 +283,14 @@ describe('passRecommendation', () => {
         defaultRankExcludedSportSeasonKeys(),
       ),
     ).toBe(true)
+  })
+
+  it('filterRankCatalogSports drops UFC only when Include UFC is off', () => {
+    const sports = ['NBA', 'UFC', 'FC'] as const
+    expect(filterRankCatalogSports(sports)).toEqual(['NBA', 'UFC', 'FC'])
+    expect(filterRankCatalogSports(sports, true)).toEqual(['NBA', 'UFC', 'FC'])
+    expect(filterRankCatalogSports(sports, false)).toEqual(['NBA', 'FC'])
+    expect(filterRankCatalogSports(['UFC'], false)).toEqual([])
   })
 
   it('filters NFL seasons independently when labels share a catalog year', () => {

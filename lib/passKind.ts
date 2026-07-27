@@ -25,6 +25,22 @@ export function catalogCandidatePassKindsForSport(sport: string): ImportPassKind
   return isUfcCatalogSport(sport) ? ['team', 'player'] : ['player']
 }
 
+/**
+ * NFL-style 2-letter city codes that appear in Real team pass labels (e.g. "KC Chiefs").
+ * 2-letter tokens otherwise look like player initials ("DJ Giddens", "CJ Stroud").
+ */
+const TWO_LETTER_TEAM_CODES = new Set([
+  'GB',
+  'KC',
+  'LA',
+  'LV',
+  'NE',
+  'NO',
+  'NY',
+  'SF',
+  'TB',
+])
+
 /** Real team OTD passes often use abbreviated names like "DEN Nuggets" or "Boise St". */
 export function looksLikeTeamPassName(name: string): boolean {
   const trimmed = name.trim()
@@ -32,7 +48,12 @@ export function looksLikeTeamPassName(name: string): boolean {
   if (/^team\s+\d+$/i.test(trimmed)) return true
 
   // City/airport code + mascot (e.g. DEN Nuggets, LAL Lakers, KC Chiefs).
-  if (/^[A-Z]{2,4}\s+[A-Za-z]/.test(trimmed)) return true
+  // Require 3–4 letter codes, or an allowlisted 2-letter NFL code — not player initials.
+  const codeMascot = trimmed.match(/^([A-Z]{2,4})\s+[A-Za-z]/)
+  if (codeMascot) {
+    const code = codeMascot[1]!
+    if (code.length >= 3 || TWO_LETTER_TEAM_CODES.has(code)) return true
+  }
 
   // College short form (e.g. Boise St, Ohio St).
   if (/^[A-Za-z]+(?:\s+[A-Za-z]+)*\sSt\.?$/i.test(trimmed)) return true

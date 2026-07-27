@@ -13,6 +13,8 @@ describe('passKind', () => {
     expect(looksLikeTeamPassName('Julian Strawther')).toBe(false)
     expect(looksLikeTeamPassName('Bruce Brown')).toBe(false)
     expect(looksLikeTeamPassName('Christian Braun')).toBe(false)
+    expect(looksLikeTeamPassName('DJ Giddens')).toBe(false)
+    expect(looksLikeTeamPassName('CJ Stroud')).toBe(false)
   })
 
   it('respects explicit passKind over name heuristics', () => {

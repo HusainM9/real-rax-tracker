@@ -20,6 +20,7 @@ import {
   advanceShopCrawlBeforeByPages,
   clearShopCrawlResumeCursor,
   estimateShopCrawlChunkTimeoutMs,
+  formatShopCrawlHttpFailure,
   formatShopCrawlResumeCursor,
   linkAbortTimeout,
   loadShopCrawlResumeCursor,
@@ -185,7 +186,7 @@ export default function AdminPage() {
     includePlayers: true,
     includeTeams: true,
     maxPages: String(DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
-    delayMs: '1500',
+    delayMs: '300',
   })
   const [shopCrawlBusy, setShopCrawlBusy] = useState(false)
   const [shopCrawlStatus, setShopCrawlStatus] = useState('')
@@ -780,8 +781,9 @@ export default function AdminPage() {
       SHOP_CRAWL_UI_MAX_PAGES_CAP,
       Math.max(1, Number(shopCrawl.maxPages) || DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
     )
-    const delayMs = Number(shopCrawl.delayMs) || 1500
-    const chunkTimeoutMs = estimateShopCrawlChunkTimeoutMs(maxPages, delayMs)
+    const delayMs = Number(shopCrawl.delayMs)
+    const resolvedDelayMs = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 300
+    const chunkTimeoutMs = estimateShopCrawlChunkTimeoutMs(maxPages, resolvedDelayMs)
 
     let jobIndex = 0
     let before = 0
@@ -821,12 +823,12 @@ export default function AdminPage() {
           shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
         }], entityTypes=[${entityTypes.join(',')}]${
           shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
-        }, maxPages/chunk=${maxPages}, delayMs=${delayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
       : `Starting crawl: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
           shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
         }], entityTypes=[${entityTypes.join(',')}]${
           shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
-        }, maxPages/chunk=${maxPages}, delayMs=${delayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
 
     shopCrawlLogIdRef.current = 1
     setShopCrawlLog([{ id: 1, type: 'client_start', message: startMsg }])
@@ -893,7 +895,7 @@ export default function AdminPage() {
               jobIndex,
               before,
               maxPages,
-              delayMs,
+              delayMs: resolvedDelayMs,
             }),
           })
         } catch (error) {
@@ -913,12 +915,8 @@ export default function AdminPage() {
             ? (JSON.parse(rawText) as ShopEarningsCrawlResponse)
             : ({} as ShopEarningsCrawlResponse)
         } catch {
-          const snippet = rawText.trim().replace(/\s+/g, ' ').slice(0, 160)
-          throw new Error(
-            response.ok
-              ? `Server returned invalid JSON: ${snippet}`
-              : `Shop earnings crawl failed (${response.status}): ${snippet}`,
-          )
+          const snippet = rawText.trim().replace(/\s+/g, ' ').slice(0, 200)
+          throw new Error(formatShopCrawlHttpFailure(response.status, snippet))
         }
 
         // Always surface server log lines, including first-chunk validation errors.
@@ -928,7 +926,7 @@ export default function AdminPage() {
           throw new Error(
             typeof data.error === 'string' && data.error.trim()
               ? data.error.trim()
-              : `Shop earnings crawl failed (${response.status}).`,
+              : formatShopCrawlHttpFailure(response.status, ''),
           )
         }
         if (!data.cursor || typeof data.cursor.jobIndex !== 'number') {
@@ -1300,8 +1298,9 @@ export default function AdminPage() {
             <summary>Advanced crawl settings</summary>
             <p className="subsection-note">
               Default is 1 page per chunk. Each page is 1 shop request + up to 20 earnings calls ×
-              delay (≈30–60s at 1500ms). Log lines arrive only when the chunk HTTP response returns —
-              keep max pages low (cap {SHOP_CRAWL_UI_MAX_PAGES_CAP}) so the UI does not look stuck.
+              delay (≈5–15s at 300ms with concurrency). Log lines arrive only when the chunk HTTP
+              response returns — keep max pages at 1 on Vercel so the platform does not kill the
+              function (cap {SHOP_CRAWL_UI_MAX_PAGES_CAP}).
             </p>
             <div className="form-grid">
               <label className="field">

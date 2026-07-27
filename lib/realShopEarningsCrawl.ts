@@ -30,19 +30,32 @@ export const SHOP_EARNINGS_PAGE_SIZE = 20
 
 /**
  * Safe default pages per admin chunk. Each page triggers up to 20 earnings fetches + delayMs
- * between calls (~30–60s/page at 1500ms), and log events only arrive when the chunk HTTP
- * response returns — so keep this at 1. The Admin UI loops until done.
+ * between calls; log events only arrive when the chunk HTTP response returns — keep at 1.
+ * The Admin UI loops until done.
  */
 export const DEFAULT_SHOP_CRAWL_MAX_PAGES = 1
 
 /** Cap so a single serverless invocation cannot run unbounded. */
 export const MAX_SHOP_CRAWL_MAX_PAGES = 5
 
-/** Delay between Real calls (pages + per-entity earnings). Override with REAL_SHOP_CRAWL_DELAY_MS. */
-export const DEFAULT_SHOP_CRAWL_DELAY_MS = 1500
+/**
+ * Delay between Real calls (pages + per-entity earnings). Override with REAL_SHOP_CRAWL_DELAY_MS.
+ * Keep low for Vercel: 1500ms × 21 calls ≈ 30s+ before any upsert, which exceeds Hobby limits
+ * and surfaces as FUNCTION_INVOCATION_FAILED with 0 writes.
+ */
+export const DEFAULT_SHOP_CRAWL_DELAY_MS = 300
 
-/** Earnings fetches in parallel within a page. Default 1 = sequential (slow / 429-safe). */
-export const DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY = 1
+/** Earnings fetches in parallel within a page. Override with REAL_SHOP_CRAWL_EARNINGS_CONCURRENCY. */
+export const DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY = 2
+
+/**
+ * Soft wall-clock budget per chunk (ms). Stop between pages before the platform kills the
+ * invocation. Override with REAL_SHOP_CRAWL_BUDGET_MS. Hobby Edge ≈ 30s; leave headroom.
+ */
+export const DEFAULT_SHOP_CRAWL_BUDGET_MS = 22_000
+
+/** Minimum remaining budget required to start another shop page. */
+export const SHOP_CRAWL_PAGE_RESERVE_MS = 4_000
 
 /** Live sports Real path slugs (UFC is opt-in via includeUfc). */
 export const LIVE_SHOP_CRAWL_SPORT_SLUGS = [
@@ -92,8 +105,10 @@ export type ShopCrawlChunkInput = {
   /** Hard stop on `before` within the current job (optional alternative to maxPages). */
   maxBefore?: number
   delayMs?: number
-  /** Parallel earnings fetches within a shop page (default 1). */
+  /** Parallel earnings fetches within a shop page (default 2). */
   earningsConcurrency?: number
+  /** Soft wall-clock budget for this chunk (ms). */
+  budgetMs?: number
 }
 
 export type ShopCrawlLogEventType =
@@ -206,6 +221,12 @@ export function resolveShopCrawlEarningsConcurrency(
     4,
     readPositiveInt(env.REAL_SHOP_CRAWL_EARNINGS_CONCURRENCY, DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY),
   )
+}
+
+export function resolveShopCrawlBudgetMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  return readPositiveInt(env.REAL_SHOP_CRAWL_BUDGET_MS, DEFAULT_SHOP_CRAWL_BUDGET_MS)
 }
 
 /**
@@ -436,6 +457,8 @@ function cursorFor(jobs: ShopCrawlJob[], jobIndex: number, before: number): Shop
 /**
  * Fetch up to `maxPages` shop earningstotal pages, then per-item daily earnings, upserting
  * pass metadata + base dailies (replace-not-merge for fetched keys). Resumable via jobIndex + before.
+ * Stops early when the soft wall-clock budget is nearly exhausted so Vercel does not hard-kill
+ * the invocation (FUNCTION_INVOCATION_FAILED) before any rows are written.
  */
 export async function crawlShopEarningsTotalChunk(
   input: ShopCrawlChunkInput,
@@ -455,10 +478,16 @@ export async function crawlShopEarningsTotalChunk(
     1,
     Math.min(4, Math.floor(input.earningsConcurrency ?? DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY)),
   )
+  const budgetMs = Math.max(
+    SHOP_CRAWL_PAGE_RESERVE_MS + 1_000,
+    Math.floor(input.budgetMs ?? DEFAULT_SHOP_CRAWL_BUDGET_MS),
+  )
   const savePasses = deps.savePasses ?? upsertCatalogPasses
   const saveDailyEarnings = deps.saveDailyEarnings ?? upsertCatalogDailyEarnings
   const wait = deps.sleep ?? sleep
   const sourceUpdatedAt = deps.now?.() ?? new Date().toISOString()
+  const startedAt = Date.now()
+  const timeLeftMs = () => budgetMs - (Date.now() - startedAt)
 
   let jobIndex = Math.max(0, Math.floor(input.jobIndex ?? 0))
   let before = Math.max(0, Math.floor(input.before ?? 0))
@@ -471,6 +500,7 @@ export async function crawlShopEarningsTotalChunk(
   const failures: string[] = []
   const log: ShopCrawlLogEvent[] = []
   let fetchedOnce = false
+  let stoppedForBudget = false
   // Serialize delays across concurrent earnings workers so "slow crawl" stays paced.
   let paceChain: Promise<void> = Promise.resolve()
 
@@ -518,7 +548,7 @@ export async function crawlShopEarningsTotalChunk(
     [...new Set(jobs.map((job) => job.entityType))].join(',') || '(none)'
   log.push({
     type: 'chunk_start',
-    message: `Chunk start: ${jobs.length} job(s), sports=[${sportsLabel}], seasons=[${seasonsLabel}], entityTypes=[${entityTypesLabel}], maxPages=${maxPages}, resume jobIndex=${jobIndex} before=${before}, delayMs=${delayMs}, earningsConcurrency=${earningsConcurrency}`,
+    message: `Chunk start: ${jobs.length} job(s), sports=[${sportsLabel}], seasons=[${seasonsLabel}], entityTypes=[${entityTypesLabel}], maxPages=${maxPages}, resume jobIndex=${jobIndex} before=${before}, delayMs=${delayMs}, earningsConcurrency=${earningsConcurrency}, budgetMs=${budgetMs}`,
     jobsTotal: jobs.length,
     maxPages,
     jobIndex,
@@ -540,7 +570,38 @@ export async function crawlShopEarningsTotalChunk(
     await next
   }
 
+  const flushPage = async (
+    pagePasses: CatalogPassInput[],
+    pageDailyRows: CatalogDailyEarningInput[],
+    replaceKeys: string[],
+  ): Promise<{ passes: number; dailies: number }> => {
+    let pagePassesUpserted = 0
+    let pageDailyUpserted = 0
+    if (pagePasses.length > 0) {
+      pagePassesUpserted = await savePasses(pagePasses)
+      upserted += pagePassesUpserted
+    }
+    if (replaceKeys.length > 0) {
+      pageDailyUpserted = await saveDailyEarnings(pageDailyRows, {
+        replaceExternalKeys: replaceKeys,
+      })
+      dailyRowsUpserted += pageDailyUpserted
+    }
+    return { passes: pagePassesUpserted, dailies: pageDailyUpserted }
+  }
+
   while (pagesFetched < maxPages && jobIndex < jobs.length) {
+    if (timeLeftMs() < SHOP_CRAWL_PAGE_RESERVE_MS) {
+      stoppedForBudget = true
+      log.push({
+        type: 'page_summary',
+        message: `Budget nearly exhausted (${Math.max(0, Math.round(timeLeftMs()))}ms left of ${budgetMs}ms) — ending chunk before another shop page so Vercel does not kill the function.`,
+        jobIndex,
+        before,
+      })
+      break
+    }
+
     const job = jobs[jobIndex]
     if (!job) break
 
@@ -644,9 +705,15 @@ export async function crawlShopEarningsTotalChunk(
     let pageOk = 0
     let pageFailed = 0
     let authError: unknown = null
+    let budgetStop = false
 
     await runWithConcurrency(page.items, earningsConcurrency, async (item) => {
-      if (authError) return
+      if (authError || budgetStop) return
+
+      if (timeLeftMs() < 1_500) {
+        budgetStop = true
+        return
+      }
 
       const basePass = mapShopEarningsItemToCatalogPass(item, job)
       if (!basePass) return
@@ -709,22 +776,32 @@ export async function crawlShopEarningsTotalChunk(
 
     if (authError) throw authError
 
-    let pagePassesUpserted = 0
-    let pageDailyUpserted = 0
-    if (pagePasses.length > 0) {
-      pagePassesUpserted = await savePasses(pagePasses)
-      upserted += pagePassesUpserted
-    }
-    if (replaceKeys.length > 0) {
-      pageDailyUpserted = await saveDailyEarnings(pageDailyRows, {
-        replaceExternalKeys: replaceKeys,
+    // Upsert whatever we gathered before returning — critical so a near-timeout still saves rows.
+    const flushed = await flushPage(pagePasses, pageDailyRows, replaceKeys)
+
+    if (budgetStop) {
+      stoppedForBudget = true
+      log.push({
+        type: 'page_summary',
+        message: `Page partial ${job.realSport}/${job.season}/${job.entityType} before=${pageBefore}: budget stop after ${pageOk} ok / ${pageFailed} failed — upserted ${flushed.passes} pass(es) / ${flushed.dailies} daily row(s). Resume same before to finish the page.`,
+        sport: job.realSport,
+        season: job.season,
+        entityType: job.entityType,
+        before: pageBefore,
+        itemCount: page.items.length,
+        ok: pageOk,
+        failed: pageFailed,
+        dailyRows: pageDailyRows.length,
+        upserted: flushed.passes,
+        dailyRowsUpserted: flushed.dailies,
       })
-      dailyRowsUpserted += pageDailyUpserted
+      // Keep the same `before` so the next chunk re-fetches this page (upserts are idempotent).
+      break
     }
 
     log.push({
       type: 'page_summary',
-      message: `Page done ${job.realSport}/${job.season}/${job.entityType} before=${pageBefore}: ${pageOk} ok / ${pageFailed} failed, ${pageDailyRows.length} daily row(s), upserted ${pagePassesUpserted} pass(es) / ${pageDailyUpserted} daily row(s)`,
+      message: `Page done ${job.realSport}/${job.season}/${job.entityType} before=${pageBefore}: ${pageOk} ok / ${pageFailed} failed, ${pageDailyRows.length} daily row(s), upserted ${flushed.passes} pass(es) / ${flushed.dailies} daily row(s)`,
       sport: job.realSport,
       season: job.season,
       entityType: job.entityType,
@@ -733,8 +810,8 @@ export async function crawlShopEarningsTotalChunk(
       ok: pageOk,
       failed: pageFailed,
       dailyRows: pageDailyRows.length,
-      upserted: pagePassesUpserted,
-      dailyRowsUpserted: pageDailyUpserted,
+      upserted: flushed.passes,
+      dailyRowsUpserted: flushed.dailies,
     })
 
     if (page.items.length < SHOP_EARNINGS_PAGE_SIZE) {
@@ -750,14 +827,16 @@ export async function crawlShopEarningsTotalChunk(
     }
   }
 
-  const done = jobIndex >= jobs.length
+  const done = !stoppedForBudget && jobIndex >= jobs.length
   const cursor = cursorFor(jobs, done ? Math.max(0, jobs.length - 1) : jobIndex, before)
   log.push({
     type: 'chunk_complete',
     message: `Chunk complete: ${pagesFetched} page(s), ${earningsFetched} earnings ok / ${earningsFailed} failed, upserted ${upserted} pass(es) / ${dailyRowsUpserted} daily row(s)${
       done
         ? ' — crawl done'
-        : ` — resume jobIndex=${cursor.jobIndex} before=${before} (${cursor.sport}/${cursor.season}/${cursor.entityType})`
+        : stoppedForBudget
+          ? ` — budget stop, resume jobIndex=${cursor.jobIndex} before=${before} (${cursor.sport}/${cursor.season}/${cursor.entityType})`
+          : ` — resume jobIndex=${cursor.jobIndex} before=${before} (${cursor.sport}/${cursor.season}/${cursor.entityType})`
     }`,
     upserted,
     dailyRowsUpserted,

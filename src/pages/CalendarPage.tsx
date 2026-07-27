@@ -102,18 +102,35 @@ function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
       ) : null}
 
       <div className="sport-grid">
-        {day.sports.map((sport) => (
-          <section className="sport-card" key={sport.sport}>
-            <h3>{sport.sport}</h3>
-            <p className="mini-heading">Top two claims</p>
-            {sport.guaranteed.map((candidate) => (
-              <CandidateRow candidate={candidate} key={candidate.performance.id} />
-            ))}
-            {sport.guaranteed.length === 0 ? <p className="empty">No claims for this sport.</p> : null}
+        {day.sports.map((sport) => {
+          const sportProBonus =
+            day.proBonus?.card.sport === sport.sport ? day.proBonus : null
+          const trueOverlaps = sport.overlaps.filter(
+            (candidate) => candidate.status !== 'pro-bonus',
+          )
 
-            <OverlapSection overlaps={sport.overlaps} />
-          </section>
-        ))}
+          return (
+            <section className="sport-card" key={sport.sport}>
+              <h3>{sport.sport}</h3>
+              <p className="mini-heading">Top two claims</p>
+              {sport.guaranteed.map((candidate) => (
+                <CandidateRow candidate={candidate} key={candidate.performance.id} />
+              ))}
+              {sport.guaranteed.length === 0 ? (
+                <p className="empty">No claims for this sport.</p>
+              ) : null}
+
+              {sportProBonus ? (
+                <>
+                  <p className="mini-heading">Pro bonus</p>
+                  <CandidateRow candidate={sportProBonus} />
+                </>
+              ) : null}
+
+              <OverlapSection overlaps={trueOverlaps} />
+            </section>
+          )
+        })}
       </div>
     </article>
   )
