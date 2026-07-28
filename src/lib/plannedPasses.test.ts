@@ -406,6 +406,45 @@ describe('plannedPasses', () => {
     )
   })
 
+  it('Plan if-sold options force planned buys to Iconic 1 and can assume collection Iconic 1', () => {
+    const owned = card('c-owned', 'Owned Low', '10|2025|NBA', 'Legendary 1')
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [owned],
+      performances: [perf('p1', 'c-owned', 10, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const buyProfile = catalogProfile('20|2025|NBA', 'Planned Buy', [
+      { claimDay: '2026-03-02', baseRaxEarned: 1 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-buy',
+        externalKey: '20|2025|NBA',
+        name: 'Planned Buy',
+        simulatedRarityLabel: 'Legendary 1',
+      }),
+    ]
+    const profilesByKey = new Map([[buyProfile.externalKey, buyProfile]])
+
+    const mixed = analyzePlanCollection(data, passes, profilesByKey)
+    const forced = analyzePlanCollection(data, passes, profilesByKey, {
+      forcePlannedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+    })
+    expect(mixed.passes[0]?.profile?.rarityLabel).toBe('Legendary 1')
+    expect(forced.passes[0]?.profile?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(forced.combinedNetDelta).not.toBe(mixed.combinedNetDelta)
+
+    const withCollection = analyzePlanCollection(data, passes, profilesByKey, {
+      forcePlannedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      assumeCollectionIconic1: true,
+    })
+    expect(withCollection.currentClaimable).toBeGreaterThan(forced.currentClaimable)
+  })
+
   it('maps pack days-until-Iconic onto Plan tags (Just started stays manual)', () => {
     expect(planProgressFromPackDaysRemaining(null)).toBeNull()
     expect(planProgressFromPackDaysRemaining(0)).toBeNull()

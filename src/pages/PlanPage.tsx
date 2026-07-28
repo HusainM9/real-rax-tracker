@@ -17,6 +17,7 @@ import {
   plannedPassProgressLabel,
   plannedPassProgressSortIndex,
   plannedPassProgressTone,
+  withCollectionAssumedIconic1,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
 import {
@@ -172,6 +173,8 @@ export default function PlanPage() {
   const [ownedAddRarity, setOwnedAddRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [passSortMode, setPassSortMode] = useState<PlanPassSortMode>('progress')
   const [soldFilter, setSoldFilter] = useState('')
+  /** Opt-in: Plan if-sold / composition assumes every owned player pass is Iconic 1. */
+  const [assumeCollectionIconic1, setAssumeCollectionIconic1] = useState(false)
 
   const plannedPasses = data.plannedPasses ?? []
   const soldCardIds = data.planSoldCardIds ?? []
@@ -219,7 +222,7 @@ export default function PlanPage() {
   const planScoringFingerprint = useMemo(
     () =>
       plannedPasses
-        .map((pass) => `${pass.externalKey}\t${pass.simulatedRarityLabel}`)
+        .map((pass) => pass.externalKey)
         .sort((a, b) => a.localeCompare(b))
         .join('\0'),
     [plannedPasses],
@@ -227,6 +230,15 @@ export default function PlanPage() {
   const soldCardIdsFingerprint = useMemo(
     () => [...soldCardIds].sort((a, b) => a.localeCompare(b)).join('\0'),
     [soldCardIds],
+  )
+
+  /** Plan if-sold / composition: planned buys always at Iconic 1; collection Iconic 1 is opt-in. */
+  const planCompositionOptions = useMemo(
+    () => ({
+      forcePlannedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      assumeCollectionIconic1,
+    }),
+    [assumeCollectionIconic1],
   )
 
   const sellableCards = useMemo(
@@ -268,13 +280,14 @@ export default function PlanPage() {
   )
 
   const unsoldClaimable = useMemo(() => {
+    const collection = assumeCollectionIconic1 ? withCollectionAssumedIconic1(data) : data
     const analysisData = {
-      ...data,
-      settings: { ...data.settings, proBonusEnabled: true },
+      ...collection,
+      settings: { ...collection.settings, proBonusEnabled: true },
     }
     return computeYearRollup(analysisData).totalClaimableRax
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- collection slices drive claimable
-  }, [data.cards, data.performances, data.settings.proBonusEnabled])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- collection slices + toggle
+  }, [data.cards, data.performances, data.settings.proBonusEnabled, assumeCollectionIconic1])
 
   const ownedAdjustableCards = useMemo(
     () =>
@@ -373,13 +386,20 @@ export default function PlanPage() {
   }, [plannedExternalKeysFingerprint])
 
   const scoredAnalysis = useMemo(
-    () => analyzePlanCollection(planBaselineData, plannedPasses, profilesByKey),
+    () =>
+      analyzePlanCollection(
+        planBaselineData,
+        plannedPasses,
+        profilesByKey,
+        planCompositionOptions,
+      ),
     // Tag/progress-only edits keep the same fingerprints so scoring is skipped.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: omit progress-only plannedPasses / full data identity
     [
       planBaselineData,
       planScoringFingerprint,
       profilesByKey,
+      planCompositionOptions,
     ],
   )
 
@@ -387,7 +407,12 @@ export default function PlanPage() {
   // ( /sell analyzeRemovedCard stays collection-only ).
   const unsoldPlanAnalysis = useMemo(() => {
     if (soldCardIds.length === 0) return null
-    return analyzePlanCollection(data, plannedPasses, profilesByKey)
+    return analyzePlanCollection(
+      data,
+      plannedPasses,
+      profilesByKey,
+      planCompositionOptions,
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- collection + plan fingerprints
   }, [
     data.cards,
@@ -395,6 +420,7 @@ export default function PlanPage() {
     data.settings.proBonusEnabled,
     planScoringFingerprint,
     profilesByKey,
+    planCompositionOptions,
     soldCardIdsFingerprint,
   ])
 
@@ -547,8 +573,8 @@ export default function PlanPage() {
         <p>
           Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
           Future; Just started stays manual. Mark planned sells so Plan scoring treats those owned
-          passes as sold with your planned buys applied — simulation only; collection unchanged.
-          The separate If sold page stays collection-only.
+          passes as sold with planned buys at {RECOMMENDATION_SIMULATED_RARITY} — simulation only;
+          collection unchanged. The separate If sold page stays collection-only.
         </p>
         <div className="button-row">
           <Link className="button" to="/potential">
@@ -575,9 +601,9 @@ export default function PlanPage() {
           hint={
             hasSoldScenario
               ? planNetVsUnsold != null && planNetVsUnsold !== 0
-                ? `${formatSignedRax(displayRaxValue(planNetVsUnsold))} vs plan without sells · planned buys included · ${soldCardIds.length} sold in plan · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
-                : `With ${soldCardIds.length} planned sell${soldCardIds.length === 1 ? '' : 's'} + planned buys · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
-              : `${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+                ? `${formatSignedRax(displayRaxValue(planNetVsUnsold))} vs plan without sells · buys at ${RECOMMENDATION_SIMULATED_RARITY}${assumeCollectionIconic1 ? ' · collection at Iconic 1' : ''} · ${soldCardIds.length} sold in plan · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+                : `With ${soldCardIds.length} planned sell${soldCardIds.length === 1 ? '' : 's'} · buys at ${RECOMMENDATION_SIMULATED_RARITY}${assumeCollectionIconic1 ? ' · collection at Iconic 1' : ''} · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+              : `${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · buys at ${RECOMMENDATION_SIMULATED_RARITY} · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
           }
         />
         {hasSoldScenario ? (
@@ -612,7 +638,7 @@ export default function PlanPage() {
         <CollapsiblePanel
           className="nested-panel"
           title="Plan to sell"
-          description="Mark owned player passes as planned sells. Plan nets and sold-impact stats strip them first, then apply planned buys/upgrades — so freed slots show up in Plan scoring. Simulation only; does not change /sell or your collection. Saved with your plan."
+          description={`Mark owned player passes as planned sells. Plan nets strip them first, then apply planned buys at ${RECOMMENDATION_SIMULATED_RARITY}. Optionally assume your whole collection is Iconic 1 for that simulation. Does not change /sell or your collection.`}
           badge={
             soldCardIds.length > 0
               ? `${soldCardIds.length} sold in plan`
@@ -629,6 +655,15 @@ export default function PlanPage() {
                 onChange={(event) => setSoldFilter(event.target.value)}
               />
             </label>
+            <button
+              className={`button${assumeCollectionIconic1 ? ' is-selected' : ''}`}
+              type="button"
+              aria-pressed={assumeCollectionIconic1}
+              title="Simulation only: treat every owned player pass as Iconic 1 for Plan if-sold / plan nets"
+              onClick={() => setAssumeCollectionIconic1((current) => !current)}
+            >
+              Assume collection Iconic 1
+            </button>
             <button
               className="button"
               type="button"

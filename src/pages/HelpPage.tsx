@@ -150,8 +150,9 @@ export default function HelpPage() {
           <div>
             <dt>Plan to sell</dt>
             <dd>
-              On Plan only: mark owned passes as planned sells (simulation). Plan nets and sold
-              impact include planned buys after those sells — If sold (/sell) stays collection-only.
+              On Plan only: mark owned passes as planned sells (simulation). Plan nets score planned
+              buys at Iconic 1 after those sells; optional “Assume collection Iconic 1” upgrades the
+              whole collection for that sim. If sold (/sell) stays collection-only.
             </dd>
           </div>
         </dl>

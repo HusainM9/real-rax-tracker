@@ -1,7 +1,10 @@
 import type { CatalogImportProfile, CatalogSearchResult } from './catalogApi'
 import { sportFromCatalog } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
+import { getBaseRaxEarned, sportToMeowbotSlug } from './effectiveRax'
+import { computeOtdRax } from './otdRax'
 import { isUfcCatalogSport } from '../../lib/passKind'
+import { isPlayerPass } from './passKind'
 import { estimatePackProgress } from './packTracker'
 import {
   applyCatalogProfilesAtOwnRarities,
@@ -21,6 +24,14 @@ import type {
   PlannedPassProgress,
   RaxTrackerData,
 } from '../types/rax'
+
+/** Options for Plan composition / if-sold scoring (Plan page only). */
+export type AnalyzePlanCollectionOptions = {
+  /** Force every planned pass profile to this rarity (e.g. Iconic 1 for if-sold). */
+  forcePlannedRarityLabel?: string
+  /** Simulation-only: treat every owned player pass as Iconic 1 before scoring. */
+  assumeCollectionIconic1?: boolean
+}
 
 export const PLANNED_PASS_PROGRESS_OPTIONS: ReadonlyArray<{
   value: PlannedPassProgress
@@ -259,10 +270,50 @@ export function plannedPassFromOwnedCard(
 export function profileForPlannedPass(
   pass: PlannedPass,
   profilesByKey: Map<string, CatalogImportProfile>,
+  forceRarityLabel?: string,
 ): CatalogImportProfile | null {
   const profile = profilesByKey.get(pass.externalKey)
   if (!profile) return null
-  return profileAtSimulatedRarity(profile, pass.simulatedRarityLabel)
+  const rarity =
+    forceRarityLabel?.trim() ||
+    pass.simulatedRarityLabel.trim() ||
+    RECOMMENDATION_SIMULATED_RARITY
+  return profileAtSimulatedRarity(profile, rarity)
+}
+
+/**
+ * Simulation-only: bump every owned player pass to Iconic 1 (recompute OTD from base).
+ * Does not mutate persisted collection data.
+ */
+export function withCollectionAssumedIconic1(data: RaxTrackerData): RaxTrackerData {
+  const rarity = RECOMMENDATION_SIMULATED_RARITY
+  let changed = false
+  const cards = data.cards.map((card) => {
+    if (!isPlayerPass(card)) return card
+    if (card.rarityLabel === rarity && !card.simulatedRarityLabel) return card
+    changed = true
+    return { ...card, rarityLabel: rarity, simulatedRarityLabel: undefined }
+  })
+  if (!changed) return data
+
+  const performances = data.performances.map((performance) => {
+    const original = data.cards.find((card) => card.id === performance.cardId)
+    if (!original || !isPlayerPass(original)) return performance
+    if (original.rarityLabel === rarity && !original.simulatedRarityLabel) return performance
+    const base = getBaseRaxEarned(performance, original)
+    return {
+      ...performance,
+      baseRaxEarned: base,
+      raxEarned: computeOtdRax(
+        base,
+        sportToMeowbotSlug(original.sport),
+        rarity,
+        original.passKind ?? 'player',
+      ),
+    }
+  })
+
+  return { ...data, cards, performances }
 }
 
 function findOwnedBelowIconicCard(
@@ -279,18 +330,23 @@ export function analyzePlanCollection(
   data: RaxTrackerData,
   plannedPasses: PlannedPass[],
   profilesByKey: Map<string, CatalogImportProfile>,
+  options?: AnalyzePlanCollectionOptions,
 ): PlanCollectionAnalysis {
   // Plan nets always assume Pro (same as Potential ranking / bundle what-ifs).
-  const analysisData: RaxTrackerData = {
+  let analysisData: RaxTrackerData = {
     ...data,
     settings: { ...data.settings, proBonusEnabled: true },
   }
+  if (options?.assumeCollectionIconic1) {
+    analysisData = withCollectionAssumedIconic1(analysisData)
+  }
+  const forcePlannedRarity = options?.forcePlannedRarityLabel?.trim() || undefined
   const currentRollup = computeYearRollup(analysisData)
   const passes: PlannedPassCardAnalysis[] = []
   const activeProfiles: CatalogImportProfile[] = []
 
   for (const pass of plannedPasses) {
-    const profile = profileForPlannedPass(pass, profilesByKey)
+    const profile = profileForPlannedPass(pass, profilesByKey, forcePlannedRarity)
     const ownedAtIconic = profile
       ? isRecommendationPassOwnedAtIconic(analysisData, profile)
       : analysisData.cards.some(
