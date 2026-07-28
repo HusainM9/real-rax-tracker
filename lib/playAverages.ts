@@ -27,6 +27,28 @@ function playRatingValue(play: { value?: string | number | null }): number | nul
 }
 
 /**
+ * Map display / catalog sport labels to Real `/players/.../sport/{slug}/plays` path slugs.
+ * Kept local so play-average imports do not pull the heavy shop-crawl/catalog graph.
+ */
+export function toRealPlaySportSlug(sport: string): string {
+  const raw = sport.trim().toLowerCase()
+  if (!raw || raw === 'other') return ''
+  if (raw === 'cbb' || raw === 'ncaab' || raw === 'ncaa-mens-basketball') return 'ncaam'
+  if (raw === 'fc' || raw === 'soccer') return 'soccer'
+  if (raw === 'cfb' || raw === 'ncaafootball' || raw === 'ncaa-football') return 'ncaaf'
+  if (raw === 'nba') return 'nba'
+  if (raw === 'wnba') return 'wnba'
+  if (raw === 'nfl') return 'nfl'
+  if (raw === 'mlb') return 'mlb'
+  if (raw === 'nhl') return 'nhl'
+  if (raw === 'golf') return 'golf'
+  if (raw === 'ufc') return 'ufc'
+  if (raw === 'ncaam') return 'ncaam'
+  if (raw === 'ncaaf') return 'ncaaf'
+  return raw
+}
+
+/**
  * Average play rating from Real `/plays/recent` rows (uses numeric `value`).
  */
 export function averagePlayRatingsFromPlays(
