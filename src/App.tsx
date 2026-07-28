@@ -38,13 +38,15 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<RequireAuth />}>
+            {/* Admin only needs site password + admin password — not a user account */}
+            <Route path="/admin/login" element={<AdminProvider><AdminLoginPage /></AdminProvider>} />
+            <Route element={<AdminProvider><RequireAdmin /></AdminProvider>}>
+              <Route path="/admin" element={<AdminPage />} />
+            </Route>
+
             <Route element={<AccountScope />}>
               <Route path="/account" element={<AccountPage />} />
               <Route element={<RequireAccount />}>
-                <Route path="/admin/login" element={<AdminProvider><AdminLoginPage /></AdminProvider>} />
-                <Route element={<AdminProvider><RequireAdmin /></AdminProvider>}>
-                  <Route path="/admin" element={<AdminPage />} />
-                </Route>
                 <Route
                   element={
                     <RaxDataProvider>
