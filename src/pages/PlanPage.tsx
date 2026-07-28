@@ -383,9 +383,11 @@ export default function PlanPage() {
     ],
   )
 
-  const unsoldPlanNet = useMemo(() => {
+  // Same planned buys/upgrades, collection without planned sells — Plan-only contrast
+  // ( /sell analyzeRemovedCard stays collection-only ).
+  const unsoldPlanAnalysis = useMemo(() => {
     if (soldCardIds.length === 0) return null
-    return analyzePlanCollection(data, plannedPasses, profilesByKey).combinedNetDelta
+    return analyzePlanCollection(data, plannedPasses, profilesByKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- collection + plan fingerprints
   }, [
     data.cards,
@@ -507,10 +509,17 @@ export default function PlanPage() {
     )
   }
 
-  const soldOnlyNetDelta = analysis.currentClaimable - unsoldClaimable
   const hasSoldScenario = soldCardIds.length > 0
   const planNetVsUnsold =
-    unsoldPlanNet != null ? analysis.combinedNetDelta - unsoldPlanNet : null
+    unsoldPlanAnalysis != null
+      ? analysis.combinedNetDelta - unsoldPlanAnalysis.combinedNetDelta
+      : null
+  // Absolute claimable change from planned sells in the with-plan world (buys applied).
+  const soldImpactWithPlan =
+    unsoldPlanAnalysis != null
+      ? analysis.withPlanClaimable - unsoldPlanAnalysis.withPlanClaimable
+      : null
+  const soldOnlyNetDelta = analysis.currentClaimable - unsoldClaimable
 
   const handleCatalogSelect = async (
     result: Parameters<typeof addPlannedPassFromCatalog>[0],
@@ -538,7 +547,8 @@ export default function PlanPage() {
         <p>
           Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
           Future; Just started stays manual. Mark planned sells so Plan scoring treats those owned
-          passes as sold — simulation only; your collection stays unchanged.
+          passes as sold with your planned buys applied — simulation only; collection unchanged.
+          The separate If sold page stays collection-only.
         </p>
         <div className="button-row">
           <Link className="button" to="/potential">
@@ -565,22 +575,34 @@ export default function PlanPage() {
           hint={
             hasSoldScenario
               ? planNetVsUnsold != null && planNetVsUnsold !== 0
-                ? `${formatSignedRax(displayRaxValue(planNetVsUnsold))} vs no planned sells · ${soldCardIds.length} sold in plan · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
-                : `With ${soldCardIds.length} planned sell${soldCardIds.length === 1 ? '' : 's'} · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+                ? `${formatSignedRax(displayRaxValue(planNetVsUnsold))} vs plan without sells · planned buys included · ${soldCardIds.length} sold in plan · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+                : `With ${soldCardIds.length} planned sell${soldCardIds.length === 1 ? '' : 's'} + planned buys · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
               : `${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
           }
         />
         {hasSoldScenario ? (
           <>
             <StatCard
-              label="Collection after planned sells"
-              value={displayRaxValue(analysis.currentClaimable).toLocaleString()}
-              hint={`${formatSignedRax(displayRaxValue(soldOnlyNetDelta))} vs keeping · before planned buys`}
+              label="Sold impact with plan"
+              value={
+                soldImpactWithPlan != null
+                  ? formatSignedRax(displayRaxValue(soldImpactWithPlan))
+                  : '—'
+              }
+              hint={
+                soldImpactWithPlan != null && soldImpactWithPlan !== soldOnlyNetDelta
+                  ? `${formatSignedRax(displayRaxValue(soldOnlyNetDelta))} sell-only (no planned buys) · vs same plan without sells`
+                  : 'Claimable change from planned sells after planned buys · vs same plan without sells'
+              }
             />
             <StatCard
               label="With plan after sells"
               value={displayRaxValue(analysis.withPlanClaimable).toLocaleString()}
-              hint={`${formatSignedRax(displayRaxValue(analysis.withPlanClaimable - unsoldClaimable))} vs current collection`}
+              hint={
+                unsoldPlanAnalysis != null
+                  ? `${displayRaxValue(unsoldPlanAnalysis.withPlanClaimable).toLocaleString()} with plan, no sells · ${formatSignedRax(displayRaxValue(analysis.withPlanClaimable - unsoldClaimable))} vs current collection`
+                  : `${formatSignedRax(displayRaxValue(analysis.withPlanClaimable - unsoldClaimable))} vs current collection`
+              }
             />
           </>
         ) : null}
@@ -590,7 +612,7 @@ export default function PlanPage() {
         <CollapsiblePanel
           className="nested-panel"
           title="Plan to sell"
-          description="Mark owned player passes as planned sells. Plan scoring treats them as sold so planned buys can claim freed slots — simulation only; does not sell or delete from your collection. Saved with your plan."
+          description="Mark owned player passes as planned sells. Plan nets and sold-impact stats strip them first, then apply planned buys/upgrades — so freed slots show up in Plan scoring. Simulation only; does not change /sell or your collection. Saved with your plan."
           badge={
             soldCardIds.length > 0
               ? `${soldCardIds.length} sold in plan`
