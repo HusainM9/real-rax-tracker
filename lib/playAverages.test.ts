@@ -33,22 +33,49 @@ describe('averagePlayRatingsFromPlays', () => {
     expect(PLAYS_PER_PACK).toBe(3)
   })
 
-  it('skips invalid values', () => {
+  it('uses absolute values for negatives and zeros; skips non-numeric', () => {
     const result = averagePlayRatingsFromPlays([
       { value: '2.5' },
       { value: 0 },
       { value: 'nope' },
       { value: null },
+      { value: -1.5 },
       { value: 7.5 },
     ])
-    expect(result?.playCount).toBe(2)
-    expect(result?.averagePlayRating).toBe(5)
-    expect(result?.averageRatingPerPack).toBe(15)
+    // abs: 2.5 + 0 + 1.5 + 7.5 = 11.5
+    expect(result?.playCount).toBe(4)
+    expect(result?.ratingSum).toBe(11.5)
+    expect(result?.averagePlayRating).toBe(2.875)
+    expect(result?.averageRatingPerPack).toBe(8.625)
+  })
+
+  it('averages mixed signs via absolute values', () => {
+    const result = averagePlayRatingsFromPlays([
+      { value: -7 },
+      { value: -1 },
+      { value: 2 },
+    ])
+    expect(result?.playCount).toBe(3)
+    expect(result?.ratingSum).toBe(10)
+    expect(result?.averagePlayRating).toBeCloseTo(10 / 3)
+    expect(result?.averageRatingPerPack).toBeCloseTo(10)
+  })
+
+  it('averages pitcher-style all-negative samples as absolutes', () => {
+    const result = averagePlayRatingsFromPlays([
+      { value: '-7.7' },
+      { value: -6.6 },
+      { value: '-5.2' },
+    ])
+    expect(result?.playCount).toBe(3)
+    expect(result?.ratingSum).toBeCloseTo(19.5)
+    expect(result?.averagePlayRating).toBeCloseTo(6.5)
+    expect(result?.averageRatingPerPack).toBeCloseTo(19.5)
   })
 
   it('returns null when no valid plays', () => {
     expect(averagePlayRatingsFromPlays([])).toBeNull()
-    expect(averagePlayRatingsFromPlays([{ value: 0 }])).toBeNull()
+    expect(averagePlayRatingsFromPlays([{ value: 'nope' }])).toBeNull()
   })
 })
 

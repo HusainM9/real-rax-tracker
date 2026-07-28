@@ -21,9 +21,11 @@ export type PlayRatingAverage = {
 }
 
 function playRatingValue(play: { value?: string | number | null }): number | null {
+  if (play.value === null || play.value === undefined || play.value === '') return null
   const n = typeof play.value === 'number' ? play.value : Number(play.value)
-  if (!Number.isFinite(n) || n <= 0) return null
-  return n
+  // Absolute value: pitcher (and other) plays often store batter-centric negatives.
+  if (!Number.isFinite(n)) return null
+  return Math.abs(n)
 }
 
 /**
@@ -49,7 +51,8 @@ export function toRealPlaySportSlug(sport: string): string {
 }
 
 /**
- * Average play rating from Real `/plays/recent` rows (uses numeric `value`).
+ * Average play rating from Real `/plays/top` (or `/plays/recent`) rows (numeric `value`).
+ * Each value is taken as absolute before averaging (e.g. −7 → 7).
  */
 export function averagePlayRatingsFromPlays(
   plays: ReadonlyArray<{ value?: string | number | null }>,

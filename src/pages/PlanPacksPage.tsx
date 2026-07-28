@@ -189,7 +189,14 @@ function PackPassRow({
             </label>
           </div>
 
-          {tracker.averagePlayRating != null && tracker.playCount != null ? (
+          {tracker.playCount != null && tracker.playCount === 0 ? (
+            <p className="import-hint pack-play-average-hint">
+              Real returned no play ratings for this player — using min {MIN_RATING_PER_PACK}/pack.
+              {tracker.lastPlaysImportedAt
+                ? ` · Checked ${new Date(tracker.lastPlaysImportedAt).toLocaleString()}`
+                : ''}
+            </p>
+          ) : tracker.averagePlayRating != null && tracker.playCount != null ? (
             <p className="import-hint pack-play-average-hint">
               Avg play rating {tracker.averagePlayRating.toFixed(2)} across {tracker.playCount}{' '}
               play{tracker.playCount === 1 ? '' : 's'}
@@ -790,14 +797,16 @@ export default function PlanPacksPage() {
         return
       }
       updatePackTracker(tracker.id, {
-        averagePlayRating: result.averagePlayRating,
+        averagePlayRating: result.noPlaysFallback ? 0 : result.averagePlayRating,
         playCount: result.playCount,
         lastPlaysImportedAt: new Date().toISOString(),
         ratingPerPack: result.ratingPerPack,
       })
       setImportStatusByPass((current) => ({
         ...current,
-        [pass.id]: `Avg ${result.averagePlayRating.toFixed(2)}/play across ${result.playCount} plays → ${result.ratingPerPack}/pack (${PLAYS_PER_PACK} plays/pack).`,
+        [pass.id]: result.noPlaysFallback
+          ? `Real has no play ratings for ${pass.name} — using min ${result.ratingPerPack}/pack.`
+          : `Avg ${result.averagePlayRating.toFixed(2)}/play across ${result.playCount} plays → ${result.ratingPerPack}/pack (${PLAYS_PER_PACK} plays/pack).`,
       }))
     } catch (error) {
       setImportStatusByPass((current) => ({
@@ -873,12 +882,17 @@ export default function PlanPacksPage() {
               continue
             }
             updatePackTracker(tracker.id, {
-              averagePlayRating: result.averagePlayRating,
+              averagePlayRating: result.noPlaysFallback ? 0 : result.averagePlayRating,
               playCount: result.playCount,
               lastPlaysImportedAt: importedAt,
               ratingPerPack: result.ratingPerPack,
             })
             updated += 1
+            if (result.noPlaysFallback) {
+              errorNotes.push(
+                `${pass.name}: no Real play ratings (using min ${result.ratingPerPack}/pack)`,
+              )
+            }
           }
         } catch (error) {
           const detail =

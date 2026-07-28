@@ -719,13 +719,13 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                     : tracker.ratingPerPack,
                 averagePlayRating:
                   patch.averagePlayRating !== undefined
-                    ? Number.isFinite(averagePlayRating) && averagePlayRating > 0
+                    ? Number.isFinite(averagePlayRating)
                       ? averagePlayRating
                       : undefined
                     : tracker.averagePlayRating,
                 playCount:
                   patch.playCount !== undefined
-                    ? Number.isFinite(playCount) && playCount > 0
+                    ? Number.isFinite(playCount) && playCount >= 0
                       ? Math.floor(playCount)
                       : undefined
                     : tracker.playCount,

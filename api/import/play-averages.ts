@@ -1,5 +1,5 @@
 import {
-  listPlayerRecentPlays,
+  listPlayerPlaysForPackAverage,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
@@ -8,6 +8,7 @@ import {
   averagePlayRatingsFromPlays,
   ratingPerPackFromPlayAverage,
   toRealPlaySportSlug,
+  MIN_RATING_PER_PACK,
 } from '../../lib/playAverages'
 import { requireAppSession } from '../admin/_helpers'
 
@@ -31,8 +32,9 @@ export type PlayAverageResult = {
   ratingSum: number
   averagePlayRating: number
   averageRatingPerPack: number
-  /** Rounded divisor suitable for packs estimates. */
   ratingPerPack: number
+  /** True when Real returned no plays and we fell back to MIN_RATING_PER_PACK. */
+  noPlaysFallback?: boolean
 }
 
 /**
@@ -44,7 +46,7 @@ export const config = {
   runtime: 'edge',
 }
 
-/** One Real request per player is enough for pack estimates (up to this many recent plays). */
+/** One Real play sample request per player (top, or recent fallback; Real accepts up to ≥1000). */
 const PLAY_SAMPLE_LIMIT = 1000
 
 function parseEntityIdFromExternalKey(externalKey?: string): number | null {
@@ -152,7 +154,9 @@ export default async function handler(request: Request): Promise<Response> {
     const context: RealApiContext = { config: realConfig, signal: request.signal }
 
     try {
-      const plays = await listPlayerRecentPlays(
+      // Prefer `/plays/top?viewFrame=season` (MLB pitchers + season samples). Fall back to
+      // `/plays/recent` when top is empty — some NFL/NHL seasons have recent data but no top sample.
+      const { plays } = await listPlayerPlaysForPackAverage(
         {
           entityId: pass.entityId,
           sport: pass.sportSlug,
@@ -163,16 +167,25 @@ export default async function handler(request: Request): Promise<Response> {
       )
       const average = averagePlayRatingsFromPlays(plays)
       if (!average) {
+        // Empty season sample — use the pack minimum instead of failing the import.
         return Response.json({
           ok: true,
-          resultCount: 0,
-          results: [],
-          errors: [
+          resultCount: 1,
+          results: [
             {
               externalKey: pass.externalKey,
-              error: 'No rated plays found for this player/season.',
+              entityId: pass.entityId,
+              sport: pass.sportSlug,
+              seasonYear: pass.seasonYear,
+              playCount: 0,
+              ratingSum: 0,
+              averagePlayRating: 0,
+              averageRatingPerPack: MIN_RATING_PER_PACK,
+              ratingPerPack: MIN_RATING_PER_PACK,
+              noPlaysFallback: true,
             },
           ],
+          errors: [],
         })
       }
 
@@ -190,6 +203,7 @@ export default async function handler(request: Request): Promise<Response> {
             averagePlayRating: Number(average.averagePlayRating.toFixed(4)),
             averageRatingPerPack: Number(average.averageRatingPerPack.toFixed(4)),
             ratingPerPack: ratingPerPackFromPlayAverage(average.averagePlayRating),
+            noPlaysFallback: false,
           },
         ],
         errors: [],
