@@ -1,7 +1,7 @@
 /**
  * Read-only live probe of Real's API for shape discovery.
  *
- * Usage: node scripts/probe-real.mjs <passes|earnings|params|pagination|seasons|shop> [args]
+ * Usage: node scripts/probe-real.mjs <passes|earnings|params|pagination|seasons|shop|plays> [args]
  *
  * shop args: [sport] [season] [entityType]  (defaults: ncaam 2026 player)
  * Also probes before=0/20, a second live season (mlb/soccer team), and field inventory.
@@ -503,6 +503,145 @@ async function phaseShop(cfg, args) {
   writeCache(`shop-${sport}-${season}-${entityType}-far`, far)
 }
 
+/**
+ * Probe candidate endpoints for per-play / boost-history ratings on an owned pass.
+ * Usage: node scripts/probe-real.mjs plays [sport season entityType entityId]
+ */
+async function phasePlays(cfg, args) {
+  let sport
+  let season
+  let entityType
+  let entityId
+  let passId
+  let boostInfo
+
+  if (args.length >= 4) {
+    ;[sport, season, entityType, entityId] = args
+  } else {
+    let passes = []
+    try {
+      passes = readCache('bot-passes').json?.passes ?? []
+    } catch {
+      const bot = await get(cfg, `/userpasses/${cfg.botUserId}/passes`)
+      writeCache('bot-passes', bot)
+      passes = bot.json?.passes ?? []
+    }
+    const ranked = passes
+      .filter(
+        (pass) =>
+          String(pass.entityType ?? '').toLowerCase() === 'player' &&
+          pass.boostInfo &&
+          Number(pass.boostInfo.progress) > 0,
+      )
+      .sort((a, b) => Number(b.boostInfo?.progress ?? 0) - Number(a.boostInfo?.progress ?? 0))
+    const pick = ranked[0]
+    if (!pick) {
+      console.error('No player pass with boost progress found in bot cache.')
+      return
+    }
+    sport = pick.sport
+    season = pick.season
+    entityType = pick.entityType
+    entityId = pick.entityId
+    passId = pick.id
+    boostInfo = pick.boostInfo
+    console.log(
+      'using pass:',
+      JSON.stringify({
+        label: pick.label,
+        sport,
+        season,
+        entityType,
+        entityId,
+        passId,
+        boostInfo,
+      }),
+    )
+  }
+
+  const userId = cfg.botUserId
+  const candidates = [
+    `/userpassplays/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassplayratings/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassboost/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassboosthistory/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassboostrating/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassratings/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassratinghistory/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassmoments/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpasspacks/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/userpassearnings/${sport}/season/${season}/entity/${entityType}/${entityId}/plays`,
+    `/userpasses/${userId}/pass/${passId ?? entityId}/plays`,
+    `/userpasses/${userId}/passes/${passId ?? entityId}/plays`,
+    `/userpasses/${userId}/plays`,
+    `/plays/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/playratings/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/boost/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/boosthistory/${sport}/season/${season}/entity/${entityType}/${entityId}`,
+    `/pass/${passId ?? entityId}/plays`,
+    `/pass/${passId ?? entityId}/boost`,
+    `/userpass/${passId ?? entityId}/plays`,
+    `/userpass/${sport}/${season}/${entityType}/${entityId}/plays`,
+    `/userpassshop/${sport}/season/${season}/entity/${entityType}/section/plays`,
+    `/userpassshop/${sport}/season/${season}/entity/${entityType}/section/rating`,
+    `/userpassshop/${sport}/season/${season}/entity/${entityType}/section/boost`,
+    `/userpassshop/${sport}/season/${season}/entity/${entityType}/${entityId}/section/plays`,
+    `/collecting/${sport}/season/${season}/entity/${entityType}/${entityId}/plays`,
+    `/user/${userId}/plays`,
+    `/user/${userId}/boostrating`,
+  ]
+
+  const hits = []
+  for (const urlPath of candidates) {
+    if (urlPath.includes('undefined')) {
+      console.log(`skip (undefined segment): ${urlPath}`)
+      continue
+    }
+    const result = await get(cfg, urlPath)
+    const { key, rows } = findArrayField(result.json)
+    const ok = result.status >= 200 && result.status < 300 && result.json
+    console.log(
+      `${ok ? 'HIT' : 'miss'} ${result.status} ${urlPath}` +
+        (ok ? ` keys=${Object.keys(result.json).join(',')} array=${key} len=${rows.length}` : ''),
+    )
+    if (!ok && result.snippet) console.log('  ', result.snippet.slice(0, 120))
+    if (ok) {
+      hits.push({ urlPath, status: result.status, keys: Object.keys(result.json), arrayKey: key, rowCount: rows.length })
+      if (rows[0]) {
+        console.log('  row keys:', Object.keys(rows[0]))
+        console.log('  first row:', JSON.stringify(rows[0]).slice(0, 600))
+      } else {
+        console.log('  body preview:', JSON.stringify(result.json).slice(0, 800))
+      }
+      writeCache(`plays-hit-${urlPath.replace(/[^\w.-]+/g, '_')}`, result)
+    }
+  }
+
+  // Also dump full boostInfo + any rating-ish keys on the pass itself.
+  const fresh = await get(cfg, `/userpasses/${userId}/passes`)
+  const match = (fresh.json?.passes ?? []).find(
+    (pass) =>
+      String(pass.sport) === String(sport) &&
+      String(pass.season) === String(season) &&
+      String(pass.entityType) === String(entityType) &&
+      String(pass.entityId) === String(entityId),
+  )
+  console.log('\nmatched pass full object keys:', match ? Object.keys(match) : null)
+  console.log('matched pass boostInfo:', JSON.stringify(match?.boostInfo ?? boostInfo))
+  console.log('matched pass rating-ish fields:', JSON.stringify(match ? {
+    boostInfo: match.boostInfo,
+    playRating: match.playRating,
+    rating: match.rating,
+    plays: match.plays,
+    playCount: match.playCount,
+    moments: match.moments,
+    packOpens: match.packOpens,
+  } : null))
+
+  writeCache('plays-probe-summary', { sport, season, entityType, entityId, passId, hits, matchBoost: match?.boostInfo })
+  console.log('\nHIT count:', hits.length)
+}
+
 async function main() {
   loadEnvLocal()
   const cfg = config()
@@ -522,6 +661,7 @@ async function main() {
   else if (phase === 'pagination') await phasePagination(cfg)
   else if (phase === 'seasons') phaseSeasons()
   else if (phase === 'shop') await phaseShop(cfg, args)
+  else if (phase === 'plays') await phasePlays(cfg, args)
   else console.error('unknown phase')
 }
 

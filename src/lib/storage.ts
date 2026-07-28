@@ -332,6 +332,16 @@ function hydratePackTracker(value: unknown): PackTracker | null {
         ? undefined
         : Number(value.ratingPerPack),
     ),
+    averagePlayRating: (() => {
+      const n = Number(value.averagePlayRating)
+      return Number.isFinite(n) && n > 0 ? n : undefined
+    })(),
+    playCount: (() => {
+      const n = Number(value.playCount)
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+    })(),
+    lastPlaysImportedAt:
+      typeof value.lastPlaysImportedAt === 'string' ? value.lastPlaysImportedAt : undefined,
     lastAutoIncrementDay:
       typeof value.lastAutoIncrementDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastAutoIncrementDay)
         ? value.lastAutoIncrementDay

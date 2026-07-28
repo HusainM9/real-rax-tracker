@@ -2396,6 +2396,10 @@ button.plan-tag:hover {
   font-size: 0.76rem;
 }
 
+.pack-play-average-hint {
+  margin: 0.15rem 0 0.35rem;
+}
+
 .pack-stat-input input {
   max-width: 5.5rem;
   width: 100%;
