@@ -534,13 +534,17 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
 
 /**
  * Default Rank catalog sport+season exclusions.
- * Keys use season labels (`2022-23`), not seasonYear — NFL is start-year encoded
- * (`seasonYear` 2022 → label `2022-23` via `seasonYearKindForSport`).
+ * Keys use season labels (`2022-23`), not seasonYear — NFL/NHL are start-year encoded
+ * (`seasonYear` 2022 → label `2022-23`); CBB is end-year (`seasonYear` 2023 → `2022-23`).
  */
 export const DEFAULT_RANK_EXCLUDED_SPORT_SEASONS: ReadonlyArray<{
   sport: Sport
   seasonLabel: string
-}> = [{ sport: 'NFL', seasonLabel: '2022-23' }]
+}> = [
+  { sport: 'NFL', seasonLabel: '2022-23' },
+  { sport: 'NHL', seasonLabel: '2022-23' },
+  { sport: 'CBB', seasonLabel: '2022-23' },
+]
 
 export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: number }): string {
   const label = item.seasonLabel.trim()

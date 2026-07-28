@@ -3,7 +3,7 @@ import type {
   CatalogPassInput,
   CatalogPassKind,
 } from './meowbotCatalogStore'
-import { claimDayInPassSeason } from './seasonClaimWindow'
+import { claimDayInPassSeason, expectedSeasonLabelFromYear } from './seasonClaimWindow'
 
 export type NormalizedMeowbotCatalog = {
   passes: CatalogPassInput[]
@@ -51,8 +51,7 @@ function sportValue(input: unknown): string {
 }
 
 function seasonLabelFromYear(seasonYear: number, sport: string): string {
-  if (['MLB', 'WNBA', 'Golf', 'UFC'].includes(sport)) return String(seasonYear)
-  return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
+  return expectedSeasonLabelFromYear(seasonYear, sport)
 }
 
 function claimDayValue(input: unknown): string {

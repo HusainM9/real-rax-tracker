@@ -21,7 +21,7 @@ describe('normalizeGlobalMeowbotCatalog', () => {
           sport: 'nfl',
           team_name: 'Test Team',
           pass_kind: 'team',
-          daily_earnings: [{ claim_day: '2025-09-01', base_rax_earned: 18 }],
+          daily_earnings: [{ claim_day: '2026-09-01', base_rax_earned: 18 }],
         },
       ],
     })
@@ -44,7 +44,7 @@ describe('normalizeGlobalMeowbotCatalog', () => {
         passKind: 'team',
         sport: 'NFL',
         seasonYear: 2026,
-        seasonLabel: '2025-26',
+        seasonLabel: '2026-27',
         name: 'Test Team',
         rarityLabel: undefined,
         sourceUpdatedAt: undefined,
@@ -59,7 +59,7 @@ describe('normalizeGlobalMeowbotCatalog', () => {
       },
       {
         externalKey: '200|2026|NFL',
-        claimDay: '2025-09-01',
+        claimDay: '2026-09-01',
         baseRaxEarned: 18,
         playerBoxScoreId: null,
       },
@@ -72,7 +72,7 @@ describe('normalizeGlobalMeowbotCatalog', () => {
       players: [
         {
           entityId: 300,
-          season: 2025,
+          season: 2024,
           sport: 'nfl',
           playerName: 'Derrick Henry',
           rows: [
@@ -86,13 +86,13 @@ describe('normalizeGlobalMeowbotCatalog', () => {
 
     expect(normalized.dailyEarnings).toEqual([
       {
-        externalKey: '300|2025|NFL',
+        externalKey: '300|2024|NFL',
         claimDay: '2024-09-08',
         baseRaxEarned: 12,
         playerBoxScoreId: null,
       },
       {
-        externalKey: '300|2025|NFL',
+        externalKey: '300|2024|NFL',
         claimDay: '2025-01-19',
         baseRaxEarned: 18,
         playerBoxScoreId: null,
