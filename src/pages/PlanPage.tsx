@@ -5,8 +5,10 @@ import CollapsiblePanel from '../components/CollapsiblePanel'
 import { useRaxData } from '../context/RaxDataContext'
 import type { CatalogImportProfile } from '../lib/catalogApi'
 import { fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
+import { type RarityFilterValue, type SortDirection } from '../lib/cardSort'
 import { computeYearRollup } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
+import { formatRax } from '../lib/format'
 import { isPlayerPass, isPlayerPassForSell } from '../lib/passKind'
 import {
   analyzePlanCollection,
@@ -20,6 +22,7 @@ import {
   plannedPassProgressTone,
   rankPlanFinishedForSalesAsync,
   withCollectionAssumedIconic1,
+  type PlanFinishedCardSource,
   type PlanFinishedSellRankResult,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
@@ -27,7 +30,7 @@ import {
   isAtLeastIconic1Rarity,
   RECOMMENDATION_SIMULATED_RARITY,
 } from '../lib/passRecommendation'
-import { isLegendaryPlusRarity } from '../lib/rarityFilter'
+import { isLegendaryPlusRarity, RARITY_TIERS } from '../lib/rarityFilter'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import {
   formatSignedRax,
@@ -35,11 +38,33 @@ import {
   withoutCards,
   type SellRankProgress,
 } from '../lib/removeCardAnalysis'
-import type { PlannedPassProgress, PlayerCard } from '../types/rax'
+import {
+  filterSellRankRows,
+  SELL_RANK_SORT_OPTIONS,
+  sortSellRankRows,
+  toSavedSellRankRow,
+  type SellRankSortKey,
+} from '../lib/sellRankings'
+import { SPORTS, type PlannedPassProgress, type PlayerCard, type Sport } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+const PLAN_SELL_RANK_PAGE_SIZE = 50
 
 type PlanPassSortMode = 'progress' | 'recent'
+type PlanSellSourceFilter = 'all' | 'owned' | 'planned'
+
+type PlanSellDisplayRow = ReturnType<typeof toSavedSellRankRow> & {
+  source: PlanFinishedCardSource
+}
+
+function paginate<T>(items: T[], page: number, pageSize: number): T[] {
+  const start = (page - 1) * pageSize
+  return items.slice(start, start + pageSize)
+}
+
+function pageCount(count: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(count / pageSize))
+}
 
 function signedRaxClass(value: number): string {
   if (value > 0) return 'sale-positive'
@@ -189,7 +214,16 @@ export default function PlanPage() {
   const [planSellRankBusy, setPlanSellRankBusy] = useState(false)
   const [planSellRankProgress, setPlanSellRankProgress] = useState<SellRankProgress | null>(null)
   const [planSellRankStatus, setPlanSellRankStatus] = useState('')
-  const [planSellRankFilter, setPlanSellRankFilter] = useState<'all' | 'owned' | 'planned'>('all')
+  const [planSellSourceFilter, setPlanSellSourceFilter] = useState<PlanSellSourceFilter>('all')
+  const [includeJustStartedInSellRank, setIncludeJustStartedInSellRank] = useState(false)
+  const [planSellRankQuery, setPlanSellRankQuery] = useState('')
+  const [planSellRankSport, setPlanSellRankSport] = useState<Sport | 'All'>('All')
+  const [planSellRankRarity, setPlanSellRankRarity] = useState<RarityFilterValue>('All')
+  const [planSellRankSortKey, setPlanSellRankSortKey] = useState<SellRankSortKey>('netClaimable')
+  const [planSellRankSortDirection, setPlanSellRankSortDirection] =
+    useState<SortDirection>('desc')
+  const [planSellRankPage, setPlanSellRankPage] = useState(1)
+  const [planSellSkippedPage, setPlanSellSkippedPage] = useState(1)
   const planSellRankAbortRef = useRef<AbortController | null>(null)
 
   const plannedPasses = data.plannedPasses ?? []
@@ -591,10 +625,13 @@ export default function PlanPage() {
     planSellRankAbortRef.current = controller
     setPlanSellRankBusy(true)
     setPlanSellRankProgress(null)
+    setPlanSellRankPage(1)
+    setPlanSellSkippedPage(1)
     setPlanSellRankStatus('Building plan-finished collection and ranking…')
     try {
       const result = await rankPlanFinishedForSalesAsync(data, plannedPasses, profilesByKey, {
         assumeCollectionIconic1,
+        includeJustStarted: includeJustStartedInSellRank,
         signal: controller.signal,
         onProgress: setPlanSellRankProgress,
       })
@@ -602,8 +639,13 @@ export default function PlanPage() {
       const notNeeded = result.rankings.filter((row) =>
         isNotNeededForClaims(row.analysis.netClaimableDelta),
       ).length
+      const skippedJustStarted = includeJustStartedInSellRank
+        ? 0
+        : plannedPasses.filter(
+            (pass) => normalizePlannedPassProgress(pass.progress) === 'just-started',
+          ).length
       setPlanSellRankStatus(
-        `Ranked ${result.rankings.length} pass${result.rankings.length === 1 ? '' : 'es'} after plan (buys at ${RECOMMENDATION_SIMULATED_RARITY}${assumeCollectionIconic1 ? ', collection at Iconic 1' : ''})${notNeeded > 0 ? ` · ${notNeeded} not needed for claims` : ''}.`,
+        `Ranked ${result.rankings.length} pass${result.rankings.length === 1 ? '' : 'es'} after plan (buys at ${RECOMMENDATION_SIMULATED_RARITY}${assumeCollectionIconic1 ? ', collection at Iconic 1' : ''})${notNeeded > 0 ? ` · ${notNeeded} not needed for claims` : ''}${skippedJustStarted > 0 ? ` · ${skippedJustStarted} Just started excluded` : ''}.`,
       )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -622,16 +664,96 @@ export default function PlanPage() {
     planSellRankAbortRef.current?.abort()
   }
 
-  const filteredPlanSellRankings = useMemo(() => {
+  const planSellDisplayRows = useMemo((): PlanSellDisplayRow[] => {
     if (!planSellRankResult) return []
-    if (planSellRankFilter === 'all') return planSellRankResult.rankings
-    if (planSellRankFilter === 'owned') {
-      return planSellRankResult.rankings.filter((row) => row.source === 'owned')
-    }
-    return planSellRankResult.rankings.filter(
-      (row) => row.source === 'planned' || row.source === 'plan-upgrade',
+    return planSellRankResult.rankings.map((row) => ({
+      ...toSavedSellRankRow(row),
+      source: row.source,
+    }))
+  }, [planSellRankResult])
+
+  const displayedPlanSellRankings = useMemo(() => {
+    const bySource =
+      planSellSourceFilter === 'all'
+        ? planSellDisplayRows
+        : planSellSourceFilter === 'owned'
+          ? planSellDisplayRows.filter((row) => row.source === 'owned')
+          : planSellDisplayRows.filter(
+              (row) => row.source === 'planned' || row.source === 'plan-upgrade',
+            )
+    const sourceByCardId = new Map(bySource.map((row) => [row.cardId, row.source]))
+    const filtered = filterSellRankRows(
+      bySource,
+      planSellRankSport,
+      planSellRankRarity,
+      planSellRankQuery,
     )
-  }, [planSellRankFilter, planSellRankResult])
+    const sorted = sortSellRankRows(filtered, planSellRankSortKey, planSellRankSortDirection)
+    return sorted.map((row) => ({
+      ...row,
+      source: sourceByCardId.get(row.cardId) ?? ('owned' as PlanFinishedCardSource),
+    }))
+  }, [
+    planSellDisplayRows,
+    planSellRankQuery,
+    planSellRankRarity,
+    planSellRankSortDirection,
+    planSellRankSortKey,
+    planSellRankSport,
+    planSellSourceFilter,
+  ])
+
+  useEffect(() => {
+    setPlanSellRankPage(1)
+  }, [
+    planSellRankQuery,
+    planSellRankRarity,
+    planSellRankSortDirection,
+    planSellRankSortKey,
+    planSellRankSport,
+    planSellSourceFilter,
+  ])
+
+  const paginatedPlanSellRankings = useMemo(
+    () => paginate(displayedPlanSellRankings, planSellRankPage, PLAN_SELL_RANK_PAGE_SIZE),
+    [displayedPlanSellRankings, planSellRankPage],
+  )
+  const planSellRankPageTotal = pageCount(
+    displayedPlanSellRankings.length,
+    PLAN_SELL_RANK_PAGE_SIZE,
+  )
+  const planSellRankOffset = (planSellRankPage - 1) * PLAN_SELL_RANK_PAGE_SIZE
+
+  const planSellSkippedPasses = planSellRankResult?.skippedPlayerPasses ?? []
+  const paginatedPlanSellSkipped = useMemo(
+    () => paginate(planSellSkippedPasses, planSellSkippedPage, PLAN_SELL_RANK_PAGE_SIZE),
+    [planSellSkippedPage, planSellSkippedPasses],
+  )
+  const planSellSkippedPageTotal = pageCount(
+    planSellSkippedPasses.length,
+    PLAN_SELL_RANK_PAGE_SIZE,
+  )
+
+  const planSellSkipHint = planSellRankResult
+    ? [
+        planSellRankResult.skippedTeamPasses > 0
+          ? `${planSellRankResult.skippedTeamPasses} team pass${planSellRankResult.skippedTeamPasses === 1 ? '' : 'es'} excluded`
+          : '',
+        planSellRankResult.skippedWithoutEarnings > 0
+          ? `${planSellRankResult.skippedWithoutEarnings} player pass${planSellRankResult.skippedWithoutEarnings === 1 ? '' : 'es'} skipped (no earnings)`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : ''
+
+  const justStartedPlannedCount = useMemo(
+    () =>
+      plannedPasses.filter(
+        (pass) => normalizePlannedPassProgress(pass.progress) === 'just-started',
+      ).length,
+    [plannedPasses],
+  )
 
   return (
     <div className="page-stack plan-page">
@@ -775,7 +897,7 @@ export default function PlanPage() {
       <CollapsiblePanel
         className="nested-panel"
         title="Sell rank after plan"
-        description={`Simulate finishing your plan: apply every planned buy/upgrade at ${RECOMMENDATION_SIMULATED_RARITY}, then rank the whole collection like If sold. Highest net (or “not needed”) = safest to sell or drop from the plan. Simulation only — does not change /sell or your collection.`}
+        description={`Same ranking as If sold, on a simulated collection after your plan finishes (planned buys at ${RECOMMENDATION_SIMULATED_RARITY}). Find planned buys to drop and owned passes that become unused. Simulation only — does not change /sell or your collection.`}
         badge={
           planSellRankResult
             ? `${planSellRankResult.rankings.length} ranked`
@@ -785,7 +907,11 @@ export default function PlanPage() {
         }
         defaultOpen={Boolean(planSellRankResult)}
       >
-        <div className="sort-controls">
+        <p className="import-hint">
+          Net 0 means selling would not reduce total claimable RAX. Team passes excluded. Just
+          started planned passes are excluded unless you toggle them on.
+        </p>
+        <div className="button-row wrap-row">
           <button
             className={`button${assumeCollectionIconic1 ? ' is-selected' : ''}`}
             type="button"
@@ -797,100 +923,307 @@ export default function PlanPage() {
             Assume collection Iconic 1
           </button>
           <button
-            className="button"
+            className={`button${includeJustStartedInSellRank ? ' is-selected' : ''}`}
+            type="button"
+            aria-pressed={includeJustStartedInSellRank}
+            disabled={planSellRankBusy}
+            title="Include planned passes tagged Just started in the finished-plan simulation"
+            onClick={() => setIncludeJustStartedInSellRank((current) => !current)}
+          >
+            Include Just started
+            {justStartedPlannedCount > 0 ? ` (${justStartedPlannedCount})` : ''}
+          </button>
+          <button
+            className="button primary"
             type="button"
             disabled={planSellRankBusy || (plannedPasses.length === 0 && data.cards.length === 0)}
             onClick={() => void runPlanFinishedSellRank()}
           >
-            {planSellRankBusy ? 'Ranking…' : 'Rank sales after plan'}
+            {planSellRankBusy
+              ? 'Calculating…'
+              : planSellRankResult
+                ? 'Recalculate rankings'
+                : 'Calculate rankings'}
           </button>
           {planSellRankBusy ? (
             <button className="button" type="button" onClick={cancelPlanFinishedSellRank}>
               Cancel
             </button>
           ) : null}
-          {planSellRankResult ? (
-            <label className="field inline-field">
-              <span>Show</span>
-              <select
-                value={planSellRankFilter}
-                disabled={planSellRankBusy}
-                onChange={(event) =>
-                  setPlanSellRankFilter(event.target.value as 'all' | 'owned' | 'planned')
-                }
-              >
-                <option value="all">All passes</option>
-                <option value="owned">Owned only</option>
-                <option value="planned">Plan / upgrades</option>
-              </select>
-            </label>
+          {planSellRankResult && !planSellRankBusy ? (
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setPlanSellRankResult(null)
+                setPlanSellRankStatus('')
+              }}
+            >
+              Clear results
+            </button>
           ) : null}
         </div>
         {planSellRankProgress ? (
           <p className="import-progress">
-            Ranking {planSellRankProgress.current}/{planSellRankProgress.total}
-            {planSellRankProgress.label ? ` · ${planSellRankProgress.label}` : ''}
+            Analyzing pass {planSellRankProgress.current}/{planSellRankProgress.total}
+            {planSellRankProgress.label ? ` — ${planSellRankProgress.label}` : ''}
           </p>
         ) : null}
         {planSellRankStatus ? <p className="import-status">{planSellRankStatus}</p> : null}
-        {filteredPlanSellRankings.length > 0 ? (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Pass</th>
-                  <th>Source</th>
-                  <th>Claimable</th>
-                  <th>Net if sold</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPlanSellRankings.map((row, index) => {
-                  const notNeeded = isNotNeededForClaims(row.analysis.netClaimableDelta)
-                  return (
-                    <tr key={row.analysis.card.id}>
-                      <td>{index + 1}</td>
-                      <td>
-                        {row.analysis.card.name}
-                        <br />
-                        <small className="table-sub">
-                          {row.analysis.card.sport} · {row.analysis.card.season}
-                          {row.analysis.card.rarityLabel
-                            ? ` · ${row.analysis.card.rarityLabel}`
-                            : ''}
-                          {notNeeded ? ' · not needed' : ''}
-                        </small>
-                      </td>
-                      <td>
-                        <span className="badge">{planFinishedSourceLabel(row.source)}</span>
-                      </td>
-                      <td>{displayRaxValue(row.claimableNow).toLocaleString()}</td>
-                      <td>
-                        <strong className={signedRaxClass(row.analysis.netClaimableDelta)}>
-                          {formatSignedRax(displayRaxValue(row.analysis.netClaimableDelta))}
-                        </strong>
-                        {row.analysis.freedClaimableRax > 0 ? (
-                          <>
-                            <br />
-                            <small className="table-sub">
-                              frees {displayRaxValue(row.analysis.freedClaimableRax).toLocaleString()}
-                            </small>
-                          </>
-                        ) : null}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : planSellRankResult ? (
-          <p className="empty">No rows match that filter.</p>
+        {planSellRankResult ? (
+          planSellRankResult.rankings.length === 0 ? (
+            <p className="empty">
+              No player passes with earnings to rank.
+              {planSellSkipHint ? ` ${planSellSkipHint}.` : ''}
+            </p>
+          ) : (
+            <>
+              <p className="import-hint">
+                {displayedPlanSellRankings.length} shown of {planSellRankResult.rankings.length}{' '}
+                ranked pass{planSellRankResult.rankings.length === 1 ? '' : 'es'}.
+                {planSellSkipHint ? ` ${planSellSkipHint}.` : ''}
+              </p>
+              {planSellSkippedPasses.length > 0 ? (
+                <section className="import-failures">
+                  <p className="import-hint">
+                    <strong>
+                      {planSellSkippedPasses.length} player pass
+                      {planSellSkippedPasses.length === 1 ? '' : 'es'} could not be ranked.
+                    </strong>{' '}
+                    Load catalog earnings for planned buys or add earnings on{' '}
+                    <Link to="/entry">Entry</Link>.
+                  </p>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Player pass</th>
+                          <th>Sport</th>
+                          <th>Season</th>
+                          <th>Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedPlanSellSkipped.map((pass) => (
+                          <tr key={`${pass.cardId}|${pass.reason}|${pass.detail}`}>
+                            <td>
+                              {pass.name || 'Unnamed pass'}
+                              {pass.rarityLabel ? (
+                                <>
+                                  <br />
+                                  <small className="table-sub">{pass.rarityLabel}</small>
+                                </>
+                              ) : null}
+                            </td>
+                            <td>{pass.sport}</td>
+                            <td>{pass.season || '—'}</td>
+                            <td>
+                              {pass.reason === 'no_earnings' ? 'No earnings' : 'Analysis failed'}
+                              <br />
+                              <small className="table-sub">{pass.detail}</small>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {planSellSkippedPasses.length > PLAN_SELL_RANK_PAGE_SIZE ? (
+                    <div className="table-pagination">
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={planSellSkippedPage <= 1}
+                        onClick={() => setPlanSellSkippedPage((page) => page - 1)}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {planSellSkippedPage} of {planSellSkippedPageTotal}
+                      </span>
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={planSellSkippedPage >= planSellSkippedPageTotal}
+                        onClick={() => setPlanSellSkippedPage((page) => page + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+              <div className="sort-controls">
+                <label className="field inline-field rank-search-field">
+                  <span>Search</span>
+                  <input
+                    type="search"
+                    value={planSellRankQuery}
+                    placeholder="Player name, sport, season…"
+                    disabled={planSellRankBusy}
+                    onChange={(event) => setPlanSellRankQuery(event.target.value)}
+                  />
+                </label>
+                <label className="field inline-field">
+                  <span>Source</span>
+                  <select
+                    value={planSellSourceFilter}
+                    disabled={planSellRankBusy}
+                    onChange={(event) =>
+                      setPlanSellSourceFilter(event.target.value as PlanSellSourceFilter)
+                    }
+                  >
+                    <option value="all">All passes</option>
+                    <option value="owned">Owned only</option>
+                    <option value="planned">Plan / upgrades</option>
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Sport</span>
+                  <select
+                    value={planSellRankSport}
+                    disabled={planSellRankBusy}
+                    onChange={(event) =>
+                      setPlanSellRankSport(event.target.value as Sport | 'All')
+                    }
+                  >
+                    <option value="All">All sports</option>
+                    {SPORTS.map((sport) => (
+                      <option key={sport} value={sport}>
+                        {sport}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Rarity</span>
+                  <select
+                    value={planSellRankRarity}
+                    disabled={planSellRankBusy}
+                    onChange={(event) =>
+                      setPlanSellRankRarity(event.target.value as RarityFilterValue)
+                    }
+                  >
+                    <option value="All">All rarities</option>
+                    <option value="Legendary+">Legendary+</option>
+                    {RARITY_TIERS.map((tier) => (
+                      <option key={tier} value={tier}>
+                        {tier}
+                      </option>
+                    ))}
+                    <option value="Unknown">Unknown</option>
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Sort by</span>
+                  <select
+                    value={planSellRankSortKey}
+                    disabled={planSellRankBusy}
+                    onChange={(event) =>
+                      setPlanSellRankSortKey(event.target.value as SellRankSortKey)
+                    }
+                  >
+                    {SELL_RANK_SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field inline-field">
+                  <span>Direction</span>
+                  <select
+                    value={planSellRankSortDirection}
+                    disabled={planSellRankBusy}
+                    onChange={(event) =>
+                      setPlanSellRankSortDirection(event.target.value as SortDirection)
+                    }
+                  >
+                    <option value="desc">High to low</option>
+                    <option value="asc">Low to high</option>
+                  </select>
+                </label>
+              </div>
+              {displayedPlanSellRankings.length === 0 ? (
+                <p className="empty">No ranked passes match the current filters.</p>
+              ) : (
+                <>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Player pass</th>
+                          <th>Source</th>
+                          <th>Sport</th>
+                          <th>Claimable now</th>
+                          <th>Lost if sold</th>
+                          <th>Freed on others</th>
+                          <th>Net claimable</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedPlanSellRankings.map((row, index) => (
+                          <tr key={row.cardId}>
+                            <td>{planSellRankOffset + index + 1}</td>
+                            <td>
+                              {row.name || 'Unnamed pass'}
+                              <br />
+                              <small className="table-sub">
+                                {row.season || 'No season'}
+                                {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                              </small>
+                            </td>
+                            <td>
+                              <span className="badge">{planFinishedSourceLabel(row.source)}</span>
+                            </td>
+                            <td>{row.sport}</td>
+                            <td>{formatRax(displayRaxValue(row.claimableNow))}</td>
+                            <td>{formatRax(displayRaxValue(row.lostClaimableRax))}</td>
+                            <td>{formatRax(displayRaxValue(row.freedClaimableRax))}</td>
+                            <td>
+                              <strong className={signedRaxClass(row.netClaimableDelta)}>
+                                {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
+                              </strong>
+                              {isNotNeededForClaims(row.netClaimableDelta) ? (
+                                <small className="table-sub sell-not-needed">Not needed</small>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {displayedPlanSellRankings.length > PLAN_SELL_RANK_PAGE_SIZE ? (
+                    <div className="table-pagination">
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={planSellRankPage <= 1}
+                        onClick={() => setPlanSellRankPage((page) => page - 1)}
+                      >
+                        Previous
+                      </button>
+                      <span>
+                        Page {planSellRankPage} of {planSellRankPageTotal}
+                      </span>
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={planSellRankPage >= planSellRankPageTotal}
+                        onClick={() => setPlanSellRankPage((page) => page + 1)}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </>
+          )
         ) : (
           <p className="empty">
-            Run the rank to see which planned buys are weakest and which owned passes become unused
-            once the plan is finished.
+            Calculate rankings to see which planned buys are weakest and which owned passes become
+            unused once the plan is finished.
           </p>
         )}
       </CollapsiblePanel>
