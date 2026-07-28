@@ -135,7 +135,7 @@ export default function ProfilePage() {
             </p>
           ) : (
             <div className="profile-bars">
-              {snapshot.sports.slice(0, 8).map((row, index) => (
+              {snapshot.sports.map((row, index) => (
                 <div className="profile-bar-row" key={row.sport} style={{ ['--i' as string]: index }}>
                   <div className="profile-bar-label">
                     <span>{row.sport}</span>
