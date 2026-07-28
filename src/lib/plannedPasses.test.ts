@@ -536,6 +536,7 @@ describe('plannedPasses', () => {
         externalKey: '20|2025|NBA',
         name: 'Plan Buy',
         simulatedRarityLabel: 'Legendary 1',
+        progress: 'on-the-way',
       }),
     ]
     const profilesByKey = new Map([[buy.externalKey, buy]])
@@ -551,5 +552,38 @@ describe('plannedPasses', () => {
     expect(ranked.rankings.length).toBeGreaterThanOrEqual(2)
     expect(ranked.rankings.some((row) => row.source === 'planned')).toBe(true)
     expect(ranked.rankings.some((row) => row.source === 'owned')).toBe(true)
+  })
+
+  it('excludes Just started planned passes from finished sell-rank unless toggled on', () => {
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('c-owned', 'Keeper', '10|2025|NBA', 'Legendary 1')],
+      performances: [perf('p-owned', 'c-owned', 50, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const buy = catalogProfile('20|2025|NBA', 'Just Started Buy', [
+      { claimDay: '2026-03-02', baseRaxEarned: 1 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-js',
+        externalKey: '20|2025|NBA',
+        name: 'Just Started Buy',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        progress: 'just-started',
+      }),
+    ]
+    const profilesByKey = new Map([[buy.externalKey, buy]])
+
+    const excluded = buildPlanFinishedCollection(data, passes, profilesByKey)
+    expect(excluded.data.cards.some((card) => card.externalKey === '20|2025|NBA')).toBe(false)
+
+    const included = buildPlanFinishedCollection(data, passes, profilesByKey, {
+      includeJustStarted: true,
+    })
+    expect(included.data.cards.some((card) => card.externalKey === '20|2025|NBA')).toBe(true)
   })
 })

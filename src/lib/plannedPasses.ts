@@ -468,14 +468,15 @@ export type PlanFinishedSellRankResult = Omit<BulkSellRankResult, 'rankings'> & 
 }
 
 /**
- * Simulate finishing the plan: optional collection→Iconic 1, then apply every planned
+ * Simulate finishing the plan: optional collection→Iconic 1, then apply planned
  * buy/upgrade at Iconic 1. Used for post-plan sell ranking (not persisted).
+ * Just-started planned passes are excluded unless `includeJustStarted` is true.
  */
 export function buildPlanFinishedCollection(
   data: RaxTrackerData,
   plannedPasses: PlannedPass[],
   profilesByKey: Map<string, CatalogImportProfile>,
-  options?: { assumeCollectionIconic1?: boolean },
+  options?: { assumeCollectionIconic1?: boolean; includeJustStarted?: boolean },
 ): PlanFinishedCollection {
   let working: RaxTrackerData = {
     ...data,
@@ -485,14 +486,20 @@ export function buildPlanFinishedCollection(
     working = withCollectionAssumedIconic1(working)
   }
 
+  const activePlannedPasses = plannedPasses.filter((pass) => {
+    const progress = normalizePlannedPassProgress(pass.progress)
+    if (progress === 'just-started' && !options?.includeJustStarted) return false
+    return true
+  })
+
   const beforeIds = new Set(working.cards.map((card) => card.id))
   const plannedExternalKeys = new Set(
-    plannedPasses.map((pass) => pass.externalKey.trim()).filter(Boolean),
+    activePlannedPasses.map((pass) => pass.externalKey.trim()).filter(Boolean),
   )
 
   const profiles: CatalogImportProfile[] = []
   const seenIdentities = new Set<string>()
-  for (const pass of plannedPasses) {
+  for (const pass of activePlannedPasses) {
     const profile = profileForPlannedPass(pass, profilesByKey, RECOMMENDATION_SIMULATED_RARITY)
     if (!profile || profile.rows.length === 0) continue
     if (isRecommendationPassOwnedAtIconic(working, profile)) continue
@@ -538,7 +545,7 @@ export function rankPlanFinishedForSales(
   data: RaxTrackerData,
   plannedPasses: PlannedPass[],
   profilesByKey: Map<string, CatalogImportProfile>,
-  options?: { assumeCollectionIconic1?: boolean },
+  options?: { assumeCollectionIconic1?: boolean; includeJustStarted?: boolean },
 ): PlanFinishedSellRankResult {
   const built = buildPlanFinishedCollection(data, plannedPasses, profilesByKey, options)
   return attachPlanFinishedSources(rankAllRemovedCards(built.data), built.sourceByCardId)
@@ -551,6 +558,7 @@ export function rankPlanFinishedForSalesAsync(
   profilesByKey: Map<string, CatalogImportProfile>,
   options?: {
     assumeCollectionIconic1?: boolean
+    includeJustStarted?: boolean
     onProgress?: (progress: SellRankProgress) => void
     signal?: AbortSignal
     batchSize?: number
@@ -558,6 +566,7 @@ export function rankPlanFinishedForSalesAsync(
 ): Promise<PlanFinishedSellRankResult> {
   const built = buildPlanFinishedCollection(data, plannedPasses, profilesByKey, {
     assumeCollectionIconic1: options?.assumeCollectionIconic1,
+    includeJustStarted: options?.includeJustStarted,
   })
   return rankAllRemovedCardsAsync(built.data, {
     onProgress: options?.onProgress,
