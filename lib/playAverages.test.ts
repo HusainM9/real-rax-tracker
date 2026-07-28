@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
   PLAYS_PER_PACK,
+  MIN_RATING_PER_PACK,
+  toRealPlaySportSlug,
   averagePlayRatingsFromPlays,
   ratingPerPackFromPlayAverage,
 } from './playAverages'
+
+describe('toRealPlaySportSlug', () => {
+  it('maps display sports to Real plays path slugs', () => {
+    expect(toRealPlaySportSlug('MLB')).toBe('mlb')
+    expect(toRealPlaySportSlug('FC')).toBe('soccer')
+    expect(toRealPlaySportSlug('CBB')).toBe('ncaam')
+    expect(toRealPlaySportSlug('CFB')).toBe('ncaaf')
+    expect(toRealPlaySportSlug('Other')).toBe('')
+  })
+})
 
 describe('averagePlayRatingsFromPlays', () => {
   it('averages play values and multiplies by plays-per-pack', () => {
@@ -47,7 +59,7 @@ describe('ratingPerPackFromPlayAverage', () => {
   })
 
   it('floors at 10 when average × 3 would be lower', () => {
-    expect(ratingPerPackFromPlayAverage(2.979)).toBe(10)
+    expect(ratingPerPackFromPlayAverage(2.979)).toBe(MIN_RATING_PER_PACK)
     expect(ratingPerPackFromPlayAverage(1)).toBe(10)
     expect(ratingPerPackFromPlayAverage(0)).toBe(10)
   })
