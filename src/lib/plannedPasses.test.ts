@@ -79,6 +79,7 @@ function plannedPass(
     rowCount: 1,
     notes: '',
     source: 'catalog',
+    progress: 'just-started',
     addedAt: '2026-01-01T00:00:00.000Z',
     ...partial,
   }
@@ -103,6 +104,7 @@ describe('plannedPasses', () => {
       rowCount: 3,
       notes: '',
       source: 'manual',
+      progress: 'just-started',
     })
     expect(plannedPassFromOwnedCard(card('c2', 'No key', undefined, 'Rare 1'))).toBeNull()
   })
@@ -147,8 +149,8 @@ describe('plannedPasses', () => {
 
     const analysis = analyzePlanCollection(data, passes, profilesByKey)
     expect(analysis.activeProfiles).toHaveLength(2)
-    expect(analysis.passes[0]?.solo?.rarityLabel).toBe('Legendary 1')
-    expect(analysis.passes[1]?.solo?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(analysis.passes[0]?.profile?.rarityLabel).toBe('Legendary 1')
+    expect(analysis.passes[1]?.profile?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
     expect(analysis.bundle?.rows).toHaveLength(2)
 
     const mixed = analyzeCatalogBundleImpactsAtProfileRarities(data, [
@@ -196,8 +198,8 @@ describe('plannedPasses', () => {
       new Map([[profile.externalKey, profile]]),
     )
     expect(analysis.passes[0]?.ownedBelowIconic).toBe(true)
-    expect(analysis.passes[0]?.solo).not.toBeNull()
-    expect(analysis.passes[0]?.solo?.netClaimableDelta).toBeGreaterThan(0)
+    expect(analysis.passes[0]?.missingRows).toBe(false)
+    expect(analysis.combinedNetDelta).toBeGreaterThan(0)
     expect(analysis.activeProfiles).toHaveLength(1)
     expect(
       plannedPassSimulatedTotalRax(passes[0]!, profileAtSimulatedRarity(profile, RECOMMENDATION_SIMULATED_RARITY)),

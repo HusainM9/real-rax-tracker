@@ -151,13 +151,16 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!storageReady) return
-    void persistTrackerData(data).then((result) => {
-      const warning = storageWarningMessage(result)
-      setStorageWarning(warning || null)
-      if (!result.ok) {
-        console.warn('Could not persist tracker data:', result)
-      }
-    })
+    const handle = window.setTimeout(() => {
+      void persistTrackerData(data).then((result) => {
+        const warning = storageWarningMessage(result)
+        setStorageWarning(warning || null)
+        if (!result.ok) {
+          console.warn('Could not persist tracker data:', result)
+        }
+      })
+    }, 250)
+    return () => window.clearTimeout(handle)
   }, [data, storageReady])
 
   const value = useMemo<RaxDataContextValue>(
@@ -403,6 +406,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 rowCount: input.rowCount ?? 0,
                 notes: input.notes?.trim() ?? '',
                 source: input.source ?? 'catalog',
+                progress: input.progress ?? 'just-started',
                 addedAt: nowIso(),
               },
             ],
@@ -431,6 +435,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                     patch.simulatedRarityLabel !== undefined
                       ? patch.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
                       : pass.simulatedRarityLabel,
+                  progress: patch.progress !== undefined ? patch.progress : pass.progress,
                 }
               : pass,
           ),
@@ -459,6 +464,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 name: input.name.trim() || 'Planned pass',
                 season: input.season.trim(),
                 notes: input.notes.trim(),
+                progress: input.progress ?? 'just-started',
                 addedAt: nowIso(),
               },
             ],

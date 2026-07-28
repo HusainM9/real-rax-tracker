@@ -1897,6 +1897,113 @@ label.button input.sr-only {
   grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
 }
 
+.plan-pass-sort-controls {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.plan-pass-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.plan-tag-section-empty {
+  margin: 0;
+}
+
+.plan-tag {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  padding: 0.28rem 0.65rem;
+  white-space: nowrap;
+}
+
+button.plan-tag {
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+button.plan-tag:hover {
+  filter: brightness(1.08);
+}
+
+.plan-tag.is-selected {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.plan-tag--mint {
+  background: rgba(72, 187, 140, 0.18);
+  border-color: rgba(72, 187, 140, 0.45);
+  color: #8fe3b8;
+}
+
+.plan-tag--sky {
+  background: rgba(74, 155, 214, 0.18);
+  border-color: rgba(74, 155, 214, 0.45);
+  color: #8ec8ef;
+}
+
+.plan-tag--amber {
+  background: rgba(214, 158, 58, 0.18);
+  border-color: rgba(214, 158, 58, 0.45);
+  color: #e8c57a;
+}
+
+.plan-tag--slate {
+  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #c2ccd8;
+}
+
+.plan-tag-section--mint {
+  border-color: rgba(72, 187, 140, 0.28);
+  box-shadow: inset 3px 0 0 rgba(72, 187, 140, 0.75);
+}
+
+.plan-tag-section--sky {
+  border-color: rgba(74, 155, 214, 0.28);
+  box-shadow: inset 3px 0 0 rgba(74, 155, 214, 0.75);
+}
+
+.plan-tag-section--amber {
+  border-color: rgba(214, 158, 58, 0.28);
+  box-shadow: inset 3px 0 0 rgba(214, 158, 58, 0.75);
+}
+
+.plan-tag-section--slate {
+  border-color: rgba(148, 163, 184, 0.24);
+  box-shadow: inset 3px 0 0 rgba(148, 163, 184, 0.7);
+}
+
+.plan-pass-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.plan-pass-card--mint {
+  border-color: rgba(72, 187, 140, 0.22);
+}
+
+.plan-pass-card--sky {
+  border-color: rgba(74, 155, 214, 0.22);
+}
+
+.plan-pass-card--amber {
+  border-color: rgba(214, 158, 58, 0.22);
+}
+
+.plan-pass-card--slate {
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
 .plan-pass-card {
   display: flex;
   flex-direction: column;
