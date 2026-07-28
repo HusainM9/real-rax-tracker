@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import ImportShutdownNotice from './ImportShutdownNotice'
 import StorageWarningBanner from './StorageWarningBanner'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useAuth } from '../context/AuthContext'
@@ -125,7 +124,6 @@ export default function Layout() {
         />
       ) : null}
 
-      <ImportShutdownNotice />
       <StorageWarningBanner />
 
       <main className="page-main">
