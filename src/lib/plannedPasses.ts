@@ -3,10 +3,9 @@ import { sportFromCatalog } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
 import { isUfcCatalogSport } from '../../lib/passKind'
 import {
-  analyzeCatalogBundleImpactsAtProfileRarities,
-  analyzeCatalogImportAtRarity,
   applyCatalogProfilesAtOwnRarities,
   estimateTotalRaxAtRarity,
+  iconic20CatalogSelectionKey,
   isAtLeastIconic1Rarity,
   isRecommendationPassOwnedAtIconic,
   profileAtSimulatedRarity,
@@ -14,7 +13,81 @@ import {
   type OwnedIconicUpgradeImpactResult,
   type PassRecommendationRow,
 } from './passRecommendation'
-import type { PlayerCard, PlannedPass, RaxTrackerData } from '../types/rax'
+import type { PlayerCard, PlannedPass, PlannedPassProgress, RaxTrackerData } from '../types/rax'
+
+export const PLANNED_PASS_PROGRESS_OPTIONS: ReadonlyArray<{
+  value: PlannedPassProgress
+  label: string
+  group: 'in-progress' | 'future'
+  description: string
+  /** CSS modifier: plan-tag--{tone} */
+  tone: 'mint' | 'sky' | 'amber' | 'slate'
+}> = [
+  {
+    value: 'nearly-finished',
+    label: 'Nearly finished',
+    group: 'in-progress',
+    description: 'Close to buying / finishing',
+    tone: 'mint',
+  },
+  {
+    value: 'on-the-way',
+    label: 'On the way',
+    group: 'in-progress',
+    description: 'Actively working toward these',
+    tone: 'sky',
+  },
+  {
+    value: 'just-started',
+    label: 'Just started',
+    group: 'in-progress',
+    description: 'Early research or first steps',
+    tone: 'amber',
+  },
+  {
+    value: 'future',
+    label: 'Future',
+    group: 'future',
+    description: 'Parked for later',
+    tone: 'slate',
+  },
+]
+
+export const DEFAULT_PLANNED_PASS_PROGRESS: PlannedPassProgress = 'just-started'
+
+export function normalizePlannedPassProgress(
+  value: string | undefined | null,
+): PlannedPassProgress {
+  if (
+    value === 'nearly-finished' ||
+    value === 'on-the-way' ||
+    value === 'just-started' ||
+    value === 'future'
+  ) {
+    return value
+  }
+  return DEFAULT_PLANNED_PASS_PROGRESS
+}
+
+export function plannedPassProgressLabel(progress: PlannedPassProgress): string {
+  return (
+    PLANNED_PASS_PROGRESS_OPTIONS.find((option) => option.value === progress)?.label ??
+    'Just started'
+  )
+}
+
+export function plannedPassProgressTone(
+  progress: PlannedPassProgress,
+): (typeof PLANNED_PASS_PROGRESS_OPTIONS)[number]['tone'] {
+  return (
+    PLANNED_PASS_PROGRESS_OPTIONS.find((option) => option.value === progress)?.tone ?? 'amber'
+  )
+}
+
+export function plannedPassProgressSortIndex(progress: PlannedPassProgress): number {
+  const index = PLANNED_PASS_PROGRESS_OPTIONS.findIndex((option) => option.value === progress)
+  return index >= 0 ? index : PLANNED_PASS_PROGRESS_OPTIONS.length
+}
 
 export type PlannedPassInput = Pick<
   PlannedPass,
@@ -28,6 +101,7 @@ export type PlannedPassInput = Pick<
   | 'rowCount'
   | 'notes'
   | 'source'
+  | 'progress'
 >
 
 export type PlannedPassCardAnalysis = {
@@ -68,6 +142,7 @@ export function plannedPassFromCatalogResult(
     rowCount: result.rowCount,
     notes: '',
     source,
+    progress: DEFAULT_PLANNED_PASS_PROGRESS,
   }
 }
 
@@ -86,6 +161,7 @@ export function plannedPassFromRecommendationRow(
     rowCount: row.rowCount,
     notes: '',
     source,
+    progress: DEFAULT_PLANNED_PASS_PROGRESS,
   }
 }
 
@@ -111,6 +187,7 @@ export function plannedPassFromOwnedCard(
     rowCount: options?.rowCount ?? 0,
     notes: '',
     source: 'manual',
+    progress: DEFAULT_PLANNED_PASS_PROGRESS,
   }
 }
 
@@ -159,19 +236,16 @@ export function analyzePlanCollection(
     const ownedBelowIconic = Boolean(ownedCard) && !ownedAtIconic
     const missingProfile = !profile
     const missingRows = !profile || profile.rows.length === 0
-    let solo: PassRecommendationRow | null = null
 
+    // Skip per-pass import scoring here — Plan UI uses leave-one-out bundle nets.
     if (profile && profile.rows.length > 0 && !ownedAtIconic) {
-      const rarity = pass.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
-      // Same import/upgrade-in-place path as the plan bundle (not Potential phantom-card scoring).
-      solo = analyzeCatalogImportAtRarity(analysisData, profile, rarity)
-      if (solo) activeProfiles.push(profile)
+      activeProfiles.push(profile)
     }
 
     passes.push({
       pass,
       profile,
-      solo,
+      solo: null,
       ownedAtIconic,
       ownedBelowIconic,
       missingProfile,
@@ -186,7 +260,6 @@ export function analyzePlanCollection(
   let combinedGuaranteedNetDelta = 0
 
   if (activeProfiles.length > 0) {
-    const greedyBundle = analyzeCatalogBundleImpactsAtProfileRarities(analysisData, activeProfiles)
     const withPlanData = applyCatalogProfilesAtOwnRarities(analysisData, activeProfiles)
     const withPlanRollup = computeYearRollup(withPlanData)
     withPlanClaimable = withPlanRollup.totalClaimableRax
@@ -195,34 +268,43 @@ export function analyzePlanCollection(
     combinedGuaranteedNetDelta = withPlanGuaranteed - currentRollup.totalGuaranteedRax
 
     // Per-pass plan net = leave-one-out contribution (not greedy add order).
-    // leaveOneOut(P) = net(all) − net(all without P) — matches Check one / Rank vs the rest of the plan.
     const leaveOneOutByKey = new Map<string, number>()
     for (const profile of activeProfiles) {
+      if (activeProfiles.length === 1) {
+        leaveOneOutByKey.set(profile.externalKey, combinedNetDelta)
+        continue
+      }
       const others = activeProfiles.filter((item) => item.externalKey !== profile.externalKey)
-      const withoutProfile =
-        others.length > 0
-          ? applyCatalogProfilesAtOwnRarities(analysisData, others)
-          : analysisData
+      const withoutProfile = applyCatalogProfilesAtOwnRarities(analysisData, others)
       const withoutClaimable = computeYearRollup(withoutProfile).totalClaimableRax
       const withoutNet = withoutClaimable - currentRollup.totalClaimableRax
       leaveOneOutByKey.set(profile.externalKey, combinedNetDelta - withoutNet)
     }
 
+    const rows = activeProfiles
+      .map((profile) => {
+        const marginal = leaveOneOutByKey.get(profile.externalKey) ?? 0
+        return {
+          key: iconic20CatalogSelectionKey(profile.externalKey),
+          name: profile.name,
+          sport: sportFromCatalog(profile.sport),
+          season: profile.seasonLabel.trim() || String(profile.seasonYear),
+          isolatedNetDelta: marginal,
+          marginalNetDelta: marginal,
+          passClaimableRax: 0,
+          passGuaranteedRax: 0,
+        }
+      })
+      .sort(
+        (a, b) =>
+          b.marginalNetDelta - a.marginalNetDelta || a.name.localeCompare(b.name),
+      )
+
     bundle = {
-      ...greedyBundle,
+      rows,
       combinedNetDelta,
       combinedGuaranteedNetDelta,
-      rows: greedyBundle.rows.map((row) => {
-        const externalKey = row.key.startsWith('catalog:')
-          ? row.key.slice('catalog:'.length)
-          : row.key.startsWith('owned:')
-            ? row.key.slice('owned:'.length)
-            : row.key
-        return {
-          ...row,
-          marginalNetDelta: leaveOneOutByKey.get(externalKey) ?? row.marginalNetDelta,
-        }
-      }),
+      combinedIsolatedNetDelta: rows.reduce((sum, row) => sum + row.isolatedNetDelta, 0),
     }
   }
 

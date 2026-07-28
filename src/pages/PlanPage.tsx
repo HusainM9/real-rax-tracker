@@ -9,7 +9,12 @@ import { displayRaxValue } from '../lib/displayRax'
 import { isPlayerPass } from '../lib/passKind'
 import {
   analyzePlanCollection,
+  normalizePlannedPassProgress,
+  PLANNED_PASS_PROGRESS_OPTIONS,
   plannedPassFromOwnedCard,
+  plannedPassProgressLabel,
+  plannedPassProgressSortIndex,
+  plannedPassProgressTone,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
 import {
@@ -18,9 +23,11 @@ import {
 } from '../lib/passRecommendation'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
-import type { PlayerCard } from '../types/rax'
+import type { PlannedPassProgress, PlayerCard } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+
+type PlanPassSortMode = 'progress' | 'recent'
 
 function signedRaxClass(value: number): string {
   if (value > 0) return 'sale-positive'
@@ -32,6 +39,30 @@ function sourceBadgeLabel(source: PlannedPassCardAnalysis['pass']['source']): st
   if (source === 'ranking') return 'From ranking'
   if (source === 'manual') return 'From collection'
   return 'Catalog'
+}
+
+function PlanTagPill({
+  progress,
+  selected = false,
+  onClick,
+}: {
+  progress: PlannedPassProgress
+  selected?: boolean
+  onClick?: () => void
+}) {
+  const tone = plannedPassProgressTone(progress)
+  const label = plannedPassProgressLabel(progress)
+  const className = `plan-tag plan-tag--${tone}${selected ? ' is-selected' : ''}`
+
+  if (onClick) {
+    return (
+      <button className={className} type="button" aria-pressed={selected} onClick={onClick}>
+        {label}
+      </button>
+    )
+  }
+
+  return <span className={className}>{label}</span>
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -47,17 +78,20 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
 function PlanPassCard({
   entry,
   planNetGain,
+  onProgressChange,
   onRemove,
 }: {
   entry: PlannedPassCardAnalysis
   planNetGain: number | null
+  onProgressChange: (progress: PlannedPassProgress) => void
   onRemove: () => void
 }) {
   const { pass, ownedAtIconic, ownedBelowIconic, missingProfile, missingRows } = entry
   const net = planNetGain
+  const progress = normalizePlannedPassProgress(pass.progress)
 
   return (
-    <article className="plan-pass-card panel">
+    <article className={`plan-pass-card panel plan-pass-card--${plannedPassProgressTone(progress)}`}>
       <div className="plan-pass-card-header">
         <div>
           <h3>{pass.name}</h3>
@@ -70,6 +104,17 @@ function PlanPassCard({
         <button className="button danger compact" type="button" onClick={onRemove}>
           Remove
         </button>
+      </div>
+
+      <div className="plan-pass-tag-row" role="group" aria-label="Plan section tag">
+        {PLANNED_PASS_PROGRESS_OPTIONS.map((option) => (
+          <PlanTagPill
+            key={option.value}
+            progress={option.value}
+            selected={progress === option.value}
+            onClick={() => onProgressChange(option.value)}
+          />
+        ))}
       </div>
 
       {ownedAtIconic ? (
@@ -103,7 +148,8 @@ function PlanPassCard({
 }
 
 export default function PlanPage() {
-  const { data, addPlannedPass, addPlannedPassFromCatalog, removePlannedPass } = useRaxData()
+  const { data, addPlannedPass, addPlannedPassFromCatalog, removePlannedPass, updatePlannedPass } =
+    useRaxData()
   const [profilesByKey, setProfilesByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [profilesStatus, setProfilesStatus] = useState('')
@@ -114,10 +160,24 @@ export default function PlanPage() {
   const [ownedQuickAddFilter, setOwnedQuickAddFilter] = useState('')
   const [ownedAddStatus, setOwnedAddStatus] = useState('')
   const [ownedAddRarity, setOwnedAddRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
+  const [passSortMode, setPassSortMode] = useState<PlanPassSortMode>('progress')
 
   const plannedPasses = data.plannedPasses ?? []
   const plannedExternalKeys = useMemo(
     () => new Set(plannedPasses.map((pass) => pass.externalKey)),
+    [plannedPasses],
+  )
+  const plannedExternalKeysFingerprint = useMemo(
+    () =>
+      [...plannedExternalKeys].sort((a, b) => a.localeCompare(b)).join('\0'),
+    [plannedExternalKeys],
+  )
+  const planScoringFingerprint = useMemo(
+    () =>
+      plannedPasses
+        .map((pass) => `${pass.externalKey}\t${pass.simulatedRarityLabel}`)
+        .sort((a, b) => a.localeCompare(b))
+        .join('\0'),
     [plannedPasses],
   )
 
@@ -163,42 +223,107 @@ export default function PlanPage() {
   )
 
   useEffect(() => {
-    const keys = plannedPasses.map((pass) => pass.externalKey)
+    const keys = plannedExternalKeysFingerprint
+      ? plannedExternalKeysFingerprint.split('\0')
+      : []
     if (keys.length === 0) {
       setProfilesByKey(new Map())
       setProfilesStatus('')
+      setProfilesLoading(false)
       return
     }
 
     const controller = new AbortController()
+    let cancelled = false
     setProfilesLoading(true)
     setProfilesStatus('Loading catalog earnings for planned passes…')
 
     fetchCatalogImportProfilesBulk(keys, controller.signal)
       .then(({ profiles, storageConfigured }) => {
+        if (cancelled) return
         if (!storageConfigured) {
           setProfilesStatus('Shared catalog is not configured yet.')
           setProfilesByKey(new Map())
           return
         }
-        setProfilesByKey(new Map(profiles.map((profile) => [profile.externalKey, profile])))
+        setProfilesByKey((current) => {
+          const next = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+          if (
+            current.size === next.size &&
+            [...next.keys()].every(
+              (key) => current.get(key) === next.get(key),
+            )
+          ) {
+            return current
+          }
+          return next
+        })
         setProfilesStatus('')
       })
       .catch((error) => {
-        if (controller.signal.aborted) return
+        if (cancelled || controller.signal.aborted) return
         setProfilesStatus(error instanceof Error ? error.message : 'Could not load planned passes.')
       })
       .finally(() => {
-        if (!controller.signal.aborted) setProfilesLoading(false)
+        if (!cancelled) setProfilesLoading(false)
       })
 
-    return () => controller.abort()
-  }, [plannedPasses])
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [plannedExternalKeysFingerprint])
 
-  const analysis = useMemo(
+  const scoredAnalysis = useMemo(
     () => analyzePlanCollection(data, plannedPasses, profilesByKey),
-    [data, plannedPasses, profilesByKey],
+    // Tag/progress-only edits keep the same fingerprints so scoring is skipped.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: omit progress-only plannedPasses / full data identity
+    [
+      data.cards,
+      data.performances,
+      data.settings.proBonusEnabled,
+      planScoringFingerprint,
+      profilesByKey,
+    ],
   )
+
+  const analysis = useMemo(() => {
+    const byId = new Map(plannedPasses.map((pass) => [pass.id, pass]))
+    return {
+      ...scoredAnalysis,
+      passes: scoredAnalysis.passes.map((entry) => ({
+        ...entry,
+        pass: byId.get(entry.pass.id) ?? entry.pass,
+      })),
+    }
+  }, [scoredAnalysis, plannedPasses])
+
+  const sortedPlanPasses = useMemo(() => {
+    const entries = [...analysis.passes]
+    if (passSortMode === 'recent') {
+      return entries.sort(
+        (a, b) =>
+          Date.parse(b.pass.addedAt) - Date.parse(a.pass.addedAt) ||
+          a.pass.name.localeCompare(b.pass.name),
+      )
+    }
+    return entries.sort(
+      (a, b) =>
+        plannedPassProgressSortIndex(normalizePlannedPassProgress(a.pass.progress)) -
+          plannedPassProgressSortIndex(normalizePlannedPassProgress(b.pass.progress)) ||
+        a.pass.name.localeCompare(b.pass.name),
+    )
+  }, [analysis.passes, passSortMode])
+
+  const planPassSections = useMemo(() => {
+    if (passSortMode !== 'progress') return null
+    return PLANNED_PASS_PROGRESS_OPTIONS.map((option) => ({
+      ...option,
+      entries: sortedPlanPasses.filter(
+        (entry) => normalizePlannedPassProgress(entry.pass.progress) === option.value,
+      ),
+    }))
+  }, [passSortMode, sortedPlanPasses])
 
   const marginalByExternalKey = useMemo(() => {
     const map = new Map<string, number>()
@@ -451,16 +576,71 @@ export default function PlanPage() {
             </CollapsiblePanel>
           ) : null}
 
-          <section className="plan-pass-grid">
-            {analysis.passes.map((entry) => (
-              <PlanPassCard
-                key={entry.pass.id}
-                entry={entry}
-                planNetGain={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
-                onRemove={() => removePlannedPass(entry.pass.id)}
-              />
-            ))}
-          </section>
+          <div className="sort-controls plan-pass-sort-controls">
+            <label className="field inline-field">
+              <span>Sort passes</span>
+              <select
+                value={passSortMode}
+                onChange={(event) => setPassSortMode(event.target.value as PlanPassSortMode)}
+              >
+                <option value="progress">By section tags</option>
+                <option value="recent">Recently added</option>
+              </select>
+            </label>
+          </div>
+
+          {passSortMode === 'progress' && planPassSections ? (
+            <div className="plan-pass-sections">
+              {planPassSections.map((section) => (
+                <CollapsiblePanel
+                  key={section.value}
+                  className={`nested-panel plan-tag-section plan-tag-section--${section.tone}`}
+                  title={section.label}
+                  description={section.description}
+                  badge={`${section.entries.length}`}
+                  defaultOpen={section.value !== 'future'}
+                  actions={<PlanTagPill progress={section.value} />}
+                >
+                  {section.entries.length > 0 ? (
+                    <div className="plan-pass-grid">
+                      {section.entries.map((entry) => (
+                        <PlanPassCard
+                          key={entry.pass.id}
+                          entry={entry}
+                          planNetGain={
+                            marginalByExternalKey.get(entry.pass.externalKey) ?? null
+                          }
+                          onProgressChange={(progress) =>
+                            updatePlannedPass(entry.pass.id, { progress })
+                          }
+                          onRemove={() => removePlannedPass(entry.pass.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty plan-tag-section-empty">
+                      No passes tagged {section.label.toLowerCase()} yet. Use the color tags on a
+                      pass to move it here.
+                    </p>
+                  )}
+                </CollapsiblePanel>
+              ))}
+            </div>
+          ) : (
+            <section className="plan-pass-grid">
+              {sortedPlanPasses.map((entry) => (
+                <PlanPassCard
+                  key={entry.pass.id}
+                  entry={entry}
+                  planNetGain={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
+                  onProgressChange={(progress) =>
+                    updatePlannedPass(entry.pass.id, { progress })
+                  }
+                  onRemove={() => removePlannedPass(entry.pass.id)}
+                />
+              ))}
+            </section>
+          )}
         </>
       ) : (
         <section className="panel plan-empty">
