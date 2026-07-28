@@ -58,7 +58,7 @@ import type {
   Sport,
 } from '../types/rax'
 import type { CatalogSearchResult } from '../lib/catalogApi'
-import { plannedPassFromCatalogResult, type PlannedPassInput } from '../lib/plannedPasses'
+import { plannedPassFromCatalogResult, syncPlanProgressFromPackTrackers, type PlannedPassInput } from '../lib/plannedPasses'
 import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 import {
   accountsFromPackTemplates,
@@ -523,11 +523,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             current.packTrackers ?? [],
             id,
           )
-          return {
+          return syncPlanProgressFromPackTrackers({
             ...current,
             plannedPasses: cleaned.plannedPasses,
             packTrackers: cleaned.packTrackers,
-          }
+          })
         })
       },
       updatePlannedPass: (id, patch) => {
@@ -609,7 +609,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                     opensPacks: true,
                   },
                 ]
-          return {
+          return syncPlanProgressFromPackTrackers({
             ...current,
             packTrackers: [
               ...(current.packTrackers ?? []),
@@ -622,7 +622,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 updatedAt: stamp,
               },
             ],
-          }
+          })
         })
         return trackerId
       },
@@ -660,130 +660,136 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           }
           tracked = additions.length
           if (additions.length === 0) return current
-          return {
+          return syncPlanProgressFromPackTrackers({
             ...current,
             packTrackers: [...(current.packTrackers ?? []), ...additions],
-          }
+          })
         })
         return { tracked }
       },
       updatePackTracker: (id, patch) => {
-        setData((current) => ({
-          ...current,
-          packTrackers: (current.packTrackers ?? []).map((tracker) => {
-            if (tracker.id !== id) return tracker
-            const averagePlayRating = Number(patch.averagePlayRating)
-            const playCount = Number(patch.playCount)
-            return {
-              ...tracker,
-              ratingPerPack:
-                patch.ratingPerPack !== undefined
-                  ? normalizeRatingPerPack(patch.ratingPerPack)
-                  : tracker.ratingPerPack,
-              averagePlayRating:
-                patch.averagePlayRating !== undefined
-                  ? Number.isFinite(averagePlayRating) && averagePlayRating > 0
-                    ? averagePlayRating
-                    : undefined
-                  : tracker.averagePlayRating,
-              playCount:
-                patch.playCount !== undefined
-                  ? Number.isFinite(playCount) && playCount > 0
-                    ? Math.floor(playCount)
-                    : undefined
-                  : tracker.playCount,
-              lastPlaysImportedAt:
-                patch.lastPlaysImportedAt !== undefined
-                  ? patch.lastPlaysImportedAt
-                  : tracker.lastPlaysImportedAt,
-              accounts: patch.accounts !== undefined ? patch.accounts : tracker.accounts,
-              updatedAt: nowIso(),
-            }
+        setData((current) =>
+          syncPlanProgressFromPackTrackers({
+            ...current,
+            packTrackers: (current.packTrackers ?? []).map((tracker) => {
+              if (tracker.id !== id) return tracker
+              const averagePlayRating = Number(patch.averagePlayRating)
+              const playCount = Number(patch.playCount)
+              return {
+                ...tracker,
+                ratingPerPack:
+                  patch.ratingPerPack !== undefined
+                    ? normalizeRatingPerPack(patch.ratingPerPack)
+                    : tracker.ratingPerPack,
+                averagePlayRating:
+                  patch.averagePlayRating !== undefined
+                    ? Number.isFinite(averagePlayRating) && averagePlayRating > 0
+                      ? averagePlayRating
+                      : undefined
+                    : tracker.averagePlayRating,
+                playCount:
+                  patch.playCount !== undefined
+                    ? Number.isFinite(playCount) && playCount > 0
+                      ? Math.floor(playCount)
+                      : undefined
+                    : tracker.playCount,
+                lastPlaysImportedAt:
+                  patch.lastPlaysImportedAt !== undefined
+                    ? patch.lastPlaysImportedAt
+                    : tracker.lastPlaysImportedAt,
+                accounts: patch.accounts !== undefined ? patch.accounts : tracker.accounts,
+                updatedAt: nowIso(),
+              }
+            }),
           }),
-        }))
+        )
       },
       addPackTrackerAccount: (trackerId, input) => {
         let accountId: string | null = null
-        setData((current) => ({
-          ...current,
-          packTrackers: (current.packTrackers ?? []).map((tracker) => {
-            if (tracker.id !== trackerId) return tracker
-            const id = createId('pacc')
-            accountId = id
-            const rating = Number(input?.rating)
-            const username = normalizePackUsername(input?.username)
-            return {
-              ...tracker,
-              accounts: [
-                ...tracker.accounts,
-                {
-                  id,
-                  name:
-                    typeof input?.name === 'string' && input.name.trim()
-                      ? input.name.trim()
-                      : `Account ${tracker.accounts.length + 1}`,
-                  rating: Number.isFinite(rating) && rating > 0 ? Math.floor(rating) : 0,
-                  opensPacks: input?.opensPacks !== false,
-                  username: username || undefined,
-                },
-              ],
-              updatedAt: nowIso(),
-            }
+        setData((current) =>
+          syncPlanProgressFromPackTrackers({
+            ...current,
+            packTrackers: (current.packTrackers ?? []).map((tracker) => {
+              if (tracker.id !== trackerId) return tracker
+              const id = createId('pacc')
+              accountId = id
+              const rating = Number(input?.rating)
+              const username = normalizePackUsername(input?.username)
+              return {
+                ...tracker,
+                accounts: [
+                  ...tracker.accounts,
+                  {
+                    id,
+                    name:
+                      typeof input?.name === 'string' && input.name.trim()
+                        ? input.name.trim()
+                        : `Account ${tracker.accounts.length + 1}`,
+                    rating: Number.isFinite(rating) && rating > 0 ? Math.floor(rating) : 0,
+                    opensPacks: input?.opensPacks !== false,
+                    username: username || undefined,
+                  },
+                ],
+                updatedAt: nowIso(),
+              }
+            }),
           }),
-        }))
+        )
         return accountId
       },
       updatePackTrackerAccount: (trackerId, accountId, patch) => {
-        setData((current) => ({
-          ...current,
-          packTrackers: (current.packTrackers ?? []).map((tracker) => {
-            if (tracker.id !== trackerId) return tracker
-            return {
-              ...tracker,
-              accounts: tracker.accounts.map((account) => {
-                if (account.id !== accountId) return account
-                const rating =
-                  patch.rating !== undefined ? Number(patch.rating) : account.rating
-                return {
-                  ...account,
-                  name:
-                    patch.name !== undefined
-                      ? patch.name.trim() || account.name
-                      : account.name,
-                  rating:
-                    patch.rating !== undefined
-                      ? Number.isFinite(rating) && rating > 0
-                        ? Math.floor(rating)
-                        : 0
-                      : account.rating,
-                  opensPacks:
-                    patch.opensPacks !== undefined ? patch.opensPacks : account.opensPacks,
-                  username:
-                    patch.username !== undefined
-                      ? patch.username.replace(/^@/, '').trim() || undefined
-                      : account.username,
-                  rarityLabel:
-                    patch.rarityLabel !== undefined
-                      ? patch.rarityLabel.trim() || undefined
-                      : account.rarityLabel,
-                  lastImportedAt:
-                    patch.lastImportedAt !== undefined
-                      ? patch.lastImportedAt
-                      : account.lastImportedAt,
-                  ownershipStatus:
-                    patch.ownershipStatus !== undefined
-                      ? patch.ownershipStatus
-                      : account.ownershipStatus,
-                  ignoredMissing:
-                    patch.ignoredMissing !== undefined
-                      ? patch.ignoredMissing || undefined
-                      : account.ignoredMissing,
-                }
-              }),
-              updatedAt: nowIso(),
-            }
+        setData((current) =>
+          syncPlanProgressFromPackTrackers({
+            ...current,
+            packTrackers: (current.packTrackers ?? []).map((tracker) => {
+              if (tracker.id !== trackerId) return tracker
+              return {
+                ...tracker,
+                accounts: tracker.accounts.map((account) => {
+                  if (account.id !== accountId) return account
+                  const rating =
+                    patch.rating !== undefined ? Number(patch.rating) : account.rating
+                  return {
+                    ...account,
+                    name:
+                      patch.name !== undefined
+                        ? patch.name.trim() || account.name
+                        : account.name,
+                    rating:
+                      patch.rating !== undefined
+                        ? Number.isFinite(rating) && rating > 0
+                          ? Math.floor(rating)
+                          : 0
+                        : account.rating,
+                    opensPacks:
+                      patch.opensPacks !== undefined ? patch.opensPacks : account.opensPacks,
+                    username:
+                      patch.username !== undefined
+                        ? patch.username.replace(/^@/, '').trim() || undefined
+                        : account.username,
+                    rarityLabel:
+                      patch.rarityLabel !== undefined
+                        ? patch.rarityLabel.trim() || undefined
+                        : account.rarityLabel,
+                    lastImportedAt:
+                      patch.lastImportedAt !== undefined
+                        ? patch.lastImportedAt
+                        : account.lastImportedAt,
+                    ownershipStatus:
+                      patch.ownershipStatus !== undefined
+                        ? patch.ownershipStatus
+                        : account.ownershipStatus,
+                    ignoredMissing:
+                      patch.ignoredMissing !== undefined
+                        ? patch.ignoredMissing || undefined
+                        : account.ignoredMissing,
+                  }
+                }),
+                updatedAt: nowIso(),
+              }
+            }),
           }),
-        }))
+        )
       },
       applyPackRatingsFromImport: (username, ratingsByExternalKey, options) => {
         const normalizedUser = username.replace(/^@/, '').trim().toLowerCase()
@@ -882,24 +888,26 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             }
           })
 
-          return { ...current, packTrackers: nextTrackers }
+          return syncPlanProgressFromPackTrackers({ ...current, packTrackers: nextTrackers })
         })
 
         return { updatedAccounts, missingPasses }
       },
       removePackTrackerAccount: (trackerId, accountId) => {
-        setData((current) => ({
-          ...current,
-          packTrackers: (current.packTrackers ?? []).map((tracker) =>
-            tracker.id === trackerId
-              ? {
-                  ...tracker,
-                  accounts: tracker.accounts.filter((account) => account.id !== accountId),
-                  updatedAt: nowIso(),
-                }
-              : tracker,
-          ),
-        }))
+        setData((current) =>
+          syncPlanProgressFromPackTrackers({
+            ...current,
+            packTrackers: (current.packTrackers ?? []).map((tracker) =>
+              tracker.id === trackerId
+                ? {
+                    ...tracker,
+                    accounts: tracker.accounts.filter((account) => account.id !== accountId),
+                    updatedAt: nowIso(),
+                  }
+                : tracker,
+            ),
+          }),
+        )
       },
       addPackAccountTemplate: (input) => {
         const id = createId('ptpl')
@@ -987,7 +995,9 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             }
           })
 
-          return changed ? { ...current, packTrackers } : current
+          return changed
+            ? syncPlanProgressFromPackTrackers({ ...current, packTrackers })
+            : current
         })
         return { trackersTouched, accountsAdded, accountsUpdated }
       },

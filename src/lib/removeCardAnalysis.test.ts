@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeRemovedCard, computeSaleComparison, rankAllRemovedCards, rankAllRemovedCardsAsync } from './removeCardAnalysis'
+import {
+  analyzeRemovedCard,
+  computeSaleComparison,
+  rankAllRemovedCards,
+  rankAllRemovedCardsAsync,
+  withoutCards,
+} from './removeCardAnalysis'
 import { isTeamPass } from './passKind'
 import { createEmptyData } from './storage'
 import type { PlayerCard, RaxPerformance } from '../types/rax'
@@ -27,6 +33,24 @@ function perf(id: string, cardId: string, claimDay: string, raxEarned: number): 
 }
 
 describe('analyzeRemovedCard', () => {
+  it('withoutCards strips multiple owned passes for plan/sell scenarios', () => {
+    const data = {
+      ...createEmptyData(),
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('a', 'Alpha'), card('b', 'Bravo'), card('c', 'Charlie')],
+      performances: [
+        perf('p1', 'a', '2025-01-15', 100),
+        perf('p2', 'b', '2025-01-15', 80),
+        perf('p3', 'c', '2025-01-15', 60),
+      ],
+    }
+
+    const stripped = withoutCards(data, ['a', 'b'])
+    expect(stripped.cards.map((item) => item.id)).toEqual(['c'])
+    expect(stripped.performances.map((item) => item.cardId)).toEqual(['c'])
+    expect(withoutCards(data, [])).toBe(data)
+  })
+
   it('frees overlap claims on other cards when a guaranteed blocker is removed', () => {
     const data = {
       ...createEmptyData(),

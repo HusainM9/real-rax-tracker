@@ -34,10 +34,17 @@ type RemoveCardAnalysisBase = {
 }
 
 function withoutCard(data: RaxTrackerData, cardId: string): RaxTrackerData {
+  return withoutCards(data, [cardId])
+}
+
+/** Simulation-only: drop owned cards + their performances from the collection baseline. */
+export function withoutCards(data: RaxTrackerData, cardIds: readonly string[]): RaxTrackerData {
+  if (cardIds.length === 0) return data
+  const removed = new Set(cardIds)
   return {
     ...data,
-    cards: data.cards.filter((card) => card.id !== cardId),
-    performances: data.performances.filter((performance) => performance.cardId !== cardId),
+    cards: data.cards.filter((card) => !removed.has(card.id)),
+    performances: data.performances.filter((performance) => !removed.has(performance.cardId)),
   }
 }
 
