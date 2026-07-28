@@ -81,6 +81,7 @@ import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { useRaxData } from '../context/RaxDataContext'
 import { plannedPassFromRecommendationRow } from '../lib/plannedPasses'
 import { isPlayerLikeCatalogPass, isPlayerPass, isUfcCatalogSport } from '../lib/passKind'
+import { isLegendaryPlusRarity } from '../lib/rarityFilter'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
 const TOP_RANKING_RESULTS = 50
@@ -1637,7 +1638,10 @@ export default function PotentialPage() {
     () =>
       [...data.cards]
         .filter(
-          (card) => isPlayerPass(card) && !isAtLeastIconic1Rarity(card.rarityLabel),
+          (card) =>
+            isPlayerPass(card) &&
+            isLegendaryPlusRarity(card.rarityLabel) &&
+            !isAtLeastIconic1Rarity(card.rarityLabel),
         )
         .sort(
           (a, b) =>

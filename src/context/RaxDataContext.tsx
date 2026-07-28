@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -25,12 +26,12 @@ import {
   persistTrackerData,
   storageWarningMessage,
 } from '../lib/trackerPersistence'
+import { loadAccountData, saveAccountData } from '../lib/accountData'
+import { useAccountAuth } from './AccountAuthContext'
 import {
-  importFromAdminOwnership as runAdminOwnershipImport,
   importFromUsername as runUsernameImport,
   retryFailedEarnings as runRetryFailedEarnings,
   type UsernameImportOptions,
-  type UsernameImportProgress,
   type UsernameImportResult,
 } from '../lib/usernameImport'
 import type { EarningsBackfillPass } from '../lib/realEarningsImport'
@@ -45,6 +46,8 @@ import type { CatalogImportProfile } from '../lib/catalogApi'
 import { applyCardRarityChange } from '../lib/cardRarity'
 import type {
   AppSettings,
+  PackTracker,
+  PackTrackerAccount,
   PlayerCard,
   PotentialRaxRow,
   RaxPerformance,
@@ -102,6 +105,25 @@ type RaxDataContextValue = {
     simulatedRarityLabel?: string,
     source?: PlannedPass['source'],
   ) => string | null
+  upsertPackTracker: (plannedPassId: string) => string
+  updatePackTracker: (
+    id: string,
+    patch: Partial<Pick<PackTracker, 'accounts'>>,
+  ) => void
+  addPackTrackerAccount: (trackerId: string, input?: Partial<PackTrackerAccount>) => string | null
+  updatePackTrackerAccount: (
+    trackerId: string,
+    accountId: string,
+    patch: Partial<
+      Pick<PackTrackerAccount, 'name' | 'rating' | 'opensPacks' | 'username' | 'rarityLabel' | 'lastImportedAt'>
+    >,
+  ) => void
+  applyPackRatingsFromImport: (
+    username: string,
+    ratingsByExternalKey: Record<string, { rating: number; rarityLabel?: string }>,
+    options?: { plannedPassId?: string; accountId?: string; ensureAccounts?: boolean },
+  ) => { updatedAccounts: number; missingPasses: number }
+  removePackTrackerAccount: (trackerId: string, accountId: string) => void
   saveCardProfile: (cardId: string, rawJson?: string) => void
   restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
   deleteCardProfile: (profileId: string) => void
@@ -118,10 +140,6 @@ type RaxDataContextValue = {
     passes: EarningsBackfillPass[],
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
-  importFromAdminOwnership: (
-    username: string,
-    options?: ImportFromUsernameOptions,
-  ) => Promise<UsernameImportResult>
   importCatalogProfile: (profile: CatalogImportProfile) => CatalogProfileImportResult
   resetAll: () => void
 }
@@ -133,21 +151,45 @@ function nowIso(): string {
 }
 
 export function RaxDataProvider({ children }: { children: ReactNode }) {
+  const { username: accountUsername, devBypass: accountDevBypass } = useAccountAuth()
   const [data, setData] = useState<RaxTrackerData>(createEmptyData)
   const [storageReady, setStorageReady] = useState(false)
   const [storageWarning, setStorageWarning] = useState<string | null>(null)
+  const accountUpdatedAtRef = useRef<string | undefined>(undefined)
+  const skipNextAccountSaveRef = useRef(true)
 
   useEffect(() => {
     let cancelled = false
-    void loadPersistedTrackerData().then((loaded) => {
+    setStorageReady(false)
+
+    const bootstrap = async () => {
+      if (!accountDevBypass) {
+        try {
+          const loaded = await loadAccountData()
+          if (cancelled) return
+          accountUpdatedAtRef.current = loaded.meta.updatedAt
+          skipNextAccountSaveRef.current = true
+          setData(loaded.data)
+          setStorageReady(true)
+          void persistTrackerData(loaded.data)
+          return
+        } catch (error) {
+          console.warn('Could not load account data; falling back to local storage.', error)
+        }
+      }
+
+      const loaded = await loadPersistedTrackerData()
       if (cancelled) return
+      skipNextAccountSaveRef.current = true
       setData(loaded.data)
       setStorageReady(true)
-    })
+    }
+
+    void bootstrap()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [accountUsername, accountDevBypass])
 
   useEffect(() => {
     if (!storageReady) return
@@ -162,6 +204,29 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     }, 250)
     return () => window.clearTimeout(handle)
   }, [data, storageReady])
+
+  useEffect(() => {
+    if (!storageReady || accountDevBypass) return
+    if (skipNextAccountSaveRef.current) {
+      skipNextAccountSaveRef.current = false
+      return
+    }
+
+    const handle = window.setTimeout(() => {
+      void saveAccountData(data, { ifUnmodifiedSince: accountUpdatedAtRef.current })
+        .then((result) => {
+          accountUpdatedAtRef.current = result.meta.updatedAt
+          setStorageWarning(null)
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : 'Could not save account data.'
+          setStorageWarning(message)
+          console.warn('Could not save account data:', error)
+        })
+    }, 800)
+
+    return () => window.clearTimeout(handle)
+  }, [data, storageReady, accountDevBypass])
 
   const value = useMemo<RaxDataContextValue>(
     () => ({
@@ -418,6 +483,9 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         setData((current) => ({
           ...current,
           plannedPasses: (current.plannedPasses ?? []).filter((pass) => pass.id !== id),
+          packTrackers: (current.packTrackers ?? []).filter(
+            (tracker) => tracker.plannedPassId !== id,
+          ),
         }))
       },
       updatePlannedPass: (id, patch) => {
@@ -472,6 +540,231 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         })
         return createdId
       },
+      upsertPackTracker: (plannedPassId) => {
+        let trackerId = ''
+        setData((current) => {
+          const existing = (current.packTrackers ?? []).find(
+            (tracker) => tracker.plannedPassId === plannedPassId,
+          )
+          if (existing) {
+            trackerId = existing.id
+            return current
+          }
+          const pass = (current.plannedPasses ?? []).find((item) => item.id === plannedPassId)
+          if (!pass) return current
+          const id = createId('pack')
+          trackerId = id
+          const stamp = nowIso()
+          return {
+            ...current,
+            packTrackers: [
+              ...(current.packTrackers ?? []),
+              {
+                id,
+                plannedPassId,
+                accounts: [
+                  {
+                    id: createId('pacc'),
+                    name: 'Account 1',
+                    rating: 0,
+                    opensPacks: true,
+                  },
+                ],
+                createdAt: stamp,
+                updatedAt: stamp,
+              },
+            ],
+          }
+        })
+        return trackerId
+      },
+      updatePackTracker: (id, patch) => {
+        setData((current) => ({
+          ...current,
+          packTrackers: (current.packTrackers ?? []).map((tracker) => {
+            if (tracker.id !== id) return tracker
+            return {
+              ...tracker,
+              accounts: patch.accounts !== undefined ? patch.accounts : tracker.accounts,
+              updatedAt: nowIso(),
+            }
+          }),
+        }))
+      },
+      addPackTrackerAccount: (trackerId, input) => {
+        let accountId: string | null = null
+        setData((current) => ({
+          ...current,
+          packTrackers: (current.packTrackers ?? []).map((tracker) => {
+            if (tracker.id !== trackerId) return tracker
+            const id = createId('pacc')
+            accountId = id
+            const rating = Number(input?.rating)
+            return {
+              ...tracker,
+              accounts: [
+                ...tracker.accounts,
+                {
+                  id,
+                  name:
+                    typeof input?.name === 'string' && input.name.trim()
+                      ? input.name.trim()
+                      : `Account ${tracker.accounts.length + 1}`,
+                  rating: Number.isFinite(rating) && rating > 0 ? Math.floor(rating) : 0,
+                  opensPacks: input?.opensPacks !== false,
+                },
+              ],
+              updatedAt: nowIso(),
+            }
+          }),
+        }))
+        return accountId
+      },
+      updatePackTrackerAccount: (trackerId, accountId, patch) => {
+        setData((current) => ({
+          ...current,
+          packTrackers: (current.packTrackers ?? []).map((tracker) => {
+            if (tracker.id !== trackerId) return tracker
+            return {
+              ...tracker,
+              accounts: tracker.accounts.map((account) => {
+                if (account.id !== accountId) return account
+                const rating =
+                  patch.rating !== undefined ? Number(patch.rating) : account.rating
+                return {
+                  ...account,
+                  name:
+                    patch.name !== undefined
+                      ? patch.name.trim() || account.name
+                      : account.name,
+                  rating:
+                    patch.rating !== undefined
+                      ? Number.isFinite(rating) && rating > 0
+                        ? Math.floor(rating)
+                        : 0
+                      : account.rating,
+                  opensPacks:
+                    patch.opensPacks !== undefined ? patch.opensPacks : account.opensPacks,
+                  username:
+                    patch.username !== undefined
+                      ? patch.username.replace(/^@/, '').trim() || undefined
+                      : account.username,
+                  rarityLabel:
+                    patch.rarityLabel !== undefined
+                      ? patch.rarityLabel.trim() || undefined
+                      : account.rarityLabel,
+                  lastImportedAt:
+                    patch.lastImportedAt !== undefined
+                      ? patch.lastImportedAt
+                      : account.lastImportedAt,
+                }
+              }),
+              updatedAt: nowIso(),
+            }
+          }),
+        }))
+      },
+      applyPackRatingsFromImport: (username, ratingsByExternalKey, options) => {
+        const normalizedUser = username.replace(/^@/, '').trim().toLowerCase()
+        const displayUser = username.replace(/^@/, '').trim()
+        const stamp = nowIso()
+        let updatedAccounts = 0
+        let missingPasses = 0
+
+        setData((current) => {
+          updatedAccounts = 0
+          missingPasses = 0
+          const plannedById = new Map(
+            (current.plannedPasses ?? []).map((pass) => [pass.id, pass]),
+          )
+
+          const nextTrackers = (current.packTrackers ?? []).map((tracker) => {
+            if (options?.plannedPassId && tracker.plannedPassId !== options.plannedPassId) {
+              return tracker
+            }
+
+            const pass = plannedById.get(tracker.plannedPassId)
+            if (!pass) return tracker
+
+            const imported = ratingsByExternalKey[pass.externalKey]
+            let accounts = [...tracker.accounts]
+
+            const matchingAccounts = accounts.filter((account) => {
+              if (options?.accountId) return account.id === options.accountId
+              const accountUser = (account.username || account.name)
+                .replace(/^@/, '')
+                .trim()
+                .toLowerCase()
+              return accountUser === normalizedUser
+            })
+
+            if (matchingAccounts.length === 0) {
+              if (!options?.ensureAccounts || !imported || options?.accountId) {
+                return tracker
+              }
+              accounts = [
+                ...accounts,
+                {
+                  id: createId('pacc'),
+                  name: displayUser || 'Account',
+                  username: displayUser || undefined,
+                  rating: imported.rating,
+                  opensPacks: true,
+                  rarityLabel: imported.rarityLabel,
+                  lastImportedAt: stamp,
+                },
+              ]
+              updatedAccounts += 1
+              return { ...tracker, accounts, updatedAt: stamp }
+            }
+
+            if (!imported) {
+              missingPasses += matchingAccounts.length
+              return tracker
+            }
+
+            const targetIds = new Set(matchingAccounts.map((account) => account.id))
+            return {
+              ...tracker,
+              accounts: accounts.map((account) => {
+                if (!targetIds.has(account.id)) return account
+                updatedAccounts += 1
+                return {
+                  ...account,
+                  username: displayUser || account.username,
+                  name:
+                    !account.name.trim() ||
+                    /^account\s*\d*$/i.test(account.name.trim())
+                      ? displayUser || account.name
+                      : account.name,
+                  rating: imported.rating,
+                  rarityLabel: imported.rarityLabel ?? account.rarityLabel,
+                  lastImportedAt: stamp,
+                }
+              }),
+              updatedAt: stamp,
+            }
+          })
+
+          return { ...current, packTrackers: nextTrackers }
+        })
+
+        return { updatedAccounts, missingPasses }
+      },
+      removePackTrackerAccount: (trackerId, accountId) => {
+        setData((current) => ({
+          ...current,
+          packTrackers: (current.packTrackers ?? []).map((tracker) =>
+            tracker.id === trackerId
+              ? {
+                  ...tracker,
+                  accounts: tracker.accounts.filter((account) => account.id !== accountId),
+                  updatedAt: nowIso(),
+                }
+              : tracker,
+          ),
+        }))
+      },
       saveCardProfile: (cardId, rawJson) => {
         setData((current) => {
           const card = current.cards.find((item) => item.id === cardId)
@@ -525,15 +818,6 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         setData(nextData)
         return result
       },
-      importFromAdminOwnership: async (username, options) => {
-        const { data: nextData, result } = await runAdminOwnershipImport(data, username, options)
-        const trimmed = username.replace(/^@/, '').trim()
-        setData({
-          ...nextData,
-          settings: { ...nextData.settings, savedUsername: trimmed },
-        })
-        return result
-      },
       importCatalogProfile: (profile) => {
         let result: CatalogProfileImportResult | null = null
         setData((current) => {
@@ -567,4 +851,5 @@ export function useRaxData(): RaxDataContextValue {
   return value
 }
 
-export type { UsernameImportProgress, UsernameImportResult }
+export type { UsernameImportResult }
+export type { UsernameImportProgress } from '../lib/usernameImport'

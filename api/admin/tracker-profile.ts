@@ -1,4 +1,5 @@
 import {
+  adminDeleteAllTrackerProfiles,
   adminDeleteTrackerProfile,
   adminResetTrackerProfilePin,
   lookupTrackerProfileForAdmin,
@@ -10,8 +11,10 @@ export const config = {
   runtime: 'edge',
 }
 
-type ResetPinBody = {
+type ResetPasswordBody = {
   username?: unknown
+  newPassword?: unknown
+  /** Legacy alias from sync PIN UI. */
   newPin?: unknown
 }
 
@@ -21,13 +24,14 @@ export default async function handler(request: Request): Promise<Response> {
 
   if (!profileSyncConfigured()) {
     return Response.json(
-      { error: 'Cloud profile sync is not configured in this environment.', storageConfigured: false },
+      { error: 'Account storage is not configured in this environment.', storageConfigured: false },
       { status: 503 },
     )
   }
 
   const url = new URL(request.url)
   const usernameParam = url.searchParams.get('username') ?? ''
+  const purgeAll = url.searchParams.get('all') === '1'
 
   if (request.method === 'GET') {
     if (!usernameParam.trim()) {
@@ -42,26 +46,31 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   if (request.method === 'POST') {
-    let body: ResetPinBody
+    let body: ResetPasswordBody
     try {
-      body = (await request.json()) as ResetPinBody
+      body = (await request.json()) as ResetPasswordBody
     } catch {
       return Response.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
     const username = typeof body.username === 'string' ? body.username : ''
-    const newPin = typeof body.newPin === 'string' ? body.newPin : ''
-    if (!username.trim() || !newPin.trim()) {
-      return Response.json({ error: 'Username and new sync PIN are required.' }, { status: 400 })
+    const newPassword =
+      typeof body.newPassword === 'string'
+        ? body.newPassword
+        : typeof body.newPin === 'string'
+          ? body.newPin
+          : ''
+    if (!username.trim() || !newPassword.trim()) {
+      return Response.json({ error: 'Username and new password are required.' }, { status: 400 })
     }
 
     try {
-      const result = await adminResetTrackerProfilePin(username, newPin)
+      const result = await adminResetTrackerProfilePin(username, newPassword)
       if (result.notFound) {
-        return Response.json({ error: 'No cloud profile found for this username.' }, { status: 404 })
+        return Response.json({ error: 'No account found for this username.' }, { status: 404 })
       }
       if (!result.ok || !result.meta) {
-        return Response.json({ error: 'Could not reset sync PIN.' }, { status: 500 })
+        return Response.json({ error: 'Could not reset password.' }, { status: 500 })
       }
 
       return Response.json({
@@ -75,23 +84,35 @@ export default async function handler(request: Request): Promise<Response> {
       })
     } catch (error) {
       return Response.json(
-        { error: error instanceof Error ? error.message : 'Could not reset sync PIN.' },
+        { error: error instanceof Error ? error.message : 'Could not reset password.' },
         { status: 400 },
       )
     }
   }
 
   if (request.method === 'DELETE') {
+    if (purgeAll) {
+      const result = await adminDeleteAllTrackerProfiles()
+      if (!result.ok) {
+        return Response.json({ error: 'Could not delete accounts.' }, { status: 500 })
+      }
+      return Response.json({
+        ok: true,
+        deleted: result.deleted,
+        usernames: result.usernames,
+      })
+    }
+
     if (!usernameParam.trim()) {
       return Response.json({ error: 'Username is required.' }, { status: 400 })
     }
 
     const result = await adminDeleteTrackerProfile(usernameParam)
     if (result.notFound) {
-      return Response.json({ error: 'No cloud profile found for this username.' }, { status: 404 })
+      return Response.json({ error: 'No account found for this username.' }, { status: 404 })
     }
     if (!result.ok) {
-      return Response.json({ error: 'Could not delete cloud profile.' }, { status: 500 })
+      return Response.json({ error: 'Could not delete account.' }, { status: 500 })
     }
 
     return Response.json({ ok: true })

@@ -5,6 +5,7 @@ import {
   normalizeRarityTier,
   passMatchesRarityFilter,
   RARITY_TIERS,
+  usernameImportRarityFilter,
 } from './rarityFilter'
 
 describe('rarityFilter', () => {
@@ -33,5 +34,18 @@ describe('rarityFilter', () => {
 
   it('defaults to Legendary+ tiers', () => {
     expect([...legendaryPlusRarityFilter()]).toEqual(['Legendary', 'Mystic', 'Iconic'])
+  })
+
+  it('optionally expands username import to Rare and/or Epic', () => {
+    expect([...usernameImportRarityFilter()]).toEqual(['Legendary', 'Mystic', 'Iconic'])
+    expect([...usernameImportRarityFilter({ includeRare: true })].sort()).toEqual(
+      ['Iconic', 'Legendary', 'Mystic', 'Rare'].sort(),
+    )
+    expect([...usernameImportRarityFilter({ includeEpic: true })].sort()).toEqual(
+      ['Epic', 'Iconic', 'Legendary', 'Mystic'].sort(),
+    )
+    expect(
+      [...usernameImportRarityFilter({ includeRare: true, includeEpic: true })].sort(),
+    ).toEqual(['Epic', 'Iconic', 'Legendary', 'Mystic', 'Rare'].sort())
   })
 })

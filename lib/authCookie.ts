@@ -1,5 +1,6 @@
 const COOKIE_NAME = 'rax_session'
-const MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+/** Site gate and account sessions both last 30 days. */
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 function sessionSecret(): string | undefined {
   return process.env.AUTH_SESSION_SECRET?.trim() || process.env.BASIC_AUTH_PASSWORD?.trim()
@@ -27,6 +28,8 @@ async function signPayload(payload: string, secret: string): Promise<string> {
   return toBase64Url(new Uint8Array(signature))
 }
 
+export { signPayload, toBase64Url }
+
 export function getSessionCookieName(): string {
   return COOKIE_NAME
 }
@@ -50,7 +53,7 @@ export async function createSessionToken(): Promise<string | null> {
   const secret = sessionSecret()
   if (!secret) return null
 
-  const expiresAt = String(Date.now() + MAX_AGE_SECONDS * 1000)
+  const expiresAt = String(Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
   const signature = await signPayload(expiresAt, secret)
   return `${expiresAt}.${signature}`
 }
@@ -75,7 +78,7 @@ export async function verifySessionToken(token: string | null | undefined): Prom
 
 export function buildSessionCookieHeader(token: string): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
-  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${MAX_AGE_SECONDS}${secure}`
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${secure}`
 }
 
 export function clearSessionCookieHeader(): string {

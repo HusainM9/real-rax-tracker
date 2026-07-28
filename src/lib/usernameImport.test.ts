@@ -211,20 +211,47 @@ describe('importFromUsername', () => {
     }
   })
 
-  it('replaces performances for imported cards on re-import', async () => {
+  it('replaces the full collection on re-import and drops stale cards', async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = mockFetch as typeof fetch
 
     try {
       const first = await importFromUsername(createEmptyData(), 'testuser')
-      const second = await importFromUsername(first.data, 'testuser')
+      const withStaleCard = {
+        ...first.data,
+        cards: [
+          ...first.data.cards,
+          {
+            id: 'stale-card',
+            name: 'Stale Pass',
+            sport: 'NBA' as const,
+            season: '2025-26',
+            notes: 'Should be removed',
+            externalKey: 'stale|2026|NBA',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        performances: [
+          ...first.data.performances,
+          {
+            id: 'stale-perf',
+            cardId: 'stale-card',
+            claimDay: '01-01',
+            raxEarned: 99,
+            note: '',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      } as typeof first.data
+      const second = await importFromUsername(withStaleCard, 'testuser')
 
-      expect(second.result.cardsCreated).toBe(0)
-      expect(second.result.cardsUpdated).toBe(2)
+      expect(second.result.cardsCreated).toBe(2)
+      expect(second.result.cardsUpdated).toBe(0)
       expect(second.result.rowsImported).toBe(2)
-      expect(second.result.skipped).toBe(0)
       expect(second.data.cards).toHaveLength(2)
+      expect(second.data.cards.some((card) => card.id === 'stale-card')).toBe(false)
       expect(second.data.performances).toHaveLength(2)
+      expect(second.data.performances.some((row) => row.cardId === 'stale-card')).toBe(false)
     } finally {
       globalThis.fetch = originalFetch
     }
@@ -319,6 +346,51 @@ describe('importFromUsername', () => {
       expect(data.cards).toHaveLength(1)
       expect(data.cards[0]?.sport).toBe('MLB')
       expect(data.cards[0]?.season).toBe('2026')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('imports Rare when includeRare is enabled', async () => {
+    const originalFetch = globalThis.fetch
+    const rareFetch: typeof fetch = (input, init) => {
+      const url = String(input)
+      if (url.includes('resolve-listing')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...samplePassesResponse,
+              rarities: {
+                ...samplePassesResponse.rarities,
+                '200-2026-nfl': ['Rare 3'],
+              },
+              passSnapshots: samplePassesResponse.passSnapshots.map((pass) =>
+                pass.entityId === 200 ? { ...pass, rarityLabel: 'Rare 3' } : pass,
+              ),
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return mockFetch(input, init)
+    }
+    globalThis.fetch = rareFetch
+
+    try {
+      const off = await importFromUsername(createEmptyData(), 'testuser')
+      expect(off.result.cardsCreated).toBe(2)
+      expect(off.result.passesSkipped).toBe(2)
+      expect(off.data.cards.some((card) => card.externalKey === '200|2026|NFL')).toBe(false)
+
+      const on = await importFromUsername(createEmptyData(), 'testuser', {
+        includeRare: true,
+      })
+      expect(on.result.cardsCreated).toBe(3)
+      expect(on.result.passesSkipped).toBe(1)
+      expect(on.data.cards.some((card) => card.externalKey === '200|2026|NFL')).toBe(true)
+      expect(on.data.cards.find((card) => card.externalKey === '200|2026|NFL')?.rarityLabel).toBe(
+        'Rare 3',
+      )
     } finally {
       globalThis.fetch = originalFetch
     }

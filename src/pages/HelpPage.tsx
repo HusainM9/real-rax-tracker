@@ -117,7 +117,7 @@ export default function HelpPage() {
         <dl className="help-dl">
           <div>
             <dt>Dashboard</dt>
-            <dd>Totals, best days, JSON backup; optional cloud sync for devices.</dd>
+            <dd>Totals, best days, JSON backup; collection saves to your account.</dd>
           </div>
           <div>
             <dt>Entry</dt>
@@ -162,9 +162,9 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>Backup and privacy</h2>
         <p>
-          Data lives in browser localStorage. Export JSON on Dashboard, or use optional cloud sync
-          there. Collection recovery is username import on Entry. Clearing site data removes the
-          tracker.
+          Data saves to your signed-in account. Export JSON on Dashboard for an extra backup.
+          Collection recovery is username import on Entry. Clearing site data removes local cache
+          only.
         </p>
         <details className="help-details">
           <summary>Privacy notes</summary>

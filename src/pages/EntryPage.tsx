@@ -5,7 +5,6 @@ import {
   usernameImportDisabled,
   realappToolsShutdownLabel,
   realProviderImportEnabled,
-  testAdminCacheImportEnabled,
 } from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
@@ -24,6 +23,7 @@ import {
   type UsernameImportProgress,
 } from '../lib/usernameImport'
 import type { EarningsBackfillPass } from '../lib/realEarningsImport'
+import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -129,19 +129,20 @@ export default function EntryPage() {
     deletePerformance,
     importFromUsername,
     retryFailedEarnings,
-    importFromAdminOwnership,
     saveCardProfile,
     restoreCardProfile,
     deleteCardProfile,
     importCatalogProfile,
     addPlannedPassFromCatalog,
+    setSettings,
   } = useRaxData()
+  const { username: accountUsername } = useAccountAuth()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
   const [profileStatus, setProfileStatus] = useState('')
   const cardEntryRef = useRef<HTMLFormElement>(null)
   const [usernameImport, setUsernameImport] = useState({
-    username: data.settings.savedUsername ?? '',
+    username: accountUsername || data.settings.savedUsername || '',
   })
   const [showHeavyTables, setShowHeavyTables] = useState(
     () => data.cards.length <= HEAVY_TABLE_THRESHOLD && data.performances.length <= HEAVY_TABLE_THRESHOLD,
@@ -153,7 +154,6 @@ export default function EntryPage() {
     null,
   )
   const [usernameImporting, setUsernameImporting] = useState(false)
-  const [adminSnapshotImporting, setAdminSnapshotImporting] = useState(false)
   const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
     FailedPlayerPassImport[]
   >([])
@@ -176,7 +176,6 @@ export default function EntryPage() {
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
-  const testingAdminCache = testAdminCacheImportEnabled()
   const realImportActive = realProviderImportEnabled()
 
   const sortedExistingCards = useMemo(
@@ -480,9 +479,13 @@ export default function EntryPage() {
     setRetryableEarningsPasses([])
 
     try {
+      const includeRare = Boolean(data.settings.importRarePasses)
+      const includeEpic = Boolean(data.settings.importEpicPasses)
       const result = await importFromUsername(username, {
         signal: controller.signal,
         onProgress: setUsernameImportProgress,
+        includeRare,
+        includeEpic,
       })
       const failedPlayerPasses = getFailedPlayerPasses(result)
       const noEarningsCount = failedPlayerPasses.filter((pass) => pass.reason === 'no_earnings').length
@@ -590,57 +593,6 @@ export default function EntryPage() {
     }
   }
 
-  const importFromAdminSnapshot = async () => {
-    const username = usernameImport.username.trim()
-    if (!username) return
-    setAdminSnapshotImporting(true)
-    setUsernameImportStatus('')
-    setUsernameImportProgress(null)
-    setUsernameImportFailedPasses([])
-    setRetryableEarningsPasses([])
-    try {
-      const result = await importFromAdminOwnership(username, {
-        onProgress: setUsernameImportProgress,
-      })
-      const failedPlayerPasses = getFailedPlayerPasses(result)
-      setUsernameImportFailedPasses(failedPlayerPasses)
-      setRetryableEarningsPasses(result.retryableEarningsPasses)
-      const skipNote =
-        result.passesSkipped > 0
-          ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
-          : ''
-      const ignoreNote =
-        result.passesIgnored > 0
-          ? ` · skipped ${result.passesIgnored} ignored pass${result.passesIgnored === 1 ? '' : 'es'}`
-          : ''
-      const raxNote =
-        result.rowsImported > 0
-          ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from admin snapshot (OTD adjusted from saved rarity)`
-          : ' · no RAX rows found in admin snapshot yet'
-      const issueNote =
-        failedPlayerPasses.length > 0
-          ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
-          : ''
-      setUsernameImportStatus(
-        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${ignoreNote}${issueNote}.`,
-      )
-      setCardsPage(1)
-      if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
-        setShowHeavyTables(false)
-      }
-      setPerformancesPage(1)
-    } catch (error) {
-      setUsernameImportStatus(
-        error instanceof Error
-          ? error.message
-          : 'Could not import from admin cached ownership.',
-      )
-    } finally {
-      setAdminSnapshotImporting(false)
-      setUsernameImportProgress(null)
-    }
-  }
-
   const cardEntrySubmitLabel =
     cardEntry.mode === 'new'
       ? cardEntry.earningsInput === 'paste' && cardEntry.rawJson.trim()
@@ -692,6 +644,19 @@ export default function EntryPage() {
     }))
   }
 
+  const importRare = Boolean(data.settings.importRarePasses)
+  const importEpic = Boolean(data.settings.importEpicPasses)
+  const importExtras = [
+    importRare ? 'Rare' : null,
+    importEpic ? 'Epic' : null,
+  ].filter((tier): tier is string => Boolean(tier))
+  const importScopeLabel =
+    importExtras.length > 0 ? `Legendary+ plus ${importExtras.join(' and ')}` : 'Legendary+ only'
+  const importButtonLabel =
+    importExtras.length > 0
+      ? `Import Legendary+ / ${importExtras.join(' / ')}`
+      : 'Import Legendary+ passes'
+
   return (
     <div className="page-stack">
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
@@ -700,8 +665,8 @@ export default function EntryPage() {
             <h2>Username import</h2>
             {realImportActive ? (
               <p>
-                Enter your Real @username to recover Legendary+ passes. Daily RAX may load in
-                stages — retry misses without redoing the pass list.
+                Enter your Real @username to recover Legendary+ passes (optional Rare/Epic). Daily
+                RAX may load in stages — retry misses without redoing the pass list.
               </p>
             ) : (
               <p>
@@ -714,13 +679,7 @@ export default function EntryPage() {
             )}
           </div>
           <span className="badge">
-            {testingAdminCache
-              ? 'Admin cache test'
-              : realImportActive
-                ? 'Primary'
-                : importDisabled
-                  ? 'Closed'
-                  : 'Limited'}
+            {realImportActive ? 'Primary' : importDisabled ? 'Closed' : 'Limited'}
           </span>
         </div>
         <div className="form-grid">
@@ -729,33 +688,49 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
+              disabled={usernameImporting || retryingFailedEarnings}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
             />
           </label>
+          <div className="field import-tier-field">
+            <span>Also import</span>
+            <div className="import-tier-toggles" role="group" aria-label="Optional rarities">
+              <label className={`import-tier-toggle${importRare ? ' active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={importRare}
+                  disabled={usernameImporting || retryingFailedEarnings || importDisabled}
+                  onChange={(event) => setSettings({ importRarePasses: event.target.checked })}
+                />
+                <span className="import-tier-dot rare" aria-hidden="true" />
+                Rare
+              </label>
+              <label className={`import-tier-toggle${importEpic ? ' active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={importEpic}
+                  disabled={usernameImporting || retryingFailedEarnings || importDisabled}
+                  onChange={(event) => setSettings({ importEpicPasses: event.target.checked })}
+                />
+                <span className="import-tier-dot epic" aria-hidden="true" />
+                Epic
+              </label>
+            </div>
+          </div>
         </div>
         <p className="import-hint">
-          Legendary+ only
+          {importScopeLabel}
           {realImportActive ? ' · duplicates keep best rarity' : ''}
-          . Username saved after a successful import.
+          . Each import replaces your full collection — data saves to your account. Below-Legendary
+          stays out of ranking baselines and Plan quick-adds.
         </p>
         {importDisabled ? (
-          <>
-            <details className="help-details import-hint">
-              <summary>Recover from admin cached passes</summary>
-              <p>
-                Try <strong>Import from admin cached passes</strong> with your exact Real @username
-                if a prior import reported ownership. Data may be incomplete — verify in Real.
-                Optional cloud backup is on the <Link to="/dashboard">Dashboard</Link>.
-              </p>
-            </details>
-            <p className="import-status">
-              Automatic username import is closed. Use{' '}
-              <a href="#catalog-search">Quick add</a> below, or Export JSON on Dashboard.
-            </p>
-          </>
+          <p className="import-status">
+            Automatic username import is closed. Use{' '}
+            <a href="#catalog-search">Quick add</a> below, or Export JSON on Dashboard.
+          </p>
         ) : null}
         <div className="button-row">
           <button
@@ -764,28 +739,12 @@ export default function EntryPage() {
             disabled={
               usernameImporting ||
               retryingFailedEarnings ||
-              adminSnapshotImporting ||
               importDisabled ||
               usernameImport.username.trim().length === 0
             }
           >
-            {usernameImporting ? 'Importing…' : 'Import Legendary+ passes'}
+            {usernameImporting ? 'Importing…' : importButtonLabel}
           </button>
-          {importDisabled ? (
-            <button
-              className="button"
-              type="button"
-              disabled={
-                usernameImporting ||
-                retryingFailedEarnings ||
-                adminSnapshotImporting ||
-                usernameImport.username.trim().length === 0
-              }
-              onClick={() => void importFromAdminSnapshot()}
-            >
-              {adminSnapshotImporting ? 'Importing cached passes…' : 'Import from admin cached passes'}
-            </button>
-          ) : null}
           {usernameImporting || retryingFailedEarnings ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>
               Cancel
@@ -838,7 +797,7 @@ export default function EntryPage() {
                 <button
                   className="button primary"
                   type="button"
-                  disabled={usernameImporting || retryingFailedEarnings || adminSnapshotImporting}
+                  disabled={usernameImporting || retryingFailedEarnings}
                   onClick={() => void retryFailedEarningsImport()}
                 >
                   {retryingFailedEarnings

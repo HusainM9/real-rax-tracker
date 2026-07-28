@@ -13,7 +13,7 @@ describe('trackerPersistence', () => {
       reason: 'quota',
     })
     expect(message).toContain('storage is full')
-    expect(message).toContain('Save to cloud')
+    expect(message).toContain('account')
   })
 
   it('does not warn when IndexedDB save succeeds without localStorage', () => {

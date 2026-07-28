@@ -5,6 +5,10 @@ import {
   verifySessionToken,
 } from '../../lib/authCookie'
 import {
+  getAccountCookieName,
+  verifyAccountSessionToken,
+} from '../../lib/accountAuth'
+import {
   getAdminCookieName,
   verifyAdminSessionToken,
 } from '../../lib/adminAuth'
@@ -32,4 +36,25 @@ export async function requireAdminSession(request: Request): Promise<Response | 
   if (appDenied) return appDenied
   if (await hasAdminSession(request)) return null
   return Response.json({ error: 'Admin session required' }, { status: 401 })
+}
+
+export async function getAccountSessionUsername(
+  request: Request,
+): Promise<string | null> {
+  const token = readCookie(request, getAccountCookieName())
+  const result = await verifyAccountSessionToken(token)
+  return result.ok ? result.username : null
+}
+
+export async function requireAccountSession(
+  request: Request,
+): Promise<{ username: string } | Response> {
+  const appDenied = await requireAppSession(request)
+  if (appDenied) return appDenied
+
+  const username = await getAccountSessionUsername(request)
+  if (!username) {
+    return Response.json({ error: 'Account login required' }, { status: 401 })
+  }
+  return { username }
 }

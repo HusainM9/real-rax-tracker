@@ -1,5 +1,7 @@
 import type {
   CachedPlayerEarningsProfile,
+  PackTracker,
+  PackTrackerAccount,
   PlayerCard,
   PotentialRaxRow,
   RaxPerformance,
@@ -14,6 +16,7 @@ import type {
 } from '../types/rax'
 import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
+import { DEFAULT_PACK_RATING_INCREMENT } from './packTracker'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
 export const EXPORT_VERSION = 1
@@ -24,6 +27,8 @@ export function createEmptyData(): RaxTrackerData {
     settings: {
       proBonusEnabled: true,
       savedUsername: '',
+      importRarePasses: false,
+      importEpicPasses: false,
     },
     cards: [],
     performances: [],
@@ -32,6 +37,7 @@ export function createEmptyData(): RaxTrackerData {
     cachedPlayerEarnings: [],
     savedSellRankings: null,
     plannedPasses: [],
+    packTrackers: [],
     ignoredPassKeys: [],
   }
 }
@@ -264,6 +270,52 @@ function hydratePlannedPass(value: unknown): PlannedPass | null {
   }
 }
 
+function hydratePackTrackerAccount(value: unknown): PackTrackerAccount | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  const rating = Number(value.rating)
+  return {
+    id: value.id,
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : 'Account',
+    rating: Number.isFinite(rating) && rating > 0 ? Math.floor(rating) : 0,
+    opensPacks: value.opensPacks !== false,
+    username:
+      typeof value.username === 'string' && value.username.trim()
+        ? value.username.replace(/^@/, '').trim()
+        : undefined,
+    rarityLabel:
+      typeof value.rarityLabel === 'string' && value.rarityLabel.trim()
+        ? value.rarityLabel.trim()
+        : undefined,
+    lastImportedAt:
+      typeof value.lastImportedAt === 'string' ? value.lastImportedAt : undefined,
+  }
+}
+
+function hydratePackTracker(value: unknown): PackTracker | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.plannedPassId !== 'string') {
+    return null
+  }
+  const now = new Date().toISOString()
+  return {
+    id: value.id,
+    plannedPassId: value.plannedPassId,
+    accounts: Array.isArray(value.accounts)
+      ? value.accounts
+          .map(hydratePackTrackerAccount)
+          .filter((account): account is PackTrackerAccount => account !== null)
+      : [],
+    ratingPerPack: Number.isFinite(Number(value.ratingPerPack))
+      ? Math.max(1, Math.floor(Number(value.ratingPerPack)))
+      : DEFAULT_PACK_RATING_INCREMENT,
+    lastAutoIncrementDay:
+      typeof value.lastAutoIncrementDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastAutoIncrementDay)
+        ? value.lastAutoIncrementDay
+        : undefined,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : now,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now,
+  }
+}
+
 function hydrateSavedSellRankings(value: unknown): SavedSellRankings | null {
   if (!isRecord(value) || typeof value.calculatedAt !== 'string') return null
   return {
@@ -306,6 +358,18 @@ export function normalizeData(value: unknown): RaxTrackerData {
         typeof settingsRecord.cloudSyncAuto === 'boolean'
           ? settingsRecord.cloudSyncAuto
           : undefined,
+      importRarePasses:
+        typeof settingsRecord.importRarePasses === 'boolean'
+          ? settingsRecord.importRarePasses
+          : typeof settingsRecord.importEpicAndRarePasses === 'boolean'
+            ? settingsRecord.importEpicAndRarePasses
+            : fallback.settings.importRarePasses,
+      importEpicPasses:
+        typeof settingsRecord.importEpicPasses === 'boolean'
+          ? settingsRecord.importEpicPasses
+          : typeof settingsRecord.importEpicAndRarePasses === 'boolean'
+            ? settingsRecord.importEpicAndRarePasses
+            : fallback.settings.importEpicPasses,
     },
     cards: Array.isArray(value.cards)
       ? value.cards.map(hydrateCard).filter((card): card is PlayerCard => card !== null)
@@ -338,6 +402,11 @@ export function normalizeData(value: unknown): RaxTrackerData {
       ? value.plannedPasses
           .map(hydratePlannedPass)
           .filter((pass): pass is PlannedPass => pass !== null)
+      : [],
+    packTrackers: Array.isArray(value.packTrackers)
+      ? value.packTrackers
+          .map(hydratePackTracker)
+          .filter((tracker): tracker is PackTracker => tracker !== null)
       : [],
     ignoredPassKeys: hydrateIgnoredPassKeys(value.ignoredPassKeys),
   }

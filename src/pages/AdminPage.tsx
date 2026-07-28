@@ -9,7 +9,11 @@ import {
   type CatalogSearchResult,
 } from '../lib/catalogApi'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
-import { SYNC_PIN_HELP, SYNC_PIN_MAX_LENGTH, stripSpacesFromSyncPinInput, validateSyncPin } from '../../lib/syncPinRules'
+import {
+  ACCOUNT_PASSWORD_HELP,
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  validateAccountPassword,
+} from '../../lib/accountPasswordRules'
 import { parseFetchJson } from '../lib/readResponseJson'
 import {
   DEFAULT_SHOP_CRAWL_UI_MAX_PAGES,
@@ -366,7 +370,7 @@ export default function AdminPage() {
       return
     }
     setCloudProfileBusy(true)
-    setCloudProfileStatus('Checking cloud profile…')
+    setCloudProfileStatus('Checking account…')
     try {
       const response = await fetch(
         `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
@@ -374,21 +378,21 @@ export default function AdminPage() {
       )
       const body = (await response.json()) as TrackerProfileLookupResponse
       if (!response.ok) {
-        throw new Error(body.error || `Cloud profile lookup failed (${response.status}).`)
+        throw new Error(body.error || `Account lookup failed (${response.status}).`)
       }
       if (!body.profile) {
         setCloudProfileSummary(null)
-        setCloudProfileStatus(`No cloud profile found for @${username}.`)
+        setCloudProfileStatus(`No account found for @${username}.`)
         return
       }
       setCloudProfileSummary(body.profile)
       setCloudProfileStatus(
-        `Cloud profile for @${body.profile.username}: ${body.profile.cardCount} card${body.profile.cardCount === 1 ? '' : 's'}, ${body.profile.performanceCount} earnings row${body.profile.performanceCount === 1 ? '' : 's'}, last saved ${new Date(body.profile.updatedAt).toLocaleString()}.`,
+        `Account for @${body.profile.username}: ${body.profile.cardCount} card${body.profile.cardCount === 1 ? '' : 's'}, ${body.profile.performanceCount} earnings row${body.profile.performanceCount === 1 ? '' : 's'}, last saved ${new Date(body.profile.updatedAt).toLocaleString()}.`,
       )
     } catch (error) {
       setCloudProfileSummary(null)
       setCloudProfileStatus(
-        error instanceof Error ? error.message : 'Could not check cloud profile.',
+        error instanceof Error ? error.message : 'Could not check account.',
       )
     } finally {
       setCloudProfileBusy(false)
@@ -401,38 +405,38 @@ export default function AdminPage() {
       setCloudProfileStatus('Enter a username first.')
       return
     }
-    const pinResult = validateSyncPin(cloudProfileNewPin)
-    if (!pinResult.ok) {
-      setCloudProfileStatus(pinResult.error)
+    const passwordResult = validateAccountPassword(cloudProfileNewPin)
+    if (!passwordResult.ok) {
+      setCloudProfileStatus(passwordResult.error)
       return
     }
     if (
       !window.confirm(
-        `Reset the cloud sync PIN for @${username}? Their saved cloud data stays intact. Share the new PIN with them privately.`,
+        `Reset the password for @${username}? Their saved account data stays intact. Share the new password with them privately.`,
       )
     ) {
       return
     }
 
     setCloudProfileBusy(true)
-    setCloudProfileStatus('Resetting sync PIN…')
+    setCloudProfileStatus('Resetting password…')
     try {
       const response = await fetch('/api/admin/tracker-profile', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, newPin: pinResult.pin }),
+        body: JSON.stringify({ username, newPassword: passwordResult.password }),
       })
       const body = (await response.json()) as TrackerProfileLookupResponse & { ok?: boolean; error?: string }
       if (!response.ok) {
-        throw new Error(body.error || `PIN reset failed (${response.status}).`)
+        throw new Error(body.error || `Password reset failed (${response.status}).`)
       }
       setCloudProfileSummary(body.profile ?? null)
       setCloudProfileStatus(
-        `Sync PIN reset for @${username}. Share the new PIN with the user privately — they can change it themselves on Dashboard after loading or saving.`,
+        `Password reset for @${username}. Share the new password with the user privately.`,
       )
     } catch (error) {
-      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not reset sync PIN.')
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not reset password.')
     } finally {
       setCloudProfileBusy(false)
     }
@@ -446,14 +450,14 @@ export default function AdminPage() {
     }
     if (
       !window.confirm(
-        `Delete the cloud profile for @${username}? This removes their cloud backup only. Local browser data is untouched.`,
+        `Delete the account for @${username}? This removes their saved collection. They can register again with a new password.`,
       )
     ) {
       return
     }
 
     setCloudProfileBusy(true)
-    setCloudProfileStatus('Deleting cloud profile…')
+    setCloudProfileStatus('Deleting account…')
     try {
       const response = await fetch(
         `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
@@ -464,9 +468,55 @@ export default function AdminPage() {
         throw new Error(body.error || `Delete failed (${response.status}).`)
       }
       setCloudProfileSummary(null)
-      setCloudProfileStatus(`Deleted cloud profile for @${username}. They can save again with a new PIN.`)
+      setCloudProfileStatus(`Deleted account for @${username}. They can register again with a new password.`)
     } catch (error) {
-      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete cloud profile.')
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete account.')
+    } finally {
+      setCloudProfileBusy(false)
+    }
+  }
+
+  const deleteAllAccounts = async () => {
+    if (
+      !window.confirm(
+        'Delete ALL accounts and legacy cloud-sync profiles? Everyone will need to create a new account. This cannot be undone.',
+      )
+    ) {
+      return
+    }
+    if (!window.confirm('Final confirm: wipe every stored account profile now?')) {
+      return
+    }
+
+    setCloudProfileBusy(true)
+    setCloudProfileStatus('Deleting all accounts…')
+    try {
+      const response = await fetch('/api/admin/tracker-profile?all=1', {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const body = (await response.json()) as {
+        ok?: boolean
+        deleted?: number
+        usernames?: string[]
+        error?: string
+      }
+      if (!response.ok) {
+        throw new Error(body.error || `Delete all failed (${response.status}).`)
+      }
+      setCloudProfileSummary(null)
+      const deleted = Number(body.deleted) || 0
+      setCloudProfileStatus(
+        deleted === 0
+          ? 'No accounts found to delete.'
+          : `Deleted ${deleted} account${deleted === 1 ? '' : 's'}${
+              body.usernames?.length
+                ? ` (${body.usernames.map((name) => `@${name}`).join(', ')})`
+                : ''
+            }. Users can create fresh accounts now.`,
+      )
+    } catch (error) {
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete all accounts.')
     } finally {
       setCloudProfileBusy(false)
     }
@@ -1524,14 +1574,15 @@ export default function AdminPage() {
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="Cloud profile sync"
-        description="Reset a forgotten sync PIN or delete a user's cloud backup"
+        title="Account management"
+        description="Reset a forgotten password or delete user accounts / legacy cloud-sync profiles"
         defaultOpen={false}
       >
         <p className="import-hint">
-          Cloud profiles are keyed by Real @username. PINs are stored as hashes — admins cannot read
-          the old PIN. Reset keeps their cloud data and sets a new PIN you share privately. Delete
-          removes the cloud copy so they can save fresh with a new PIN.
+          Accounts are keyed by Real @username. Passwords are stored as hashes — admins cannot read
+          the old password. Reset keeps their account data and sets a new password you share
+          privately. Delete removes one account so they can register fresh. Use{' '}
+          <strong>Delete all accounts</strong> to wipe legacy cloud-sync profiles.
         </p>
         <div className="button-row">
           <label className="field inline-field rank-search-field">
@@ -1562,20 +1613,18 @@ export default function AdminPage() {
         ) : null}
         <div className="sort-controls">
           <label className="field">
-            <span>New sync PIN</span>
+            <span>New password</span>
             <input
               type="password"
               value={cloudProfileNewPin}
               disabled={cloudProfileBusy}
-              placeholder="Temporary PIN for the user"
+              placeholder="Temporary password for the user"
               autoComplete="off"
               spellCheck={false}
-              maxLength={SYNC_PIN_MAX_LENGTH}
-              onChange={(event) =>
-                setCloudProfileNewPin(stripSpacesFromSyncPinInput(event.target.value))
-              }
+              maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
+              onChange={(event) => setCloudProfileNewPin(event.target.value)}
             />
-            <small className="field-hint">{SYNC_PIN_HELP}</small>
+            <small className="field-hint">{ACCOUNT_PASSWORD_HELP}</small>
           </label>
         </div>
         <div className="button-row">
@@ -1585,7 +1634,7 @@ export default function AdminPage() {
             disabled={cloudProfileBusy}
             onClick={() => void resetCloudProfilePin()}
           >
-            Reset sync PIN
+            Reset password
           </button>
           <button
             className="button danger"
@@ -1593,7 +1642,15 @@ export default function AdminPage() {
             disabled={cloudProfileBusy}
             onClick={() => void deleteCloudProfile()}
           >
-            Delete cloud profile
+            Delete account
+          </button>
+          <button
+            className="button danger"
+            type="button"
+            disabled={cloudProfileBusy}
+            onClick={() => void deleteAllAccounts()}
+          >
+            Delete all accounts
           </button>
         </div>
         {cloudProfileStatus ? <p className="import-status">{cloudProfileStatus}</p> : null}

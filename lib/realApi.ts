@@ -327,6 +327,12 @@ export type RealBoostInfo = {
   /** Real returns the OTD multiplier per pass, e.g. "150x". Unused for now. */
   multiplier?: string
   level?: number
+  /** Play-rating progress toward the next rarity tier (from Real `boostInfo.progress`). */
+  progress?: number
+  /** Play rating still needed for the next tier. */
+  required?: number
+  progressDisplay?: string
+  progressQualifier?: string
 }
 
 export type RealPass = {
