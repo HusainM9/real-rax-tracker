@@ -14,6 +14,7 @@ import {
   type RemoveCardFromCollectionOptions,
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
+import { ignorePassOnImport, removeIgnoredPassKey } from '../lib/ignoredPasses'
 import {
   createEmptyData,
   exportTrackerData,
@@ -29,9 +30,11 @@ import { loadAccountData, saveAccountData } from '../lib/accountData'
 import { useAccountAuth } from './AccountAuthContext'
 import {
   importFromUsername as runUsernameImport,
+  retryFailedEarnings as runRetryFailedEarnings,
   type UsernameImportOptions,
   type UsernameImportResult,
 } from '../lib/usernameImport'
+import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { createId } from '../lib/id'
 import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
@@ -85,6 +88,8 @@ type RaxDataContextValue = {
   setCardRarity: (id: string, targetRarity: string) => void
   deleteCard: (id: string) => void
   removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
+  ignorePassOnImport: (id: string) => boolean
+  unignorePassKey: (externalKey: string) => void
   addPerformance: (input: PerformanceInput) => void
   addPerformances: (inputs: PerformanceInput[]) => void
   updatePerformance: (id: string, patch: Partial<PerformanceInput>) => void
@@ -129,6 +134,10 @@ type RaxDataContextValue = {
   replaceData: (next: RaxTrackerData) => void
   importFromUsername: (
     username: string,
+    options?: ImportFromUsernameOptions,
+  ) => Promise<UsernameImportResult>
+  retryFailedEarnings: (
+    passes: EarningsBackfillPass[],
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
   importCatalogProfile: (profile: CatalogImportProfile) => CatalogProfileImportResult
@@ -184,13 +193,16 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!storageReady) return
-    void persistTrackerData(data).then((result) => {
-      const warning = storageWarningMessage(result)
-      setStorageWarning(warning || null)
-      if (!result.ok) {
-        console.warn('Could not persist tracker data:', result)
-      }
-    })
+    const handle = window.setTimeout(() => {
+      void persistTrackerData(data).then((result) => {
+        const warning = storageWarningMessage(result)
+        setStorageWarning(warning || null)
+        if (!result.ok) {
+          console.warn('Could not persist tracker data:', result)
+        }
+      })
+    }, 250)
+    return () => window.clearTimeout(handle)
   }, [data, storageReady])
 
   useEffect(() => {
@@ -320,6 +332,19 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         })
         return removed
       },
+      ignorePassOnImport: (id) => {
+        let ignored = false
+        setData((current) => {
+          const next = ignorePassOnImport(current, id)
+          if (!next) return current
+          ignored = true
+          return next
+        })
+        return ignored
+      },
+      unignorePassKey: (externalKey) => {
+        setData((current) => removeIgnoredPassKey(current, externalKey))
+      },
       addPerformance: (input) => {
         setData((current) => ({
           ...current,
@@ -446,6 +471,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 rowCount: input.rowCount ?? 0,
                 notes: input.notes?.trim() ?? '',
                 source: input.source ?? 'catalog',
+                progress: input.progress ?? 'just-started',
                 addedAt: nowIso(),
               },
             ],
@@ -477,6 +503,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                     patch.simulatedRarityLabel !== undefined
                       ? patch.simulatedRarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
                       : pass.simulatedRarityLabel,
+                  progress: patch.progress !== undefined ? patch.progress : pass.progress,
                 }
               : pass,
           ),
@@ -505,6 +532,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 name: input.name.trim() || 'Planned pass',
                 season: input.season.trim(),
                 notes: input.notes.trim(),
+                progress: input.progress ?? 'just-started',
                 addedAt: nowIso(),
               },
             ],
@@ -783,6 +811,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           ...nextData,
           settings: { ...nextData.settings, savedUsername: trimmed },
         })
+        return result
+      },
+      retryFailedEarnings: async (passes, options) => {
+        const { data: nextData, result } = await runRetryFailedEarnings(data, passes, options)
+        setData(nextData)
         return result
       },
       importCatalogProfile: (profile) => {

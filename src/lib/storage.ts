@@ -36,7 +36,22 @@ export function createEmptyData(): RaxTrackerData {
     savedSellRankings: null,
     plannedPasses: [],
     packTrackers: [],
+    ignoredPassKeys: [],
   }
+}
+
+function hydrateIgnoredPassKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const key = entry.trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    keys.push(key)
+  }
+  return keys
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -225,6 +240,14 @@ function hydratePlannedPass(value: unknown): PlannedPass | null {
   const passKind = value.passKind === 'team' ? 'team' : 'player'
   const source =
     value.source === 'ranking' ? 'ranking' : value.source === 'manual' ? 'manual' : 'catalog'
+  const progressRaw = typeof value.progress === 'string' ? value.progress : ''
+  const progress: PlannedPass['progress'] =
+    progressRaw === 'nearly-finished' ||
+    progressRaw === 'on-the-way' ||
+    progressRaw === 'just-started' ||
+    progressRaw === 'future'
+      ? progressRaw
+      : 'just-started'
   return {
     id: value.id,
     externalKey: value.externalKey,
@@ -240,6 +263,7 @@ function hydratePlannedPass(value: unknown): PlannedPass | null {
     rowCount: Number(value.rowCount) || 0,
     notes: typeof value.notes === 'string' ? value.notes : '',
     source,
+    progress,
     addedAt: typeof value.addedAt === 'string' ? value.addedAt : new Date().toISOString(),
   }
 }
@@ -370,6 +394,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .map(hydratePackTracker)
           .filter((tracker): tracker is PackTracker => tracker !== null)
       : [],
+    ignoredPassKeys: hydrateIgnoredPassKeys(value.ignoredPassKeys),
   }
 }
 

@@ -10,25 +10,39 @@ import {
   isCatalogSeasonMetadataAligned,
   ownershipImportSeasonLabel,
   resolveCatalogPassSeasonYear,
+  seasonYearKindForSport,
 } from './seasonClaimWindow'
 
+describe('seasonYearKindForSport', () => {
+  it('matches live Real season + seasonDisplay encoding', () => {
+    expect(seasonYearKindForSport('NFL')).toBe('start')
+    expect(seasonYearKindForSport('NHL')).toBe('start')
+    expect(seasonYearKindForSport('CFB')).toBe('start')
+    expect(seasonYearKindForSport('FC')).toBe('start')
+    expect(seasonYearKindForSport('NBA')).toBe('end')
+    expect(seasonYearKindForSport('CBB')).toBe('end')
+    expect(seasonYearKindForSport('ncaam')).toBe('end')
+    expect(seasonYearKindForSport('MLB')).toBe('calendar')
+  })
+})
+
 describe('passSeasonDateWindow', () => {
-  it('uses end-year windows for NFL', () => {
-    expect(passSeasonDateWindow(2025, 'NFL')).toEqual({
+  it('uses start-year windows for NFL through the Super Bowl window in April', () => {
+    expect(passSeasonDateWindow(2024, 'NFL')).toEqual({
       start: '2024-08-01',
       end: '2025-04-30',
     })
   })
 
-  it('uses end-year windows for NHL through Stanley Cup playoffs in June', () => {
-    expect(passSeasonDateWindow(2024, 'NHL')).toEqual({
+  it('uses start-year windows for NHL through Stanley Cup playoffs in June', () => {
+    expect(passSeasonDateWindow(2023, 'NHL')).toEqual({
       start: '2023-08-01',
       end: '2024-06-30',
     })
   })
 
-  it('uses start-year windows for CBB', () => {
-    expect(passSeasonDateWindow(2024, 'CBB')).toEqual({
+  it('uses end-year windows for CBB', () => {
+    expect(passSeasonDateWindow(2025, 'CBB')).toEqual({
       start: '2024-08-01',
       end: '2025-06-30',
     })
@@ -37,38 +51,38 @@ describe('passSeasonDateWindow', () => {
 
 describe('claimDayInPassSeason', () => {
   it('keeps 2024-25 NFL games and drops other seasons', () => {
-    expect(claimDayInPassSeason('2024-11-26', 2025, 'NFL')).toBe(true)
-    expect(claimDayInPassSeason('2025-01-19', 2025, 'NFL')).toBe(true)
-    expect(claimDayInPassSeason('2023-11-26', 2025, 'NFL')).toBe(false)
-    expect(claimDayInPassSeason('2023-01-22', 2025, 'NFL')).toBe(false)
-    expect(claimDayInPassSeason('2023-09-10', 2025, 'NFL')).toBe(false)
+    expect(claimDayInPassSeason('2024-11-26', 2024, 'NFL')).toBe(true)
+    expect(claimDayInPassSeason('2025-01-19', 2024, 'NFL')).toBe(true)
+    expect(claimDayInPassSeason('2023-11-26', 2024, 'NFL')).toBe(false)
+    expect(claimDayInPassSeason('2023-01-22', 2024, 'NFL')).toBe(false)
+    expect(claimDayInPassSeason('2023-09-10', 2024, 'NFL')).toBe(false)
   })
 
-  it('keeps 2023-24 NFL games on the 2024 pass', () => {
-    expect(claimDayInPassSeason('2023-11-26', 2024, 'NFL')).toBe(true)
-    expect(claimDayInPassSeason('2024-02-11', 2024, 'NFL')).toBe(true)
-    expect(claimDayInPassSeason('2022-12-11', 2024, 'NFL')).toBe(false)
+  it('keeps 2023-24 NFL games on the 2023 pass', () => {
+    expect(claimDayInPassSeason('2023-11-26', 2023, 'NFL')).toBe(true)
+    expect(claimDayInPassSeason('2024-02-11', 2023, 'NFL')).toBe(true)
+    expect(claimDayInPassSeason('2022-12-11', 2023, 'NFL')).toBe(false)
   })
 
   it('uses season_label when season_year is mismatched in catalog metadata', () => {
-    expect(claimDayInPassSeason('2023-09-10', 2024, 'NFL', '2024-25')).toBe(false)
-    expect(claimDayInPassSeason('2024-09-08', 2024, 'NFL', '2024-25')).toBe(true)
-    expect(claimDayInPassSeason('2025-01-19', 2024, 'NFL', '2024-25')).toBe(true)
+    expect(claimDayInPassSeason('2023-09-10', 2025, 'NFL', '2024-25')).toBe(false)
+    expect(claimDayInPassSeason('2024-09-08', 2025, 'NFL', '2024-25')).toBe(true)
+    expect(claimDayInPassSeason('2025-01-19', 2025, 'NFL', '2024-25')).toBe(true)
   })
 
   it('keeps NHL playoff claim days in May and June on the correct pass', () => {
-    expect(claimDayInPassSeason('2024-05-15', 2024, 'NHL', '2023-24')).toBe(true)
-    expect(claimDayInPassSeason('2024-06-18', 2024, 'NHL', '2023-24')).toBe(true)
-    expect(claimDayInPassSeason('2024-07-01', 2024, 'NHL', '2023-24')).toBe(false)
-    expect(claimDayInPassSeason('2023-05-15', 2024, 'NHL', '2023-24')).toBe(false)
+    expect(claimDayInPassSeason('2024-05-15', 2023, 'NHL', '2023-24')).toBe(true)
+    expect(claimDayInPassSeason('2024-06-18', 2023, 'NHL', '2023-24')).toBe(true)
+    expect(claimDayInPassSeason('2024-07-01', 2023, 'NHL', '2023-24')).toBe(false)
+    expect(claimDayInPassSeason('2023-05-15', 2023, 'NHL', '2023-24')).toBe(false)
   })
 })
 
 describe('expectedSeasonLabelFromYear', () => {
   it('maps season_year 2024 per sport encoding rules', () => {
-    expect(expectedSeasonLabelFromYear(2024, 'NFL')).toBe('2023-24')
+    expect(expectedSeasonLabelFromYear(2024, 'NFL')).toBe('2024-25')
     expect(expectedSeasonLabelFromYear(2024, 'NBA')).toBe('2023-24')
-    expect(expectedSeasonLabelFromYear(2024, 'CBB')).toBe('2024-25')
+    expect(expectedSeasonLabelFromYear(2025, 'CBB')).toBe('2024-25')
     expect(expectedSeasonLabelFromYear(2024, 'MLB')).toBe('2024')
   })
 })
@@ -76,38 +90,38 @@ describe('expectedSeasonLabelFromYear', () => {
 describe('ownershipImportSeasonLabel', () => {
   it('keeps Meowbot OTD labels even when catalog canonicalization would rewrite them', () => {
     expect(ownershipImportSeasonLabel('NFL', 2024, '2024-25')).toBe('2024-25')
-    expect(importSeasonLabelForCatalog('NFL', 2024, '2024-25')).toBe('2023-24')
+    expect(importSeasonLabelForCatalog('NFL', 2024, '2024-25')).toBe('2024-25')
     expect(ownershipImportSeasonLabel('NFL', 2025, '2024-25')).toBe('2024-25')
-    expect(ownershipImportSeasonLabel('NHL', 2024, '2023-24')).toBe('2023-24')
+    expect(ownershipImportSeasonLabel('NHL', 2023, '2023-24')).toBe('2023-24')
   })
 
   it('falls back to season_year encoding when OTD label is missing', () => {
-    expect(ownershipImportSeasonLabel('NFL', 2025, undefined)).toBe('2024-25')
+    expect(ownershipImportSeasonLabel('NFL', 2024, undefined)).toBe('2024-25')
     expect(ownershipImportSeasonLabel('Golf', 2025, undefined)).toBe('2025')
   })
 })
 
 describe('isCatalogSeasonMetadataAligned', () => {
-  it('accepts valid NFL 2023-24 metadata', () => {
-    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NFL')).toBe(true)
+  it('accepts valid NFL 2024-25 metadata on season_year 2024', () => {
+    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'NFL')).toBe(true)
   })
 
-  it('flags NFL 2024-25 metadata stored on season_year 2024', () => {
-    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'NFL')).toBe(false)
+  it('flags NFL 2023-24 metadata stored on season_year 2024', () => {
+    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NFL')).toBe(false)
   })
 
-  it('flags NHL 2023-24 metadata stored on season_year 2023 (22-23 collision)', () => {
-    expect(isCatalogSeasonMetadataAligned(2023, '2023-24', 'NHL')).toBe(false)
-    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NHL')).toBe(true)
+  it('flags NHL end-year-style metadata after the start-year flip', () => {
+    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NHL')).toBe(false)
+    expect(isCatalogSeasonMetadataAligned(2023, '2023-24', 'NHL')).toBe(true)
   })
 
-  it('accepts valid CBB 2024-25 metadata on season_year 2024', () => {
-    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'CBB')).toBe(true)
+  it('accepts valid CBB 2024-25 metadata on season_year 2025', () => {
+    expect(isCatalogSeasonMetadataAligned(2025, '2024-25', 'CBB')).toBe(true)
   })
 })
 
 describe('canonicalCatalogPassMetadata', () => {
-  it('repairs NFL pass metadata from label', () => {
+  it('keeps already-correct NFL start-year metadata', () => {
     expect(
       canonicalCatalogPassMetadata({
         entityId: 607,
@@ -116,57 +130,65 @@ describe('canonicalCatalogPassMetadata', () => {
         seasonLabel: '2024-25',
       }),
     ).toEqual({
-      seasonYear: 2025,
+      seasonYear: 2024,
       seasonLabel: '2024-25',
-      externalKey: '607|2025|NFL',
-      aligned: false,
+      externalKey: '607|2024|NFL',
+      aligned: true,
     })
   })
 
-  it('repairs NHL Trocheck-style collision metadata from label', () => {
+  it('repairs NHL end-year collision metadata toward start-year', () => {
     expect(
       canonicalCatalogPassMetadata({
         entityId: 999,
         sport: 'NHL',
-        seasonYear: 2023,
+        seasonYear: 2024,
         seasonLabel: '2023-24',
       }),
     ).toEqual({
-      seasonYear: 2024,
+      seasonYear: 2023,
       seasonLabel: '2023-24',
-      externalKey: '999|2024|NHL',
+      externalKey: '999|2023|NHL',
       aligned: false,
     })
   })
 })
 
 describe('resolveCatalogPassSeasonYear', () => {
-  it('maps NFL split-season labels to Real end-year season_year values', () => {
-    expect(resolveCatalogPassSeasonYear(2024, '2023-24', 'NFL')).toBe(2024)
-    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'NFL')).toBe(2025)
+  it('maps NFL split-season labels to Real start-year season_year values', () => {
+    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'NFL')).toBe(2024)
+    expect(resolveCatalogPassSeasonYear(2025, '2024-25', 'NFL')).toBe(2024)
   })
 })
 
-describe('college sports (CBB/CFB) — start-year encoding', () => {
+describe('CFB — start-year encoding', () => {
+  it('treats season_year 2024 as 2024-25', () => {
+    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'CFB')).toBe(2024)
+    expect(expectedSeasonLabelFromYear(2024, 'CFB')).toBe('2024-25')
+    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'CFB')).toBe(true)
+  })
+})
+
+describe('CBB — end-year encoding', () => {
   const cbbPass = {
     entityId: 42,
     sport: 'CBB',
-    seasonYear: 2024,
+    seasonYear: 2025,
     seasonLabel: '2024-25',
   }
 
-  it('treats season_year 2024 as 2024-25 (not 2023-24)', () => {
-    expect(resolveCatalogPassSeasonYear(2024, '2024-25', 'CBB')).toBe(2024)
-    expect(expectedSeasonLabelFromYear(2024, 'CBB')).toBe('2024-25')
-    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'CBB')).toBe(true)
-    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'CFB')).toBe(true)
+  it('treats season_year 2025 as 2024-25 (not 2025-26)', () => {
+    expect(resolveCatalogPassSeasonYear(2025, '2024-25', 'CBB')).toBe(2025)
+    expect(expectedSeasonLabelFromYear(2025, 'CBB')).toBe('2024-25')
+    expect(isCatalogSeasonMetadataAligned(2025, '2024-25', 'CBB')).toBe(true)
+    expect(isCatalogSeasonMetadataAligned(2024, '2024-25', 'CBB')).toBe(false)
   })
 
-  it('does not rewrite already-correct college pass metadata on upsert', () => {
+  it('does not rewrite already-correct CBB pass metadata on upsert', () => {
     expect(canonicalCatalogPassMetadata(cbbPass)).toEqual({
-      seasonYear: 2024,
+      seasonYear: 2025,
       seasonLabel: '2024-25',
-      externalKey: '42|2024|CBB',
+      externalKey: '42|2025|CBB',
       aligned: true,
     })
   })
@@ -177,14 +199,14 @@ describe('college sports (CBB/CFB) — start-year encoding', () => {
       { claimDay: '2025-03-01', baseRaxEarned: 12 },
       { claimDay: '2023-11-26', baseRaxEarned: 99 },
     ]
-    expect(filterDailyRowsToPassSeason(rows, 2024, 'CBB', '2024-25')).toEqual([
+    expect(filterDailyRowsToPassSeason(rows, 2025, 'CBB', '2024-25')).toEqual([
       { claimDay: '2024-11-15', baseRaxEarned: 10 },
       { claimDay: '2025-03-01', baseRaxEarned: 12 },
     ])
   })
 })
 
-describe('end-year pro sports with clean catalog metadata (NBA/FC)', () => {
+describe('end-year pro sports with clean catalog metadata (NBA)', () => {
   it('accepts NBA 2023-24 on season_year 2024', () => {
     expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NBA')).toBe(true)
     expect(
@@ -196,24 +218,73 @@ describe('end-year pro sports with clean catalog metadata (NBA/FC)', () => {
       }).aligned,
     ).toBe(true)
   })
+})
 
-  it('accepts FC 2023-24 on season_year 2024', () => {
-    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'FC')).toBe(true)
+// Confirmed from a live Real pass: `season: 2025` with `seasonDisplay: "2025-26"`.
+describe('FC — start-year encoding', () => {
+  it('treats season_year 2025 as 2025-26 (not 2024-25)', () => {
+    expect(expectedSeasonLabelFromYear(2025, 'FC')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2025, 'soccer')).toBe('2025-26')
+    expect(resolveCatalogPassSeasonYear(2025, '2025-26', 'FC')).toBe(2025)
+    expect(isCatalogSeasonMetadataAligned(2025, '2025-26', 'FC')).toBe(true)
   })
 
-  it('accepts FC 2025-26 on season_year 2026', () => {
-    expect(isCatalogSeasonMetadataAligned(2026, '2025-26', 'FC')).toBe(true)
+  it('rejects the old end-year pairing', () => {
+    expect(isCatalogSeasonMetadataAligned(2026, '2025-26', 'FC')).toBe(false)
+    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'FC')).toBe(false)
+  })
+
+  it('does not rewrite an already-correct FC pass on upsert', () => {
+    expect(
+      canonicalCatalogPassMetadata({
+        entityId: 551,
+        sport: 'FC',
+        seasonYear: 2025,
+        seasonLabel: '2025-26',
+      }),
+    ).toEqual({
+      seasonYear: 2025,
+      seasonLabel: '2025-26',
+      externalKey: '551|2025|FC',
+      aligned: true,
+    })
+  })
+
+  it('keeps Real seasonDisplay unchanged through the catalog import label rules', () => {
+    expect(importSeasonLabelForCatalog('FC', 2025, '2025-26')).toBe('2025-26')
+  })
+
+  it('still exempts FC from claim-day season filtering, so the window change is inert', () => {
+    expect(claimDayInPassSeason('2020-01-01', 2025, 'FC', '2025-26')).toBe(true)
+    expect(claimDayInPassSeason('2030-12-31', 2025, 'FC')).toBe(true)
+    expect(passSeasonDateWindow(2025, 'FC')).toEqual({
+      start: '2025-08-01',
+      end: '2026-06-30',
+    })
+  })
+})
+
+// Confirmed from live Real: UFC passes use season 2023 + seasonDisplay "All-time".
+describe('UFC — All-time sentinel season 2023', () => {
+  it('keeps calendar label 2023 for catalog metadata', () => {
+    expect(expectedSeasonLabelFromYear(2023, 'UFC')).toBe('2023')
+    expect(seasonYearKindForSport('UFC')).toBe('calendar')
+  })
+
+  it('skips claim-day season filtering so All-time dailies are kept', () => {
+    expect(claimDayInPassSeason('2020-01-01', 2023, 'UFC', '2023')).toBe(true)
+    expect(claimDayInPassSeason('2026-07-11', 2023, 'ufc')).toBe(true)
   })
 })
 
 describe('catalogExternalKeyCandidates', () => {
-  it('includes listing and canonical keys for end-year sports', () => {
+  it('includes listing and canonical keys for start-year sports', () => {
     expect(
       catalogExternalKeyCandidates({
         entityId: 100,
         sport: 'NFL',
         seasonYear: 2024,
-        seasonLabel: '2023-24',
+        seasonLabel: '2024-25',
       }),
     ).toEqual(['100|2024|NFL'])
   })
@@ -223,10 +294,10 @@ describe('catalogExternalKeyCandidates', () => {
       catalogExternalKeyCandidates({
         entityId: 200,
         sport: 'NFL',
-        seasonYear: 2024,
+        seasonYear: 2025,
         seasonLabel: '2024-25',
       }),
-    ).toEqual(expect.arrayContaining(['200|2024|NFL', '200|2025|NFL']))
+    ).toEqual(expect.arrayContaining(['200|2025|NFL', '200|2024|NFL']))
   })
 })
 
@@ -237,7 +308,7 @@ describe('filterDailyRowsToPassSeason', () => {
       { claimDay: '2023-11-26', baseRaxEarned: 99 },
       { claimDay: '2025-01-19', baseRaxEarned: 18 },
     ]
-    expect(filterDailyRowsToPassSeason(rows, 2025, 'NFL')).toEqual([
+    expect(filterDailyRowsToPassSeason(rows, 2024, 'NFL')).toEqual([
       { claimDay: '2024-09-08', baseRaxEarned: 12 },
       { claimDay: '2025-01-19', baseRaxEarned: 18 },
     ])

@@ -2,6 +2,7 @@ import {
   getRealAppToolsRows,
   normalizeRealAppToolsPaste,
   parseRealAppToolsJson,
+  realAppToolsBoxScoreId,
   type RealAppToolsRow,
 } from '../../lib/realAppToolsPaste'
 import { computeOtdRax, type OtdPassKind } from './otdRax'
@@ -32,13 +33,8 @@ function parseClaimDay(day: string): string | null {
 }
 
 function boxScoreIdFromRow(row: RealAppToolsRow): string {
-  if (row.player_box_score_id !== undefined && row.player_box_score_id !== null) {
-    return String(row.player_box_score_id)
-  }
-  if (Array.isArray(row.playerBoxScoreIds) && row.playerBoxScoreIds.length > 0) {
-    return String(row.playerBoxScoreIds[0])
-  }
-  return ''
+  const boxScoreId = realAppToolsBoxScoreId(row)
+  return boxScoreId === null ? '' : String(boxScoreId)
 }
 
 function parseDailyRow(

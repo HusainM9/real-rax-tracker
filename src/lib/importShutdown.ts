@@ -10,11 +10,23 @@ export function testAdminCacheImportEnabled(): boolean {
   )
 }
 
-export function usernameImportDisabled(now = new Date()): boolean {
+/**
+ * Username import now reads pass lists straight from Real through /api/import/real-passes.
+ * Set VITE_REAL_IMPORT_ENABLED=true for the client and REAL_IMPORT_ENABLED=true plus the bot
+ * credentials for the server.
+ */
+export function realProviderImportEnabled(): boolean {
   return (
-    testAdminCacheImportEnabled() ||
-    now.getTime() >= new Date(REALAPP_TOOLS_SHUTDOWN_AT).getTime()
+    String(import.meta.env.VITE_REAL_IMPORT_ENABLED ?? '')
+      .trim()
+      .toLowerCase() === 'true'
   )
+}
+
+export function usernameImportDisabled(now = new Date()): boolean {
+  if (testAdminCacheImportEnabled()) return true
+  if (realProviderImportEnabled()) return false
+  return now.getTime() >= new Date(REALAPP_TOOLS_SHUTDOWN_AT).getTime()
 }
 
 export function realappToolsShutdownLabel(): string {

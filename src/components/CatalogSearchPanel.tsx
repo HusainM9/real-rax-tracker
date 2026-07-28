@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatClaimDay, formatRax } from '../lib/format'
 import { searchCatalog, type CatalogPassKind, type CatalogSearchResult } from '../lib/catalogApi'
+import { isPlayerLikeCatalogPass } from '../lib/passKind'
+
+function catalogPassKindLabel(profile: Pick<CatalogSearchResult, 'passKind' | 'sport'>): string {
+  if (isPlayerLikeCatalogPass(profile)) return 'Player'
+  return profile.passKind === 'team' ? 'Team' : 'Player'
+}
 
 export type CatalogCollectionAddOptions = {
   defaultRarity: string
@@ -64,10 +70,13 @@ export function CatalogSearchPanel({
   const collectionAddEnabled = Boolean(collectionAdd)
   const planAddEnabled = Boolean(onAddToPlan)
 
-  const visibleResults = useMemo(
-    () => (passKind === 'all' ? results : results.filter((result) => result.passKind === passKind)),
-    [passKind, results],
-  )
+  const visibleResults = useMemo(() => {
+    if (passKind === 'all') return results
+    if (passKind === 'player') {
+      return results.filter((result) => isPlayerLikeCatalogPass(result))
+    }
+    return results.filter((result) => result.passKind === passKind)
+  }, [passKind, results])
 
   useEffect(() => {
     const trimmed = query.trim()
@@ -92,7 +101,9 @@ export function CatalogSearchPanel({
           const filtered =
             passKind === 'all'
               ? result.results
-              : result.results.filter((item) => item.passKind === passKind)
+              : passKind === 'player'
+                ? result.results.filter((item) => isPlayerLikeCatalogPass(item))
+                : result.results.filter((item) => item.passKind === passKind)
           setStatus(filtered.length === 0 ? 'No passes match that search in the shared catalog.' : '')
         })
         .catch((error) => {
@@ -119,38 +130,26 @@ export function CatalogSearchPanel({
             <h2>{title}</h2>
             <p>{description}</p>
             <p className="catalog-accuracy-disclaimer">
-              Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
-              totals look too low, add or correct earnings manually using JSON from{' '}
+              Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
               <a href="https://realapp.com" target="_blank" rel="noreferrer">
                 realapp.com
-              </a>
-              .
+              </a>{' '}
+              JSON if totals look low.
             </p>
           </div>
           <span className="badge">{badge}</span>
         </div>
       ) : (
         <p className="catalog-accuracy-disclaimer">
-          Shared catalog RAX may be incorrect or incomplete — especially for older NBA seasons. If
-          totals look too low, add or correct earnings manually using JSON from{' '}
+          Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
           <a href="https://realapp.com" target="_blank" rel="noreferrer">
             realapp.com
-          </a>
-          .
+          </a>{' '}
+          JSON if totals look low.
         </p>
       )}
       {collectionAddEnabled ? (
-        <ol className="entry-quick-add-steps">
-          <li>
-            <strong>Search</strong> for a player pass by name
-          </li>
-          <li>
-            <strong>Pick rarity</strong> — defaults below; change per pass if needed
-          </li>
-          <li>
-            <strong>Add to collection</strong> — earnings import automatically when available
-          </li>
-        </ol>
+        <p className="import-hint">Search → rarity → add. Earnings import when available.</p>
       ) : null}
       {collectionAddEnabled && collectionAdd ? (
         <label className="field entry-default-rarity-field">
@@ -182,8 +181,8 @@ export function CatalogSearchPanel({
         <p className="card-picker-empty">
           {emptyHint ??
             (collectionAddEnabled
-              ? 'Type a player name to search the shared catalog — then click Add to collection. No JSON paste needed when daily earnings are available.'
-              : 'Start typing to search the shared Meowbot catalog. Results include daily RAX row counts and total base RAX.')}
+              ? 'Type a player name, then Add to collection. No JSON needed when earnings exist.'
+              : 'Type to search. Results show row counts and base RAX.')}
         </p>
       ) : searching ? (
         <p className="import-progress">Searching shared catalog…</p>
@@ -207,7 +206,7 @@ export function CatalogSearchPanel({
                   <span>
                     <strong>{profile.name}</strong>
                     <small>
-                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                       {profile.seasonLabel || profile.seasonYear}
                       {profile.rarityLabel ? ` · catalog ${profile.rarityLabel}` : ''} ·{' '}
                       {profile.rowCount} row{profile.rowCount === 1 ? '' : 's'}
@@ -273,7 +272,7 @@ export function CatalogSearchPanel({
                   <span>
                     <strong>{profile.name}</strong>
                     <small>
-                      {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                       {profile.seasonLabel || profile.seasonYear}
                       {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
                       row{profile.rowCount === 1 ? '' : 's'}
@@ -329,7 +328,7 @@ export function CatalogSearchPanel({
               >
                 <strong>{profile.name}</strong>
                 <small>
-                  {profile.passKind === 'team' ? 'Team' : 'Player'} · {profile.sport} ·{' '}
+                  {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
                   {profile.seasonLabel || profile.seasonYear}
                   {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
                   row{profile.rowCount === 1 ? '' : 's'}

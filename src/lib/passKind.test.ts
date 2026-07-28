@@ -13,11 +13,18 @@ describe('passKind', () => {
     expect(looksLikeTeamPassName('Julian Strawther')).toBe(false)
     expect(looksLikeTeamPassName('Bruce Brown')).toBe(false)
     expect(looksLikeTeamPassName('Christian Braun')).toBe(false)
+    expect(looksLikeTeamPassName('DJ Giddens')).toBe(false)
+    expect(looksLikeTeamPassName('CJ Stroud')).toBe(false)
   })
 
   it('respects explicit passKind over name heuristics', () => {
     expect(isTeamPass({ name: 'Julian Strawther', passKind: 'team' })).toBe(true)
     expect(isPlayerPass({ name: 'DEN Nuggets', passKind: 'player' })).toBe(true)
+  })
+
+  it('treats UFC team passKind as player when sport is UFC', () => {
+    expect(isTeamPass({ name: 'Anderson Silva', passKind: 'team', sport: 'UFC' })).toBe(false)
+    expect(isPlayerPass({ name: 'Anderson Silva', passKind: 'team', sport: 'UFC' })).toBe(true)
   })
 
   it('infers team passes when passKind is missing', () => {

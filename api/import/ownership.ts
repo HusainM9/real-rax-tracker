@@ -44,7 +44,7 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json(
       {
         error:
-          'No admin ownership snapshot found for this username yet. Ask admin to import this username before meowbot shutdown.',
+          'No ownership snapshot found for this username yet. Snapshots are created when a username import reports ownership to the operator cache.',
       },
       { status: 404 },
     )

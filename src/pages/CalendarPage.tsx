@@ -13,6 +13,7 @@ import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from '../lib/claimDay
 import { computeClaimDayResults } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
 import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
+import { normalizeBestDayParam } from '../lib/passRecommendation'
 import { useRaxData } from '../context/RaxDataContext'
 import type { ClaimCandidate, ClaimDayResult } from '../types/rax'
 
@@ -66,7 +67,19 @@ function OverlapSection({ overlaps }: { overlaps: ClaimCandidate[] }) {
   )
 }
 
+function bestCatalogEarnersHref(monthDay: string): string | null {
+  const normalized = normalizeBestDayParam(monthDay)
+  if (!normalized) return null
+  const params = new URLSearchParams({
+    bestDay: `${currentYear()}-${normalized}`,
+    topPerSport: '2',
+  })
+  return `/potential?${params.toString()}`
+}
+
 function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
+  const bestEarnersHref = bestCatalogEarnersHref(day.claimDay)
+
   return (
     <article className="panel day-panel">
       <div className="section-heading">
@@ -80,19 +93,44 @@ function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
         {day.proBonus ? <span className="badge">Pro: {day.proBonus.card.name}</span> : null}
       </div>
 
-      <div className="sport-grid">
-        {day.sports.map((sport) => (
-          <section className="sport-card" key={sport.sport}>
-            <h3>{sport.sport}</h3>
-            <p className="mini-heading">Top two claims</p>
-            {sport.guaranteed.map((candidate) => (
-              <CandidateRow candidate={candidate} key={candidate.performance.id} />
-            ))}
-            {sport.guaranteed.length === 0 ? <p className="empty">No claims for this sport.</p> : null}
+      {bestEarnersHref ? (
+        <div className="button-row calendar-day-actions">
+          <Link className="button primary" to={bestEarnersHref}>
+            Top catalog earners
+          </Link>
+        </div>
+      ) : null}
 
-            <OverlapSection overlaps={sport.overlaps} />
-          </section>
-        ))}
+      <div className="sport-grid">
+        {day.sports.map((sport) => {
+          const sportProBonus =
+            day.proBonus?.card.sport === sport.sport ? day.proBonus : null
+          const trueOverlaps = sport.overlaps.filter(
+            (candidate) => candidate.status !== 'pro-bonus',
+          )
+
+          return (
+            <section className="sport-card" key={sport.sport}>
+              <h3>{sport.sport}</h3>
+              <p className="mini-heading">Top two claims</p>
+              {sport.guaranteed.map((candidate) => (
+                <CandidateRow candidate={candidate} key={candidate.performance.id} />
+              ))}
+              {sport.guaranteed.length === 0 ? (
+                <p className="empty">No claims for this sport.</p>
+              ) : null}
+
+              {sportProBonus ? (
+                <>
+                  <p className="mini-heading">Pro bonus</p>
+                  <CandidateRow candidate={sportProBonus} />
+                </>
+              ) : null}
+
+              <OverlapSection overlaps={trueOverlaps} />
+            </section>
+          )
+        })}
       </div>
     </article>
   )

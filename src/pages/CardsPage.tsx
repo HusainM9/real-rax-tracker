@@ -16,6 +16,10 @@ import {
 } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
+import {
+  formatIgnorePassConfirmMessage,
+  listIgnoredPasses,
+} from '../lib/ignoredPasses'
 import { formatRax } from '../lib/format'
 import { RARITY_TIERS } from '../lib/rarityFilter'
 import { isPlayerPassForSell } from '../lib/passKind'
@@ -34,7 +38,8 @@ function pageCount(count: number, pageSize: number): number {
 }
 
 export default function CardsPage() {
-  const { data, setCardRarity, removeCardFromCollection } = useRaxData()
+  const { data, setCardRarity, removeCardFromCollection, ignorePassOnImport, unignorePassKey } =
+    useRaxData()
   const [removeStatus, setRemoveStatus] = useState('')
   const [sortKey, setSortKey] = useState<CardSortKey>('claimable')
   const [secondarySortKey, setSecondarySortKey] = useState<CardSortKey | 'none'>('none')
@@ -44,6 +49,8 @@ export default function CardsPage() {
   const [cardSearchQuery, setCardSearchQuery] = useState('')
   const [showTeamCards, setShowTeamCards] = useState(true)
   const [cardsPage, setCardsPage] = useState(1)
+
+  const ignoredPasses = useMemo(() => listIgnoredPasses(data), [data])
 
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
   const rollup = useMemo(() => computeYearRollup(data, claimResults), [data, claimResults])
@@ -101,11 +108,21 @@ export default function CardsPage() {
     )
   }
 
+  const handleIgnoreOnImport = (card: (typeof rollup.cards)[number]['card']) => {
+    if (!card.externalKey) return
+    if (!window.confirm(formatIgnorePassConfirmMessage(card))) return
+    const ignored = ignorePassOnImport(card.id)
+    if (!ignored) return
+    setRemoveStatus(
+      `Ignored ${card.name || 'pass'} on import — removed from collection. Manage under Ignored passes.`,
+    )
+  }
+
   return (
     <div className="page-stack">
       <CollapsiblePanel
         title="Player card totals"
-        description="Claimable RAX includes guaranteed top-two claims and any Pro bonus selections. Filter by sport and rarity, then sort by base RAX and a tie-breaker. Change rarity after a merge or upgrade — saved to your account and JSON export. Edit player, sport, or season on Entry."
+        description="Guaranteed + Pro bonus claimable RAX. Filter, sort, edit rarity — saves with your collection."
         badge={`${sortedCards.length} card${sortedCards.length === 1 ? '' : 's'}`}
         actions={
           <>
@@ -277,13 +294,24 @@ export default function CardsPage() {
                       <strong>{formatRax(displayRaxValue(cardRollup.totalClaimableRax))} RAX</strong>
                     </td>
                     <td>
-                      <button
-                        className="button danger compact"
-                        type="button"
-                        onClick={() => handleRemoveFromCollection(cardRollup.card)}
-                      >
-                        Remove
-                      </button>
+                      <span className="button-row compact-actions">
+                        {cardRollup.card.externalKey ? (
+                          <button
+                            className="button compact"
+                            type="button"
+                            onClick={() => handleIgnoreOnImport(cardRollup.card)}
+                          >
+                            Ignore on import
+                          </button>
+                        ) : null}
+                        <button
+                          className="button danger compact"
+                          type="button"
+                          onClick={() => handleRemoveFromCollection(cardRollup.card)}
+                        >
+                          Remove
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))
@@ -315,6 +343,59 @@ export default function CardsPage() {
             </button>
           </div>
         ) : null}
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
+        title="Ignored passes"
+        description="Skipped on every username import for this tracker profile. Un-ignore to allow import again."
+        badge={`${ignoredPasses.length}`}
+        defaultOpen={ignoredPasses.length > 0}
+      >
+        {ignoredPasses.length === 0 ? (
+          <p className="empty">No ignored passes. Use Ignore on import on a collection card.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Pass</th>
+                  <th>Sport</th>
+                  <th>Season</th>
+                  <th>Key</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {ignoredPasses.map((pass) => (
+                  <tr key={pass.externalKey}>
+                    <td>
+                      <strong>{pass.name}</strong>
+                    </td>
+                    <td>{pass.sport || '—'}</td>
+                    <td>{pass.season || '—'}</td>
+                    <td>
+                      <small className="table-sub">{pass.externalKey}</small>
+                    </td>
+                    <td>
+                      <button
+                        className="button compact"
+                        type="button"
+                        onClick={() => {
+                          unignorePassKey(pass.externalKey)
+                          setRemoveStatus(
+                            `Removed ${pass.name} from ignore list. Re-run username import to add it back.`,
+                          )
+                        }}
+                      >
+                        Un-ignore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </CollapsiblePanel>
 
       <CollapsiblePanel

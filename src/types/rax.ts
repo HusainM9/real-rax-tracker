@@ -124,6 +124,12 @@ export type SavedSellRankings = {
 }
 
 /** Catalog pass saved on the Plan page — lightweight ref, earnings fetched at analysis time. */
+export type PlannedPassProgress =
+  | 'nearly-finished'
+  | 'on-the-way'
+  | 'just-started'
+  | 'future'
+
 export type PlannedPass = {
   id: string
   externalKey: string
@@ -136,6 +142,8 @@ export type PlannedPass = {
   rowCount: number
   notes: string
   source: 'catalog' | 'ranking' | 'manual'
+  /** Purchase progress bucket on the Plan page. */
+  progress: PlannedPassProgress
   addedAt: string
 }
 
@@ -187,6 +195,8 @@ export type RaxTrackerData = {
   savedSellRankings?: SavedSellRankings | null
   plannedPasses?: PlannedPass[]
   packTrackers?: PackTracker[]
+  /** Per-tracker-user pass keys skipped on username import (`entityId|seasonYear|Sport`). */
+  ignoredPassKeys?: string[]
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

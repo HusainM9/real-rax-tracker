@@ -1,0 +1,311 @@
+import { describe, expect, it } from 'vitest'
+import type { CatalogImportProfile } from './catalogApi'
+import {
+  analyzePlanCollection,
+  plannedPassFromOwnedCard,
+  plannedPassSimulatedTotalRax,
+} from './plannedPasses'
+import {
+  analyzeCatalogBundleImpacts,
+  analyzeCatalogBundleImpactsAtProfileRarities,
+  analyzeCatalogImportAtRarity,
+  applyCatalogProfilesAtOwnRarities,
+  profileAtSimulatedRarity,
+  RECOMMENDATION_SIMULATED_RARITY,
+} from './passRecommendation'
+import type { PlannedPass, PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
+
+function card(
+  id: string,
+  name: string,
+  externalKey?: string,
+  rarityLabel?: string,
+): PlayerCard {
+  return {
+    id,
+    name,
+    sport: 'NBA',
+    season: '2025-26',
+    notes: '',
+    externalKey,
+    rarityLabel,
+    passKind: 'player',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }
+}
+
+function perf(id: string, cardId: string, rax: number, claimDay: string): RaxPerformance {
+  return {
+    id,
+    cardId,
+    claimDay,
+    raxEarned: rax,
+    baseRaxEarned: rax,
+    note: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  }
+}
+
+function catalogProfile(
+  externalKey: string,
+  name: string,
+  rows: Array<{ claimDay: string; baseRaxEarned: number }>,
+): CatalogImportProfile {
+  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+  return {
+    externalKey,
+    entityId: 1,
+    passKind: 'player',
+    sport: 'NBA',
+    seasonYear: 2025,
+    seasonLabel: '2025-26',
+    name,
+    cachedAt: '2026-01-01T00:00:00.000Z',
+    rowCount: rows.length,
+    totalBaseRax,
+    rows,
+  }
+}
+
+function plannedPass(
+  partial: Pick<PlannedPass, 'id' | 'externalKey' | 'name' | 'simulatedRarityLabel'> &
+    Partial<PlannedPass>,
+): PlannedPass {
+  return {
+    sport: 'NBA',
+    season: '2025-26',
+    passKind: 'player',
+    totalBaseRax: 1,
+    rowCount: 1,
+    notes: '',
+    source: 'catalog',
+    progress: 'just-started',
+    addedAt: '2026-01-01T00:00:00.000Z',
+    ...partial,
+  }
+}
+
+describe('plannedPasses', () => {
+  it('plannedPassFromOwnedCard builds a manual plan entry', () => {
+    const owned = card('c1', 'Owned', '10|2025|NBA', 'Legendary 1')
+    const input = plannedPassFromOwnedCard(owned, {
+      simulatedRarityLabel: 'Iconic 1',
+      totalBaseRax: 12,
+      rowCount: 3,
+    })
+    expect(input).toEqual({
+      externalKey: '10|2025|NBA',
+      name: 'Owned',
+      sport: 'NBA',
+      season: '2025-26',
+      passKind: 'player',
+      simulatedRarityLabel: 'Iconic 1',
+      totalBaseRax: 12,
+      rowCount: 3,
+      notes: '',
+      source: 'manual',
+      progress: 'just-started',
+    })
+    expect(plannedPassFromOwnedCard(card('c2', 'No key', undefined, 'Rare 1'))).toBeNull()
+  })
+
+  it('analyzePlanCollection scores each pass at its planned rarity in the bundle', () => {
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('c-other', 'Other', '99|2025|NBA', 'Legendary 1')],
+      performances: [perf('p-other', 'c-other', 5, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+
+    const legendaryProfile = catalogProfile('1|2025|NBA', 'Pass Legendary', [
+      { claimDay: '2026-03-02', baseRaxEarned: 1 },
+    ])
+    const iconicProfile = catalogProfile('2|2025|NBA', 'Pass Iconic', [
+      { claimDay: '2026-03-03', baseRaxEarned: 1 },
+    ])
+
+    const passes = [
+      plannedPass({
+        id: 'plan-1',
+        externalKey: '1|2025|NBA',
+        name: 'Pass Legendary',
+        simulatedRarityLabel: 'Legendary 1',
+      }),
+      plannedPass({
+        id: 'plan-2',
+        externalKey: '2|2025|NBA',
+        name: 'Pass Iconic',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+    ]
+
+    const profilesByKey = new Map([
+      [legendaryProfile.externalKey, legendaryProfile],
+      [iconicProfile.externalKey, iconicProfile],
+    ])
+
+    const analysis = analyzePlanCollection(data, passes, profilesByKey)
+    expect(analysis.activeProfiles).toHaveLength(2)
+    expect(analysis.passes[0]?.profile?.rarityLabel).toBe('Legendary 1')
+    expect(analysis.passes[1]?.profile?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(analysis.bundle?.rows).toHaveLength(2)
+
+    const mixed = analyzeCatalogBundleImpactsAtProfileRarities(data, [
+      profileAtSimulatedRarity(legendaryProfile, 'Legendary 1'),
+      profileAtSimulatedRarity(iconicProfile, RECOMMENDATION_SIMULATED_RARITY),
+    ])
+    const forcedIconic = analyzeCatalogBundleImpacts(data, [
+      profileAtSimulatedRarity(legendaryProfile, 'Legendary 1'),
+      profileAtSimulatedRarity(iconicProfile, RECOMMENDATION_SIMULATED_RARITY),
+    ], RECOMMENDATION_SIMULATED_RARITY)
+
+    // Mixed rarities should not match forcing every pass to Iconic 1.
+    expect(mixed.combinedNetDelta).not.toBe(forcedIconic.combinedNetDelta)
+    expect(analysis.combinedNetDelta).toBe(mixed.combinedNetDelta)
+    expect(analysis.withPlanClaimable).toBeGreaterThan(analysis.currentClaimable)
+  })
+
+  it('treats owned non-iconic plan adds as upgrades', () => {
+    const owned = card('c-owned', 'Owned Star', '50|2025|NBA', 'Legendary 1')
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [owned],
+      performances: [{ ...perf('p1', 'c-owned', 20, '2026-03-01'), baseRaxEarned: 1 }],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const profile = catalogProfile('50|2025|NBA', 'Owned Star', [
+      { claimDay: '2026-03-01', baseRaxEarned: 1 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-owned',
+        externalKey: '50|2025|NBA',
+        name: 'Owned Star',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        source: 'manual',
+      }),
+    ]
+
+    const analysis = analyzePlanCollection(
+      data,
+      passes,
+      new Map([[profile.externalKey, profile]]),
+    )
+    expect(analysis.passes[0]?.ownedBelowIconic).toBe(true)
+    expect(analysis.passes[0]?.missingRows).toBe(false)
+    expect(analysis.combinedNetDelta).toBeGreaterThan(0)
+    expect(analysis.activeProfiles).toHaveLength(1)
+    expect(
+      plannedPassSimulatedTotalRax(passes[0]!, profileAtSimulatedRarity(profile, RECOMMENDATION_SIMULATED_RARITY)),
+    ).toBeGreaterThan(0)
+  })
+
+  it('plan net gain: leave-one-out matches Rank/Check one against the rest of the plan', () => {
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('c-other', 'Other', '99|2025|NBA', 'Legendary 1')],
+      performances: [perf('p-other', 'c-other', 50, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+
+    // Four NBA earners on one day → contested slots even with Pro (top 2 + 1 Pro).
+    const passA = catalogProfile('1|2025|NBA', 'Pass A', [
+      { claimDay: '2026-03-01', baseRaxEarned: 3 },
+    ])
+    const passB = catalogProfile('2|2025|NBA', 'Pass B', [
+      { claimDay: '2026-03-01', baseRaxEarned: 2.5 },
+    ])
+    const passC = catalogProfile('3|2025|NBA', 'Pass C', [
+      { claimDay: '2026-03-01', baseRaxEarned: 2 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-1',
+        externalKey: '1|2025|NBA',
+        name: 'Pass A',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+      plannedPass({
+        id: 'plan-2',
+        externalKey: '2|2025|NBA',
+        name: 'Pass B',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+      plannedPass({
+        id: 'plan-3',
+        externalKey: '3|2025|NBA',
+        name: 'Pass C',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+    ]
+
+    const profilesByKey = new Map([
+      [passA.externalKey, passA],
+      [passB.externalKey, passB],
+      [passC.externalKey, passC],
+    ])
+
+    const analysis = analyzePlanCollection(data, passes, profilesByKey)
+    expect(analysis.bundle).not.toBeNull()
+    expect(analysis.withPlanClaimable - analysis.currentClaimable).toBe(analysis.combinedNetDelta)
+
+    // Leave-one-out for Pass C === scoring C alone against collection + A + B.
+    const withAb = applyCatalogProfilesAtOwnRarities(
+      {
+        ...data,
+        settings: { ...data.settings, proBonusEnabled: true },
+      },
+      [
+        profileAtSimulatedRarity(passA, RECOMMENDATION_SIMULATED_RARITY),
+        profileAtSimulatedRarity(passB, RECOMMENDATION_SIMULATED_RARITY),
+      ],
+    )
+    const soloVsRest = analyzeCatalogImportAtRarity(
+      withAb,
+      passC,
+      RECOMMENDATION_SIMULATED_RARITY,
+    )
+    const planRowC = analysis.bundle!.rows.find((row) => row.key.includes('3|2025|NBA'))
+    expect(planRowC?.marginalNetDelta).toBe(soloVsRest?.netClaimableDelta)
+  })
+
+  it('skips owned Iconic 1+ passes from the active bundle', () => {
+    const owned = card('c-iconic', 'Already Iconic', '60|2025|NBA', 'Iconic 1')
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [owned],
+      performances: [{ ...perf('p1', 'c-iconic', 100, '2026-03-01'), baseRaxEarned: 1 }],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const profile = catalogProfile('60|2025|NBA', 'Already Iconic', [
+      { claimDay: '2026-03-01', baseRaxEarned: 1 },
+    ])
+    const analysis = analyzePlanCollection(
+      data,
+      [
+        plannedPass({
+          id: 'plan-iconic',
+          externalKey: '60|2025|NBA',
+          name: 'Already Iconic',
+          simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        }),
+      ],
+      new Map([[profile.externalKey, profile]]),
+    )
+    expect(analysis.passes[0]?.ownedAtIconic).toBe(true)
+    expect(analysis.activeProfiles).toHaveLength(0)
+    expect(analysis.bundle).toBeNull()
+  })
+})

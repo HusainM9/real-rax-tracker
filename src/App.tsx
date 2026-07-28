@@ -12,6 +12,7 @@ import EntryPage from './pages/EntryPage'
 import HelpPage from './pages/HelpPage'
 import LoginPage from './pages/LoginPage'
 import AccountPage from './pages/AccountPage'
+import OtdPage from './pages/OtdPage'
 import OverlapsPage from './pages/OverlapsPage'
 import PotentialPage from './pages/PotentialPage'
 import PlanPage from './pages/PlanPage'
@@ -57,6 +58,7 @@ export default function App() {
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/entry" element={<EntryPage />} />
                   <Route path="/calendar" element={<CalendarPage />} />
+                  <Route path="/otd" element={<OtdPage />} />
                   <Route path="/overlap" element={<OverlapsPage />} />
                   <Route path="/overlaps" element={<OverlapsPage />} />
                   <Route path="/potential" element={<PotentialPage />} />

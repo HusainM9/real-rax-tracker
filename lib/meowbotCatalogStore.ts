@@ -1,6 +1,8 @@
 import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
 import {
   canonicalCatalogPassMetadata,
+  claimDayInPassSeason,
+  filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
   resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'
@@ -34,6 +36,8 @@ export type CatalogSearchResult = CatalogPassInput & {
   rowCount: number
   totalBaseRax: number
   latestClaimDay?: string
+  /** Sum of base RAX in an active startDate–endDate browse window. */
+  rangeBaseRax?: number
 }
 
 export type CatalogImportProfile = CatalogSearchResult & {
@@ -258,23 +262,41 @@ function filterDailyEarningsForPasses(
   passes: CatalogPassInput[],
   rows: CatalogDailyEarningInput[],
 ): CatalogDailyEarningInput[] {
-  const passByKey = new Set(passes.map((pass) => pass.externalKey))
-  return rows.filter((row) => passByKey.has(row.externalKey))
+  const passByKey = new Map(passes.map((pass) => [pass.externalKey, pass]))
+  return rows.filter((row) => {
+    const pass = passByKey.get(row.externalKey)
+    if (!pass) return false
+    return claimDayInPassSeason(row.claimDay, pass.seasonYear, pass.sport, pass.seasonLabel)
+  })
 }
 
-/** Only replace stored earnings for passes that receive new daily rows in this import. */
+/**
+ * Replace stored earnings for passes that receive daily rows in this import (before season
+ * filtering). Keys are cleared even when every incoming day is out-of-season, so leaked
+ * prior-season rows cannot linger under the pass.
+ */
 export function catalogDailyEarningsReplaceKeys(
   passes: CatalogPassInput[],
   dailyEarnings: CatalogDailyEarningInput[],
 ): string[] {
-  const normalizedPasses = passes.map(normalizeCatalogPassInput)
-  const filteredEarnings = filterDailyEarningsForPasses(normalizedPasses, dailyEarnings)
-  return [...new Set(filteredEarnings.map((row) => row.externalKey))]
+  const passKeys = new Set(passes.map((pass) => normalizeCatalogPassInput(pass).externalKey))
+  const keys = new Set<string>()
+  for (const row of dailyEarnings) {
+    if (passKeys.has(row.externalKey)) keys.add(row.externalKey)
+  }
+  for (const pass of passes.map(normalizeCatalogPassInput)) {
+    if (pass.hasEarnings === false) keys.add(pass.externalKey)
+  }
+  return [...keys]
 }
 
-function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> {
+function toPassRow(
+  input: CatalogPassInput,
+): Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & { rarity_label?: string | null } {
   const pass = normalizeCatalogPassInput(input)
-  return {
+  const row: Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & {
+    rarity_label?: string | null
+  } = {
     external_key: pass.externalKey,
     entity_id: pass.entityId,
     pass_kind: pass.passKind,
@@ -282,11 +304,15 @@ function toPassRow(input: CatalogPassInput): Omit<SupabasePassRow, 'cached_at'> 
     season_year: pass.seasonYear,
     season_label: pass.seasonLabel,
     name: pass.name,
-    rarity_label: pass.rarityLabel ?? null,
     has_earnings: pass.hasEarnings !== false,
     total_base_rax: Math.max(0, Number(pass.totalBaseRax) || 0),
     source_updated_at: pass.sourceUpdatedAt ?? null,
   }
+  // Omit rarity on merge-upserts when unset so shop crawls / total-only updates keep existing labels.
+  if (pass.rarityLabel !== undefined) {
+    row.rarity_label = pass.rarityLabel.trim() ? pass.rarityLabel.trim() : null
+  }
+  return row
 }
 
 function toDailyRow(input: CatalogDailyEarningInput): Omit<SupabaseDailyRow, 'cached_at'> {
@@ -382,7 +408,9 @@ const DAILY_FETCH_PAGE_CONCURRENCY = 4
 
 async function fetchExactRowCount(table: string, filter: URLSearchParams): Promise<number> {
   const params = new URLSearchParams(filter)
-  params.set('select', 'external_key')
+  if (!params.has('select')) {
+    params.set('select', 'external_key')
+  }
   params.set('limit', '1')
 
   const url = supabaseRestUrl(table, params)
@@ -489,20 +517,35 @@ function buildImportProfileFromPass(
   pass: SupabasePassRow,
   dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const rows = dailyRowsForPass
+  const seasonYear = resolveCatalogPassSeasonYear(pass.season_year, pass.season_label, pass.sport)
+  const allMappedRows = dailyRowsForPass
     .map((row) => ({
       claimDay: row.claim_day,
       baseRaxEarned: Number(row.base_rax_earned),
       playerBoxScoreId: row.player_box_score_id ?? undefined,
     }))
     .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
-  const totalBaseRax = rows.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+  const mappedRows = filterDailyRowsToPassSeason(
+    allMappedRows,
+    seasonYear,
+    pass.sport,
+    pass.season_label,
+  )
+  const filteredOutOfSeason = mappedRows.length < allMappedRows.length
+  // Prefer season-trimmed rows when prior-season days leaked into the key (NFL end→start
+  // reclassification). Otherwise scale to stored total_base_rax if dailies still drift.
+  const { rows, totalBaseRax } = filteredOutOfSeason
+    ? {
+        rows: mappedRows,
+        totalBaseRax: mappedRows.reduce((sum, row) => sum + row.baseRaxEarned, 0),
+      }
+    : reconcileDailyRowsToPassTotal(Number(pass.total_base_rax) || 0, mappedRows)
   const base = fromPassRow(pass)
   const latestClaimDay = rows.length > 0 ? rows[rows.length - 1]?.claimDay : undefined
   return {
     ...base,
     rowCount: rows.length,
-    storedRowCount: rows.length,
+    storedRowCount: allMappedRows.length,
     totalBaseRax,
     latestClaimDay,
     rows,
@@ -601,6 +644,323 @@ export async function listCatalogPassSummaries(options: {
 
   const { items } = dedupeCatalogPassSummaries(results)
   return { results: items, storageConfigured: true }
+}
+
+const MAX_BROWSE_LIMIT = 100
+const DEFAULT_BROWSE_LIMIT = 50
+const BROWSE_MONTH_DAY_YEAR_WINDOW = 12
+const MAX_DATE_RANGE_DAYS = 62
+const RANGE_DAILY_PAGE_SIZE = 1000
+const MAX_RANGE_DAILY_PAGES = 80
+
+function normalizeMonthDayFilter(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  if (!/^\d{2}-\d{2}$/.test(trimmed)) return null
+  const month = Number(trimmed.slice(0, 2))
+  const day = Number(trimmed.slice(3, 5))
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null
+  return trimmed
+}
+
+function normalizeOtdMonthFilter(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  if (!/^\d{2}$/.test(trimmed)) return null
+  const month = Number(trimmed)
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null
+  return trimmed
+}
+
+function normalizeIsoDate(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null
+  const time = Date.parse(`${trimmed}T00:00:00Z`)
+  if (!Number.isFinite(time)) return null
+  return trimmed
+}
+
+function inclusiveDaySpan(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00Z`)
+  const end = Date.parse(`${endDate}T00:00:00Z`)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return -1
+  return Math.floor((end - start) / 86_400_000) + 1
+}
+
+function lastDayOfMonth(year: number, month: string): string {
+  const monthNum = Number(month)
+  const day = new Date(Date.UTC(year, monthNum, 0)).getUTCDate()
+  return String(day).padStart(2, '0')
+}
+
+function expandMonthDayClaimDays(monthDay: string, seasonYears: number[]): string[] {
+  const years =
+    seasonYears.length > 0
+      ? [...new Set(seasonYears.filter((year) => Number.isFinite(year)))]
+      : Array.from({ length: BROWSE_MONTH_DAY_YEAR_WINDOW }, (_, index) => {
+          const now = new Date()
+          return now.getUTCFullYear() - index
+        })
+  return years
+    .sort((a, b) => b - a)
+    .map((year) => `${year}-${monthDay}`)
+}
+
+function expandOtdMonthRanges(month: string, seasonYears: number[]): Array<{ start: string; end: string }> {
+  const years =
+    seasonYears.length > 0
+      ? [...new Set(seasonYears.filter((year) => Number.isFinite(year)))]
+      : Array.from({ length: BROWSE_MONTH_DAY_YEAR_WINDOW }, (_, index) => {
+          const now = new Date()
+          return now.getUTCFullYear() - index
+        })
+  return years
+    .sort((a, b) => b - a)
+    .map((year) => ({
+      start: `${year}-${month}-01`,
+      end: `${year}-${month}-${lastDayOfMonth(year, month)}`,
+    }))
+}
+
+function expandOtdMonthClaimDays(month: string, seasonYears: number[]): string[] {
+  const days: string[] = []
+  for (const range of expandOtdMonthRanges(month, seasonYears)) {
+    const start = Date.parse(`${range.start}T00:00:00Z`)
+    const end = Date.parse(`${range.end}T00:00:00Z`)
+    for (let time = start; time <= end; time += 86_400_000) {
+      days.push(new Date(time).toISOString().slice(0, 10))
+    }
+  }
+  return days
+}
+
+function quotedNumericIn(values: number[]): string {
+  return `in.(${values.join(',')})`
+}
+
+function applyPassBrowseFilters(
+  params: URLSearchParams,
+  options: {
+    sports: string[]
+    seasonYears: number[]
+    passKind?: CatalogPassKind
+    query: string
+    /** Prefix for embedded pass filters, e.g. `meowbot_passes.` */
+    embedPrefix?: string
+  },
+): void {
+  const prefix = options.embedPrefix ?? ''
+  if (options.sports.length === 1) {
+    params.set(`${prefix}sport`, `eq.${options.sports[0]}`)
+  } else if (options.sports.length > 1) {
+    params.set(`${prefix}sport`, quotedIn(options.sports))
+  }
+
+  if (options.seasonYears.length === 1) {
+    params.set(`${prefix}season_year`, `eq.${options.seasonYears[0]}`)
+  } else if (options.seasonYears.length > 1) {
+    params.set(`${prefix}season_year`, quotedNumericIn(options.seasonYears))
+  }
+
+  if (options.passKind) {
+    params.set(`${prefix}pass_kind`, `eq.${options.passKind}`)
+  }
+
+  if (options.query.length >= 2) {
+    const search = `*${options.query.replace(/\*/g, ' ')}*`
+    params.set(`${prefix}name`, `ilike.${search}`)
+  }
+}
+
+type RangeDailyJoinRow = {
+  external_key: string
+  claim_day: string
+  base_rax_earned: number | string
+  meowbot_passes: SupabasePassRow | SupabasePassRow[] | null
+}
+
+function unwrapPassEmbed(
+  value: SupabasePassRow | SupabasePassRow[] | null | undefined,
+): SupabasePassRow | null {
+  if (!value) return null
+  return Array.isArray(value) ? (value[0] ?? null) : value
+}
+
+async function browseCatalogPassesByDateRange(options: {
+  query: string
+  sports: string[]
+  seasonYears: number[]
+  passKind?: CatalogPassKind
+  startDate: string
+  endDate: string
+  limit: number
+  offset: number
+}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean }> {
+  const daySpan = inclusiveDaySpan(options.startDate, options.endDate)
+  if (daySpan < 1) {
+    return { results: [], total: 0, storageConfigured: true }
+  }
+  if (daySpan > MAX_DATE_RANGE_DAYS) {
+    throw new Error(
+      `Date range can be at most ${MAX_DATE_RANGE_DAYS} days. Narrow the range and try again.`,
+    )
+  }
+
+  const passSelect =
+    'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at'
+  const params = new URLSearchParams({
+    select: `external_key,claim_day,base_rax_earned,meowbot_passes!inner(${passSelect})`,
+    and: `(claim_day.gte.${options.startDate},claim_day.lte.${options.endDate})`,
+    order: 'external_key.asc,claim_day.asc',
+  })
+  applyPassBrowseFilters(params, {
+    sports: options.sports,
+    seasonYears: options.seasonYears,
+    passKind: options.passKind,
+    query: options.query,
+    embedPrefix: 'meowbot_passes.',
+  })
+
+  const rangeTotals = new Map<string, { rax: number; pass: SupabasePassRow; days: number }>()
+
+  for (let page = 0; page < MAX_RANGE_DAILY_PAGES; page += 1) {
+    const pageParams = new URLSearchParams(params)
+    pageParams.set('limit', String(RANGE_DAILY_PAGE_SIZE))
+    pageParams.set('offset', String(page * RANGE_DAILY_PAGE_SIZE))
+    const rows = await supabaseFetch<RangeDailyJoinRow[]>('meowbot_daily_earnings', {
+      params: pageParams,
+    })
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      const pass = unwrapPassEmbed(row.meowbot_passes)
+      if (!pass) continue
+      const earned = Number(row.base_rax_earned) || 0
+      if (earned <= 0) continue
+      const existing = rangeTotals.get(row.external_key)
+      if (existing) {
+        existing.rax += earned
+        existing.days += 1
+      } else {
+        rangeTotals.set(row.external_key, { rax: earned, pass, days: 1 })
+      }
+    }
+
+    if (rows.length < RANGE_DAILY_PAGE_SIZE) break
+  }
+
+  const ranked = [...rangeTotals.values()].sort(
+    (a, b) =>
+      b.rax - a.rax ||
+      a.pass.name.localeCompare(b.pass.name) ||
+      a.pass.external_key.localeCompare(b.pass.external_key),
+  )
+
+  const pageSlice = ranked.slice(options.offset, options.offset + options.limit)
+  const results = pageSlice.map((entry) => {
+    const base = fromPassRow(entry.pass)
+    return {
+      ...base,
+      rowCount: entry.days,
+      rangeBaseRax: entry.rax,
+    }
+  })
+
+  return { results, total: ranked.length, storageConfigured: true }
+}
+
+export async function browseCatalogPasses(options: {
+  query?: string
+  sports?: string[]
+  seasonYears?: number[]
+  passKind?: CatalogPassKind | 'all'
+  monthDay?: string
+  /** OTD month only (MM). Kept when no date range is set. */
+  otdMonth?: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  offset?: number
+}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { results: [], total: 0, storageConfigured: false }
+  }
+
+  const limit = Math.min(
+    Math.max(Math.floor(options.limit ?? DEFAULT_BROWSE_LIMIT), 1),
+    MAX_BROWSE_LIMIT,
+  )
+  const offset = Math.max(Math.floor(options.offset ?? 0), 0)
+  const sports = [...new Set((options.sports ?? []).map((sport) => sport.trim()).filter(Boolean))]
+  const seasonYears = [
+    ...new Set(
+      (options.seasonYears ?? []).filter((year) => Number.isFinite(year)).map((year) => Math.floor(year)),
+    ),
+  ]
+  const query = normalizeSearchQuery(options.query ?? '')
+  const monthDay = normalizeMonthDayFilter(options.monthDay)
+  const otdMonth = normalizeOtdMonthFilter(options.otdMonth)
+  const startDate = normalizeIsoDate(options.startDate)
+  const endDate = normalizeIsoDate(options.endDate)
+  const passKind =
+    options.passKind === 'player' || options.passKind === 'team' ? options.passKind : undefined
+
+  if (startDate && endDate) {
+    return browseCatalogPassesByDateRange({
+      query,
+      sports,
+      seasonYears,
+      passKind,
+      startDate: startDate <= endDate ? startDate : endDate,
+      endDate: startDate <= endDate ? endDate : startDate,
+      limit,
+      offset,
+    })
+  }
+
+  const monthClaimDays =
+    !monthDay && otdMonth ? expandOtdMonthClaimDays(otdMonth, seasonYears) : null
+  const useDailyJoin = Boolean(monthDay || (monthClaimDays && monthClaimDays.length > 0))
+  const select = useDailyJoin
+    ? 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings!inner(claim_day)'
+    : 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)'
+
+  const params = new URLSearchParams({
+    select,
+    has_earnings: 'eq.true',
+    order: 'total_base_rax.desc,name.asc',
+    limit: String(limit),
+    offset: String(offset),
+  })
+
+  applyPassBrowseFilters(params, { sports, seasonYears, passKind, query })
+
+  if (monthDay) {
+    const claimDays = expandMonthDayClaimDays(monthDay, seasonYears)
+    if (claimDays.length === 0) {
+      return { results: [], total: 0, storageConfigured: true }
+    }
+    params.set('meowbot_daily_earnings.claim_day', quotedIn(claimDays))
+  } else if (monthClaimDays && monthClaimDays.length > 0) {
+    params.set('meowbot_daily_earnings.claim_day', quotedIn(monthClaimDays))
+  }
+
+  const countFilter = new URLSearchParams(params)
+  countFilter.delete('order')
+  countFilter.delete('limit')
+  countFilter.delete('offset')
+  // Keep !inner embed in select so claim_day filters still apply to the count.
+  countFilter.set(
+    'select',
+    useDailyJoin ? 'external_key,meowbot_daily_earnings!inner(claim_day)' : 'external_key',
+  )
+
+  const [total, passRows] = await Promise.all([
+    fetchExactRowCount('meowbot_passes', countFilter),
+    supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params }),
+  ])
+
+  const { items } = dedupeCatalogPassSummaries(passRows.map(fromPassRow))
+  return { results: items, total, storageConfigured: true }
 }
 
 async function fetchCatalogImportProfilesChunk(
@@ -791,11 +1151,29 @@ export async function upsertCatalogPasses(passes: CatalogPassInput[]): Promise<n
   )
 }
 
-export async function upsertCatalogDailyEarnings(rows: CatalogDailyEarningInput[]): Promise<number> {
+/**
+ * Upsert daily earnings. When `replaceExternalKeys` is set, those keys are cleared first so
+ * prior-season days cannot accumulate across re-imports (merge-only upserts caused NFL totals
+ * like CMC 2022+2023 = 1033 under a 2023-24 key).
+ */
+export async function upsertCatalogDailyEarnings(
+  rows: CatalogDailyEarningInput[],
+  options?: { replaceExternalKeys?: string[] },
+): Promise<number> {
   const validRows = sortCatalogDailyEarnings(rows)
-  if (validRows.length === 0) return 0
-  return withCatalogWriteLock(() =>
-    upsertInBatches(validRows, DAILY_UPSERT_BATCH_SIZE, upsertCatalogDailyEarningBatch),
-  )
+  const replaceKeys = [
+    ...new Set([
+      ...(options?.replaceExternalKeys ?? []),
+      ...validRows.map((row) => row.externalKey),
+    ]),
+  ]
+  if (validRows.length === 0 && replaceKeys.length === 0) return 0
+  return withCatalogWriteLock(async () => {
+    if (replaceKeys.length > 0) {
+      await deleteDailyEarningsByExternalKeys(replaceKeys)
+    }
+    if (validRows.length === 0) return 0
+    return upsertInBatches(validRows, DAILY_UPSERT_BATCH_SIZE, upsertCatalogDailyEarningBatch)
+  })
 }
 

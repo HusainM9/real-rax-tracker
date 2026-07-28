@@ -5,7 +5,13 @@ import type {
 } from './meowbotCatalogStore'
 import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
 import { resolveImportPassKind } from './passKind'
-import { importSeasonLabelForCatalog, normalizeSportForSeasonWindow, buildCatalogExternalKey } from './seasonClaimWindow'
+import {
+  buildCatalogExternalKey,
+  expectedSeasonLabelFromYear,
+  filterDailyRowsToPassSeason,
+  importSeasonLabelForCatalog,
+  normalizeSportForSeasonWindow,
+} from './seasonClaimWindow'
 import {
   displaySportFromRaw,
   resolveUsernameImportSeasonLabel,
@@ -94,21 +100,8 @@ function normalizeSport(raw: string): string {
   return sport
 }
 
-function isCalendarYearSport(raw: string): boolean {
-  const sport = normalizeSport(raw)
-  return sport === 'ufc' || sport === 'golf' || sport === 'mlb' || sport === 'wnba'
-}
-
-function isCollegeSport(raw: string): boolean {
-  const sport = normalizeSport(raw)
-  return sport === 'ncaaf' || sport === 'ncaam'
-}
-
 function seasonLabelFromPass(seasonYear: number, sportRaw: string): string {
-  if (!Number.isInteger(seasonYear) || seasonYear < 1000) return String(seasonYear)
-  if (isCollegeSport(sportRaw)) return `${seasonYear}-${String(seasonYear + 1).slice(-2)}`
-  if (isCalendarYearSport(sportRaw)) return String(seasonYear)
-  return `${seasonYear - 1}-${String(seasonYear).slice(-2)}`
+  return expectedSeasonLabelFromYear(seasonYear, normalizeSport(sportRaw))
 }
 
 function displaySport(raw: string): string {
@@ -429,7 +422,12 @@ async function fetchDailyRows(pass: ImportPass): Promise<CatalogDailyEarningInpu
         row.baseRaxEarned > 0,
     )
 
-  return rows
+  return filterDailyRowsToPassSeason(
+    rows,
+    canonicalPass.seasonYear,
+    canonicalPass.sport,
+    canonicalPass.seasonLabel,
+  )
 }
 
 function prepareOwnershipPass(pass: ImportPass): ImportPass {
@@ -474,7 +472,7 @@ async function fetchDailyRowsForOwnership(pass: ImportPass): Promise<CatalogDail
         row.baseRaxEarned > 0,
     )
 
-  return rows
+  return filterDailyRowsToPassSeason(rows, ready.seasonYear, ready.sport, ready.seasonLabel)
 }
 
 function passToOwnershipInput(

@@ -7,9 +7,9 @@ const DEFAULT_DEVICE_NAME =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const DEFAULT_VERSION = '35'
 const DEFAULT_TIMEOUT_MS = 12000
-/** Upstream Real calls in parallel per serverless batch. Keep low ΓÇö cold imports used to hit 429s at 6. */
+/** Upstream Real calls in parallel per serverless batch. Keep low — cold imports used to hit 429s at 6. */
 const DEFAULT_CONCURRENCY = 2
-/** Attempts after the first try (so maxRetries=5 ΓçÆ up to 6 total requests). */
+/** Attempts after the first try (so maxRetries=5 ⇒ up to 6 total requests). */
 const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_RETRY_BASE_MS = 750
 const DEFAULT_RETRY_MAX_MS = 20_000
@@ -76,7 +76,7 @@ function isTruthyFlag(value: string): boolean {
 }
 
 /**
- * Credentials come from the environment only ΓÇö never hardcode or log their values.
+ * Credentials come from the environment only — never hardcode or log their values.
  * Returns null when the import is disabled or any required credential is missing.
  */
 export function resolveRealApiConfig(
@@ -145,7 +145,7 @@ function retryAfterMs(response: Response): number | null {
   return null
 }
 
-/** Presence-only view of the credential set ΓÇö safe to log. */
+/** Presence-only view of the credential set — safe to log. */
 export function realImportConfigStatus(
   env: Record<string, string | undefined> = process.env,
 ): Record<string, boolean> {
@@ -336,7 +336,7 @@ export type RealBoostInfo = {
 }
 
 export type RealPass = {
-  /** Pass instance id ΓÇö distinct per owned copy of the same entity/season. */
+  /** Pass instance id — distinct per owned copy of the same entity/season. */
   id?: string | number
   entityType?: string
   entityId?: number | string
@@ -391,7 +391,7 @@ export async function getUserByUsername(username: string, context: RealApiContex
 
 /**
  * Sport/season/entity-type availability for a user. The default scan does not need this
- * (one unfiltered /userpasses call returns everything) ΓÇö it is kept for targeted refreshes
+ * (one unfiltered /userpasses call returns everything) — it is kept for targeted refreshes
  * and diagnostics.
  */
 export async function getCollectingInfo(
@@ -491,11 +491,11 @@ export type RealShopEarningsTotalItem = {
 }
 
 export type RealShopEarningsTotalQuery = {
-  /** Real path slug (`ncaam`, `soccer`, ΓÇª) ΓÇö not app display names. */
+  /** Real path slug (`ncaam`, `soccer`, …) — not app display names. */
   sport: string
   season: number
   entityType: string
-  /** 0-based offset; Real returns ~20 items per page (`0`, `20`, `40`, ΓÇª). */
+  /** 0-based offset; Real returns ~20 items per page (`0`, `20`, `40`, …). */
   before?: number
 }
 

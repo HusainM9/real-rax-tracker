@@ -271,10 +271,8 @@ export default function SellPage() {
           <p className="eyebrow">Sell planning</p>
           <h2>If you sell this pass</h2>
           <p>
-            See how much claimable RAX you lose, what opens up on other cards, and whether a sale
-            price beats keeping the pass. Remove passes from your collection when you plan to sell —
-            earnings are archived under Entry → Saved profiles. Player passes only — team passes are
-            excluded.
+            Lost vs freed claimable RAX if you sell. Removing archives earnings under Entry → Saved
+            profiles.
           </p>
         </div>
         <Link className="button" to="/cards">
@@ -286,12 +284,11 @@ export default function SellPage() {
 
       <CollapsiblePanel
         title="Rank all passes"
-        description="Scan player passes with earnings on demand — sorted by highest net claimable if sold."
+        description="Player passes with earnings, ranked by net claimable if sold."
         defaultOpen={false}
       >
         <p className="import-hint">
-          Player passes only. Team passes are excluded. Net claimable 0 means the pass is not
-          needed for your collection claims — selling it would not reduce total claimable RAX.
+          Net 0 means selling would not reduce total claimable RAX. Team passes excluded.
         </p>
         <div className="button-row">
           <button
