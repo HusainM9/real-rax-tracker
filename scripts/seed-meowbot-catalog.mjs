@@ -89,10 +89,17 @@ function isCalendarYearSport(raw) {
   return sport === 'ufc' || sport === 'golf' || sport === 'mlb' || sport === 'wnba'
 }
 
-// Real reports the season's first year for these: FC season 2025 is the 2025-26 season.
+// Real reports the season's first year for these (matches seasonYearKindForSport).
+// CBB/ncaam is end-year: season 2026 is the 2025-26 season — do not treat as start-year.
 function isStartYearSport(raw) {
   const sport = normalizeSport(raw)
-  return sport === 'ncaaf' || sport === 'ncaam' || sport === 'fc' || sport === 'soccer'
+  return (
+    sport === 'nfl' ||
+    sport === 'nhl' ||
+    sport === 'ncaaf' ||
+    sport === 'fc' ||
+    sport === 'soccer'
+  )
 }
 
 function seasonLabelFromPass(seasonYear, sportRaw) {

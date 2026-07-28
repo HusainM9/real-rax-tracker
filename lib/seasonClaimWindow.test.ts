@@ -193,6 +193,22 @@ describe('CBB — end-year encoding', () => {
     })
   })
 
+  it('repairs old CBB start-year labels toward end-year without bumping season_year', () => {
+    expect(
+      canonicalCatalogPassMetadata({
+        entityId: 42,
+        sport: 'CBB',
+        seasonYear: 2026,
+        seasonLabel: '2026-27',
+      }),
+    ).toEqual({
+      seasonYear: 2026,
+      seasonLabel: '2025-26',
+      externalKey: '42|2026|CBB',
+      aligned: false,
+    })
+  })
+
   it('keeps in-season college game dates and only drops prior-season noise', () => {
     const rows = [
       { claimDay: '2024-11-15', baseRaxEarned: 10 },

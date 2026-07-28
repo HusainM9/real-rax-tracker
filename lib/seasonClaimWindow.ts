@@ -258,12 +258,28 @@ export function canonicalCatalogPassMetadata(input: {
   aligned: boolean
 } {
   const sport = normalizeSportForSeasonWindow(input.sport)
+  const kind = seasonYearKindForSport(input.sport)
+  const incomingLabel = input.seasonLabel.trim().replace(/\u2013|\u2014/g, '-')
+
+  // End-year / calendar: Real `season_year` is authoritative. Old CBB start-year labels
+  // (season 2026 stored as "2026-27") must rewrite the label — not bump the year to 2027.
+  if (kind === 'end' || kind === 'calendar') {
+    const seasonYear = input.seasonYear
+    const seasonLabel = expectedSeasonLabelFromYear(seasonYear, input.sport)
+    const externalKey = buildCatalogExternalKey(input.entityId, seasonYear, sport)
+    const aligned =
+      incomingLabel === seasonLabel &&
+      buildCatalogExternalKey(input.entityId, input.seasonYear, sport) === externalKey
+    return { seasonYear, seasonLabel, externalKey, aligned }
+  }
+
+  // Start-year sports: prefer a parsed label when season_year still uses old end-year keys.
   const seasonYear = resolveCatalogPassSeasonYear(input.seasonYear, input.seasonLabel, input.sport)
   const seasonLabel = expectedSeasonLabelFromYear(seasonYear, input.sport)
   const externalKey = buildCatalogExternalKey(input.entityId, seasonYear, sport)
   const aligned =
     input.seasonYear === seasonYear &&
-    input.seasonLabel.trim() === seasonLabel &&
+    incomingLabel === seasonLabel &&
     buildCatalogExternalKey(input.entityId, input.seasonYear, sport) === externalKey
   return { seasonYear, seasonLabel, externalKey, aligned }
 }

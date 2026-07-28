@@ -4,7 +4,6 @@ import {
   claimDayInPassSeason,
   filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
-  resolveCatalogPassSeasonYear,
 } from './seasonClaimWindow'
 
 export type CatalogPassKind = 'player' | 'team'
@@ -331,14 +330,19 @@ function dailyRowCount(row: SupabasePassRow): number {
 
 function fromPassRow(row: SupabasePassRow): CatalogSearchResult {
   const rowCount = dailyRowCount(row)
-  const seasonYear = resolveCatalogPassSeasonYear(row.season_year, row.season_label, row.sport)
+  const canonical = canonicalCatalogPassMetadata({
+    entityId: row.entity_id,
+    sport: row.sport,
+    seasonYear: row.season_year,
+    seasonLabel: row.season_label,
+  })
   return {
     externalKey: row.external_key,
     entityId: row.entity_id,
     passKind: row.pass_kind,
     sport: row.sport,
-    seasonYear,
-    seasonLabel: row.season_label,
+    seasonYear: canonical.seasonYear,
+    seasonLabel: canonical.seasonLabel,
     name: row.name,
     rarityLabel: row.rarity_label ?? undefined,
     hasEarnings: row.has_earnings ?? true,
@@ -517,7 +521,12 @@ function buildImportProfileFromPass(
   pass: SupabasePassRow,
   dailyRowsForPass: SupabaseDailyRow[],
 ): CatalogImportProfile {
-  const seasonYear = resolveCatalogPassSeasonYear(pass.season_year, pass.season_label, pass.sport)
+  const canonical = canonicalCatalogPassMetadata({
+    entityId: pass.entity_id,
+    sport: pass.sport,
+    seasonYear: pass.season_year,
+    seasonLabel: pass.season_label,
+  })
   const allMappedRows = dailyRowsForPass
     .map((row) => ({
       claimDay: row.claim_day,
@@ -527,9 +536,9 @@ function buildImportProfileFromPass(
     .sort((a, b) => a.claimDay.localeCompare(b.claimDay))
   const mappedRows = filterDailyRowsToPassSeason(
     allMappedRows,
-    seasonYear,
+    canonical.seasonYear,
     pass.sport,
-    pass.season_label,
+    canonical.seasonLabel,
   )
   const filteredOutOfSeason = mappedRows.length < allMappedRows.length
   // Prefer season-trimmed rows when prior-season days leaked into the key (NFL end→start
@@ -1047,8 +1056,16 @@ export async function listCatalogSeasonYears(options: {
     )
 
     for (const row of rows) {
-      const seasonLabel = row.season_label.trim() || String(row.season_year)
-      byLabel.set(seasonLabel, Math.max(byLabel.get(seasonLabel) ?? 0, row.season_year))
+      const canonical = canonicalCatalogPassMetadata({
+        entityId: 0,
+        sport,
+        seasonYear: row.season_year,
+        seasonLabel: row.season_label.trim() || String(row.season_year),
+      })
+      byLabel.set(
+        canonical.seasonLabel,
+        Math.max(byLabel.get(canonical.seasonLabel) ?? 0, canonical.seasonYear),
+      )
     }
 
     if (rows.length < MAX_CANDIDATES_PAGE) break

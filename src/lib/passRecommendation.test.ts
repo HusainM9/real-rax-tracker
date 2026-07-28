@@ -267,13 +267,33 @@ describe('passRecommendation', () => {
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
   })
 
-  it('defaults Rank catalog exclusion to NFL 2022-23 season label key', () => {
-    expect(DEFAULT_RANK_EXCLUDED_SPORT_SEASONS).toEqual([{ sport: 'NFL', seasonLabel: '2022-23' }])
-    expect(defaultRankExcludedSportSeasonKeys()).toEqual(['NFL|2022-23'])
+  it('defaults Rank catalog exclusion to NFL, NHL, and CBB 2022-23', () => {
+    expect(DEFAULT_RANK_EXCLUDED_SPORT_SEASONS).toEqual([
+      { sport: 'NFL', seasonLabel: '2022-23' },
+      { sport: 'NHL', seasonLabel: '2022-23' },
+      { sport: 'CBB', seasonLabel: '2022-23' },
+    ])
+    expect(defaultRankExcludedSportSeasonKeys()).toEqual([
+      'NFL|2022-23',
+      'NHL|2022-23',
+      'CBB|2022-23',
+    ])
     expect(sportSeasonFilterKey('NFL', '2022-23')).toBe('NFL|2022-23')
     expect(
       passSeasonIncluded(
         { sport: 'NFL', seasonLabel: '2022-23', seasonYear: 2022 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'NHL', seasonLabel: '2022-23', seasonYear: 2022 },
+        defaultRankExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'CBB', seasonLabel: '2022-23', seasonYear: 2023 },
         defaultRankExcludedSportSeasonKeys(),
       ),
     ).toBe(false)
