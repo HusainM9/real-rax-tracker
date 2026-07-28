@@ -822,43 +822,75 @@ export default function PlanPacksPage() {
       return
     }
 
+    // Small batches keep the UI updating and avoid edge-function timeouts on large lists.
+    const CHUNK_SIZE = 4
     setImportBusyKey('play-avg:all')
-    setSyncStatus(
-      `Averaging plays for ${targets.length} tracked pass${targets.length === 1 ? '' : 'es'}…`,
-    )
+    setSyncStatus(`Averaging plays… 0/${targets.length}`)
+
+    let updated = 0
+    const errorNotes: string[] = []
 
     try {
-      const { results, errors } = await fetchPlayAverages(
-        targets.map(({ pass }) => ({
-          externalKey: pass.externalKey,
-          sport: pass.sport,
-        })),
-      )
+      for (let offset = 0; offset < targets.length; offset += CHUNK_SIZE) {
+        const chunk = targets.slice(offset, offset + CHUNK_SIZE)
+        const label = chunk.map(({ pass }) => pass.name).join(', ')
+        setSyncStatus(
+          `Averaging ${label}… ${Math.min(offset + chunk.length, targets.length)}/${targets.length}`,
+        )
 
-      const byKey = new Map(results.map((row) => [row.externalKey, row]))
-      const nameByKey = new Map(targets.map(({ pass }) => [pass.externalKey, pass.name]))
-      const importedAt = new Date().toISOString()
-      let updated = 0
-      const errorNotes: string[] = errors.map((row) => {
-        const name = nameByKey.get(row.externalKey) ?? row.externalKey
-        return `${name}: ${row.error}`
-      })
-
-      for (const { pass, tracker } of targets) {
-        const result = byKey.get(pass.externalKey)
-        if (!result) {
-          if (!errors.some((row) => row.externalKey === pass.externalKey)) {
-            errorNotes.push(`${pass.name}: no play average returned`)
+        try {
+          const controller = new AbortController()
+          const timeoutId = window.setTimeout(() => controller.abort(), 60_000)
+          let batch: Awaited<ReturnType<typeof fetchPlayAverages>>
+          try {
+            batch = await fetchPlayAverages(
+              chunk.map(({ pass }) => ({
+                externalKey: pass.externalKey,
+                sport: pass.sport,
+              })),
+              controller.signal,
+            )
+          } finally {
+            window.clearTimeout(timeoutId)
           }
-          continue
+          const { results, errors } = batch
+          const byKey = new Map(results.map((row) => [row.externalKey, row]))
+          const importedAt = new Date().toISOString()
+
+          for (const err of errors) {
+            const name =
+              chunk.find(({ pass }) => pass.externalKey === err.externalKey)?.pass.name ??
+              err.externalKey
+            errorNotes.push(`${name}: ${err.error}`)
+          }
+
+          for (const { pass, tracker } of chunk) {
+            const result = byKey.get(pass.externalKey)
+            if (!result) {
+              if (!errors.some((row) => row.externalKey === pass.externalKey)) {
+                errorNotes.push(`${pass.name}: no play average returned`)
+              }
+              continue
+            }
+            updatePackTracker(tracker.id, {
+              averagePlayRating: result.averagePlayRating,
+              playCount: result.playCount,
+              lastPlaysImportedAt: importedAt,
+              ratingPerPack: result.ratingPerPack,
+            })
+            updated += 1
+          }
+        } catch (error) {
+          const detail =
+            error instanceof DOMException && error.name === 'AbortError'
+              ? 'timed out'
+              : error instanceof Error
+                ? error.message
+                : 'failed'
+          for (const { pass } of chunk) {
+            errorNotes.push(`${pass.name}: ${detail}`)
+          }
         }
-        updatePackTracker(tracker.id, {
-          averagePlayRating: result.averagePlayRating,
-          playCount: result.playCount,
-          lastPlaysImportedAt: importedAt,
-          ratingPerPack: result.ratingPerPack,
-        })
-        updated += 1
       }
 
       const parts = [
@@ -869,8 +901,6 @@ export default function PlanPacksPage() {
         if (errorNotes.length > 4) parts.push(`(+${errorNotes.length - 4} more)`)
       }
       setSyncStatus(parts.join(' '))
-    } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : 'Could not import play averages.')
     } finally {
       setImportBusyKey('')
     }
