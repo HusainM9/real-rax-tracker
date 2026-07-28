@@ -219,6 +219,11 @@ export type RaxTrackerData = {
   cachedPlayerEarnings?: CachedPlayerEarningsProfile[]
   savedSellRankings?: SavedSellRankings | null
   plannedPasses?: PlannedPass[]
+  /**
+   * Owned card ids treated as sold when scoring Plan (simulation only).
+   * Persisted with the plan; never removes cards from the collection.
+   */
+  planSoldCardIds?: string[]
   packTrackers?: PackTracker[]
   /** Shared accounts reused when seeding / applying across pack trackers. */
   packAccountTemplates?: PackAccountTemplate[]

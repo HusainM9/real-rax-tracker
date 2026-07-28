@@ -221,10 +221,13 @@ export function removeCardFromCollection(
     next = upsertSavedCardProfile(next, profile)
   }
 
+  const planSoldCardIds = (next.planSoldCardIds ?? []).filter((id) => id !== cardId)
+
   next = {
     ...next,
     cards: next.cards.filter((item) => item.id !== cardId),
     performances: next.performances.filter((performance) => performance.cardId !== cardId),
+    planSoldCardIds,
   }
 
   return pruneSavedSellRankings(next, cardId)

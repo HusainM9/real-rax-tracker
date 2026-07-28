@@ -348,6 +348,54 @@ describe('plannedPasses', () => {
     expect(ifSold.withPlanClaimable).toBeGreaterThan(ifSold.currentClaimable)
   })
 
+  it('planned sell frees a claim slot so plan net rises for a buy', () => {
+    // Three owned NBA earners fill Pro slots (top 2 + Pro). A weaker planned buy is overlap.
+    // Selling the weakest owned pass frees a slot so the buy's plan net becomes positive.
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [
+        card('c-a', 'Owned A', '10|2025|NBA', 'Legendary 1'),
+        card('c-b', 'Owned B', '11|2025|NBA', 'Legendary 1'),
+        card('c-c', 'Owned C', '12|2025|NBA', 'Legendary 1'),
+      ],
+      performances: [
+        perf('p-a', 'c-a', 100, '2026-03-01'),
+        perf('p-b', 'c-b', 90, '2026-03-01'),
+        perf('p-c', 'c-c', 80, '2026-03-01'),
+      ],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    // base 2 at Legendary 1 stays below the 80 claimable floor → overlap until a slot opens.
+    const buyProfile = catalogProfile('20|2025|NBA', 'Planned Buy', [
+      { claimDay: '2026-03-01', baseRaxEarned: 2 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-buy',
+        externalKey: '20|2025|NBA',
+        name: 'Planned Buy',
+        simulatedRarityLabel: 'Legendary 1',
+        totalBaseRax: 2,
+        rowCount: 1,
+      }),
+    ]
+    const profilesByKey = new Map([[buyProfile.externalKey, buyProfile]])
+
+    const keeping = analyzePlanCollection(data, passes, profilesByKey)
+    const withPlannedSell = analyzePlanCollection(
+      withoutCards(data, ['c-c']),
+      passes,
+      profilesByKey,
+    )
+
+    expect(keeping.combinedNetDelta).toBe(0)
+    expect(withPlannedSell.combinedNetDelta).toBeGreaterThan(keeping.combinedNetDelta)
+    expect(withPlannedSell.combinedNetDelta).toBeGreaterThan(0)
+  })
+
   it('maps pack days-until-Iconic onto Plan tags (Just started stays manual)', () => {
     expect(planProgressFromPackDaysRemaining(null)).toBeNull()
     expect(planProgressFromPackDaysRemaining(0)).toBeNull()

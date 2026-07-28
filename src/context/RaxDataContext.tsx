@@ -114,6 +114,9 @@ type RaxDataContextValue = {
     simulatedRarityLabel?: string,
     source?: PlannedPass['source'],
   ) => string | null
+  setPlanSoldCardIds: (ids: string[]) => void
+  togglePlanSoldCard: (cardId: string) => void
+  clearPlanSoldCardIds: () => void
   upsertPackTracker: (plannedPassId: string) => string
   /** Start tracking every untracked planned player pass (same seeding as upsertPackTracker). */
   trackAllUntrackedPlayerPacks: () => { tracked: number }
@@ -581,6 +584,39 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           }
         })
         return createdId
+      },
+      setPlanSoldCardIds: (ids) => {
+        setData((current) => {
+          const validIds = new Set(current.cards.map((card) => card.id))
+          const next = [
+            ...new Set(ids.filter((id) => typeof id === 'string' && validIds.has(id))),
+          ]
+          const prev = current.planSoldCardIds ?? []
+          if (
+            next.length === prev.length &&
+            next.every((id, index) => id === prev[index])
+          ) {
+            return current
+          }
+          return { ...current, planSoldCardIds: next }
+        })
+      },
+      togglePlanSoldCard: (cardId) => {
+        setData((current) => {
+          if (!current.cards.some((card) => card.id === cardId)) return current
+          const prev = current.planSoldCardIds ?? []
+          const planSoldCardIds = prev.includes(cardId)
+            ? prev.filter((id) => id !== cardId)
+            : [...prev, cardId]
+          return { ...current, planSoldCardIds }
+        })
+      },
+      clearPlanSoldCardIds: () => {
+        setData((current) =>
+          (current.planSoldCardIds ?? []).length === 0
+            ? current
+            : { ...current, planSoldCardIds: [] },
+        )
       },
       upsertPackTracker: (plannedPassId) => {
         let trackerId = ''

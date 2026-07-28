@@ -38,6 +38,7 @@ export function createEmptyData(): RaxTrackerData {
     cachedPlayerEarnings: [],
     savedSellRankings: null,
     plannedPasses: [],
+    planSoldCardIds: [],
     packTrackers: [],
     packAccountTemplates: [],
     ignoredPassKeys: [],
@@ -56,6 +57,22 @@ function hydrateIgnoredPassKeys(value: unknown): string[] {
     keys.push(key)
   }
   return keys
+}
+
+/** Deduped card ids; optionally prune to ids still present in the collection. */
+function hydratePlanSoldCardIds(value: unknown, validCardIds?: Set<string>): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const ids: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const id = entry.trim()
+    if (!id || seen.has(id)) continue
+    if (validCardIds && !validCardIds.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  return ids
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -375,6 +392,10 @@ export function normalizeData(value: unknown): RaxTrackerData {
   if (!isRecord(value)) return fallback
 
   const settingsRecord = isRecord(value.settings) ? value.settings : {}
+  const cards = Array.isArray(value.cards)
+    ? value.cards.map(hydrateCard).filter((card): card is PlayerCard => card !== null)
+    : []
+  const validCardIds = new Set(cards.map((card) => card.id))
 
   return {
     version: EXPORT_VERSION,
@@ -406,9 +427,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
             ? settingsRecord.importEpicAndRarePasses
             : fallback.settings.importEpicPasses,
     },
-    cards: Array.isArray(value.cards)
-      ? value.cards.map(hydrateCard).filter((card): card is PlayerCard => card !== null)
-      : [],
+    cards,
     performances: Array.isArray(value.performances)
       ? value.performances
           .map(hydratePerformance)
@@ -438,6 +457,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .map(hydratePlannedPass)
           .filter((pass): pass is PlannedPass => pass !== null)
       : [],
+    planSoldCardIds: hydratePlanSoldCardIds(value.planSoldCardIds, validCardIds),
     packTrackers: Array.isArray(value.packTrackers)
       ? value.packTrackers
           .map(hydratePackTracker)
