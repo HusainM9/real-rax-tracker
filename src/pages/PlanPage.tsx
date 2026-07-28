@@ -21,6 +21,7 @@ import {
   isAtLeastIconic1Rarity,
   RECOMMENDATION_SIMULATED_RARITY,
 } from '../lib/passRecommendation'
+import { isLegendaryPlusRarity } from '../lib/rarityFilter'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
 import type { PlannedPassProgress, PlayerCard } from '../types/rax'
@@ -185,7 +186,10 @@ export default function PlanPage() {
     () =>
       [...data.cards]
         .filter(
-          (card) => isPlayerPass(card) && !isAtLeastIconic1Rarity(card.rarityLabel),
+          (card) =>
+            isPlayerPass(card) &&
+            isLegendaryPlusRarity(card.rarityLabel) &&
+            !isAtLeastIconic1Rarity(card.rarityLabel),
         )
         .sort(
           (a, b) =>

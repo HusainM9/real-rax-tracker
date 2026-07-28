@@ -5,6 +5,7 @@ import {
   parseSeasonYearFromExternalKey,
 } from '../../lib/catalogPassIdentity'
 import { isUfcCatalogSport } from '../../lib/passKind'
+import { isPlayerPass } from './passKind'
 import type { CatalogImportProfile } from './catalogApi'
 import type { CatalogSearchResult } from './catalogApi'
 import { catalogProfileToJson, filteredCatalogProfileRows } from './catalogProfileJson'
@@ -22,7 +23,7 @@ import {
 } from './potentialAnalysis'
 import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppToolsImport'
 import { computeOtdRax, parseRarityLabel } from './otdRax'
-import { normalizeRarityTier } from './rarityFilter'
+import { isLegendaryPlusRarity, normalizeRarityTier } from './rarityFilter'
 import type { CatalogPassKind } from './catalogApi'
 import { SPORTS, type PlayerCard, type RaxTrackerData, type Sport } from '../types/rax'
 
@@ -279,13 +280,27 @@ export function countAppliedBaselineAdjustments(
   return count
 }
 
+/** Drop optional Rare/Epic player imports from ranking baselines; keep Legendary+ and teams. */
+export function legendaryPlusBaselineCollection(data: RaxTrackerData): RaxTrackerData {
+  const cards = data.cards.filter(
+    (card) => !isPlayerPass(card) || isLegendaryPlusRarity(card.rarityLabel),
+  )
+  if (cards.length === data.cards.length) return data
+  const cardIds = new Set(cards.map((card) => card.id))
+  return {
+    ...data,
+    cards,
+    performances: data.performances.filter((perf) => cardIds.has(perf.cardId)),
+  }
+}
+
 export function applyRecommendationBaseline(
   data: RaxTrackerData,
   profilesByKey: Map<string, CatalogImportProfile>,
   adjustments?: RecommendationPassAdjustment[],
 ): RaxTrackerData {
   const appliedIdentities = new Set<string>()
-  let workingData = data
+  let workingData = legendaryPlusBaselineCollection(data)
   for (const adjustment of adjustments ?? []) {
     if (adjustment.mode !== 'assume-iconic-1') continue
     const profile = resolveProfileForRecommendationAdjustment(adjustment, profilesByKey)

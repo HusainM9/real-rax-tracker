@@ -182,6 +182,10 @@ export type AppSettings = {
   savedUsername: string
   lastCloudSyncAt?: string
   cloudSyncAuto?: boolean
+  /** When true, username import also pulls Rare (default Legendary+ only). */
+  importRarePasses?: boolean
+  /** When true, username import also pulls Epic (default Legendary+ only). */
+  importEpicPasses?: boolean
 }
 
 export type RaxTrackerData = {

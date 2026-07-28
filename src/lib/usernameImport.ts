@@ -1,5 +1,9 @@
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
-import { legendaryPlusRarityFilter, passMatchesRarityFilter } from '../../lib/rarityFilter'
+import {
+  legendaryPlusRarityFilter,
+  passMatchesRarityFilter,
+  usernameImportRarityFilter,
+} from '../../lib/rarityFilter'
 import {
   resolveUsernameImportSeasonLabel,
   usernameImportExternalKey,
@@ -178,6 +182,10 @@ export type UsernameImportOptions = {
   signal?: AbortSignal
   onProgress?: (progress: UsernameImportProgress) => void
   concurrency?: number
+  /** Include Rare in addition to Legendary+. Default false. */
+  includeRare?: boolean
+  /** Include Epic in addition to Legendary+. Default false. */
+  includeEpic?: boolean
 }
 
 type OwnershipSnapshotPass = {
@@ -627,32 +635,40 @@ export async function importFromUsername(
   const allPasses = resolved.metadataAuthoritative
     ? providedPasses
     : providedPasses.map(withResolvedPassKind)
-  const legendaryPasses = allPasses.filter((pass) =>
+  const includeRare = Boolean(options?.includeRare)
+  const includeEpic = Boolean(options?.includeEpic)
+  const rarityFilter = usernameImportRarityFilter({ includeRare, includeEpic })
+  const extras = [
+    includeRare ? 'Rare' : null,
+    includeEpic ? 'Epic' : null,
+  ].filter(Boolean)
+  const rarityLabel = extras.length > 0 ? `Legendary+ / ${extras.join(' / ')}` : 'Legendary+'
+  const eligiblePasses = allPasses.filter((pass) =>
     passMatchesRarityFilter(
       pass,
       resolved.rarities,
       pass.rarityLabel,
-      legendaryPlusRarityFilter(),
+      rarityFilter,
     ),
   )
-  const passesSkipped = allPasses.length - legendaryPasses.length
+  const passesSkipped = allPasses.length - eligiblePasses.length
   const ignoredKeys = ignoredPassKeySet(current)
-  const selectedPasses = legendaryPasses.filter((pass) => {
+  const selectedPasses = eligiblePasses.filter((pass) => {
     const sport = mapMeowbotSport(pass.sportRaw) as Sport
     const externalKey = buildPlayerExternalKey(pass.entityId, pass.season, sport)
     return !ignoredKeys.has(externalKey)
   })
-  const passesIgnored = legendaryPasses.length - selectedPasses.length
+  const passesIgnored = eligiblePasses.length - selectedPasses.length
   const passesToFetch = uniquePasses(selectedPasses)
 
-  if (legendaryPasses.length === 0) {
-    throw new Error('No Legendary+ passes found for this username.')
+  if (eligiblePasses.length === 0) {
+    throw new Error(`No ${rarityLabel} passes found for this username.`)
   }
   if (selectedPasses.length === 0) {
     throw new Error(
       passesIgnored > 0
-        ? 'All Legendary+ passes for this username are on your ignore list.'
-        : 'No Legendary+ passes found for this username.',
+        ? `All ${rarityLabel} passes for this username are on your ignore list.`
+        : `No ${rarityLabel} passes found for this username.`,
     )
   }
 

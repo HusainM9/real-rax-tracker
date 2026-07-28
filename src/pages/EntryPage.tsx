@@ -134,6 +134,7 @@ export default function EntryPage() {
     deleteCardProfile,
     importCatalogProfile,
     addPlannedPassFromCatalog,
+    setSettings,
   } = useRaxData()
   const { username: accountUsername } = useAccountAuth()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
@@ -478,9 +479,13 @@ export default function EntryPage() {
     setRetryableEarningsPasses([])
 
     try {
+      const includeRare = Boolean(data.settings.importRarePasses)
+      const includeEpic = Boolean(data.settings.importEpicPasses)
       const result = await importFromUsername(username, {
         signal: controller.signal,
         onProgress: setUsernameImportProgress,
+        includeRare,
+        includeEpic,
       })
       const failedPlayerPasses = getFailedPlayerPasses(result)
       const noEarningsCount = failedPlayerPasses.filter((pass) => pass.reason === 'no_earnings').length
@@ -639,6 +644,19 @@ export default function EntryPage() {
     }))
   }
 
+  const importRare = Boolean(data.settings.importRarePasses)
+  const importEpic = Boolean(data.settings.importEpicPasses)
+  const importExtras = [
+    importRare ? 'Rare' : null,
+    importEpic ? 'Epic' : null,
+  ].filter((tier): tier is string => Boolean(tier))
+  const importScopeLabel =
+    importExtras.length > 0 ? `Legendary+ plus ${importExtras.join(' and ')}` : 'Legendary+ only'
+  const importButtonLabel =
+    importExtras.length > 0
+      ? `Import Legendary+ / ${importExtras.join(' / ')}`
+      : 'Import Legendary+ passes'
+
   return (
     <div className="page-stack">
       <form className="panel form-panel import-panel" onSubmit={submitUsernameImport}>
@@ -647,8 +665,8 @@ export default function EntryPage() {
             <h2>Username import</h2>
             {realImportActive ? (
               <p>
-                Enter your Real @username to recover Legendary+ passes. Daily RAX may load in
-                stages — retry misses without redoing the pass list.
+                Enter your Real @username to recover Legendary+ passes (optional Rare/Epic). Daily
+                RAX may load in stages — retry misses without redoing the pass list.
               </p>
             ) : (
               <p>
@@ -676,11 +694,37 @@ export default function EntryPage() {
               }
             />
           </label>
+          <div className="field import-tier-field">
+            <span>Also import</span>
+            <div className="import-tier-toggles" role="group" aria-label="Optional rarities">
+              <label className={`import-tier-toggle${importRare ? ' active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={importRare}
+                  disabled={usernameImporting || retryingFailedEarnings || importDisabled}
+                  onChange={(event) => setSettings({ importRarePasses: event.target.checked })}
+                />
+                <span className="import-tier-dot rare" aria-hidden="true" />
+                Rare
+              </label>
+              <label className={`import-tier-toggle${importEpic ? ' active' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={importEpic}
+                  disabled={usernameImporting || retryingFailedEarnings || importDisabled}
+                  onChange={(event) => setSettings({ importEpicPasses: event.target.checked })}
+                />
+                <span className="import-tier-dot epic" aria-hidden="true" />
+                Epic
+              </label>
+            </div>
+          </div>
         </div>
         <p className="import-hint">
-          Legendary+ only
+          {importScopeLabel}
           {realImportActive ? ' · duplicates keep best rarity' : ''}
-          . Each import replaces your full collection — data saves to your account.
+          . Each import replaces your full collection — data saves to your account. Below-Legendary
+          stays out of ranking baselines and Plan quick-adds.
         </p>
         {importDisabled ? (
           <p className="import-status">
@@ -699,7 +743,7 @@ export default function EntryPage() {
               usernameImport.username.trim().length === 0
             }
           >
-            {usernameImporting ? 'Importing…' : 'Import Legendary+ passes'}
+            {usernameImporting ? 'Importing…' : importButtonLabel}
           </button>
           {usernameImporting || retryingFailedEarnings ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>

@@ -27,6 +27,8 @@ export function createEmptyData(): RaxTrackerData {
     settings: {
       proBonusEnabled: true,
       savedUsername: '',
+      importRarePasses: false,
+      importEpicPasses: false,
     },
     cards: [],
     performances: [],
@@ -356,6 +358,18 @@ export function normalizeData(value: unknown): RaxTrackerData {
         typeof settingsRecord.cloudSyncAuto === 'boolean'
           ? settingsRecord.cloudSyncAuto
           : undefined,
+      importRarePasses:
+        typeof settingsRecord.importRarePasses === 'boolean'
+          ? settingsRecord.importRarePasses
+          : typeof settingsRecord.importEpicAndRarePasses === 'boolean'
+            ? settingsRecord.importEpicAndRarePasses
+            : fallback.settings.importRarePasses,
+      importEpicPasses:
+        typeof settingsRecord.importEpicPasses === 'boolean'
+          ? settingsRecord.importEpicPasses
+          : typeof settingsRecord.importEpicAndRarePasses === 'boolean'
+            ? settingsRecord.importEpicAndRarePasses
+            : fallback.settings.importEpicPasses,
     },
     cards: Array.isArray(value.cards)
       ? value.cards.map(hydrateCard).filter((card): card is PlayerCard => card !== null)

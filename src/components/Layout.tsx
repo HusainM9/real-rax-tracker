@@ -16,10 +16,30 @@ const links = [
   { to: '/plan', label: 'Plan' },
   { to: '/packs', label: 'Packs' },
   { to: '/cards', label: 'Cards' },
-  { to: '/profile', label: 'Profile' },
   { to: '/sell', label: 'If sold' },
-  { to: '/help', label: 'Help' },
 ]
+
+function ProfileIcon() {
+  return (
+    <svg
+      className="nav-profile-icon"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="8" r="3.25" fill="none" stroke="currentColor" strokeWidth="1.75" />
+      <path
+        d="M5.5 19.25c1.6-3.1 3.9-4.6 6.5-4.6s4.9 1.5 6.5 4.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
 
 export default function Layout() {
   const { logout: siteLogout, devBypass } = useAuth()
@@ -79,21 +99,6 @@ export default function Layout() {
             RAX OTD Tracker
           </NavLink>
 
-          <button
-            type="button"
-            className="nav-menu-button"
-            aria-expanded={menuOpen}
-            aria-controls="main-nav"
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            <span className="nav-menu-icon" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-            <span className="nav-menu-label">{menuOpen ? 'Close' : 'Menu'}</span>
-          </button>
-
           <nav
             id="main-nav"
             className={`main-nav${menuOpen ? ' open' : ''}`}
@@ -114,6 +119,33 @@ export default function Layout() {
               ))}
             </ul>
           </nav>
+
+          <div className="header-end">
+            <button
+              type="button"
+              className="nav-menu-button"
+              aria-expanded={menuOpen}
+              aria-controls="main-nav"
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <span className="nav-menu-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="nav-menu-label">{menuOpen ? 'Close' : 'Menu'}</span>
+            </button>
+
+            <NavLink
+              to="/profile"
+              className={({ isActive }) => `nav-profile-link${isActive ? ' active' : ''}`}
+              aria-label="Profile"
+              title="Profile"
+              onClick={() => setMenuOpen(false)}
+            >
+              <ProfileIcon />
+            </NavLink>
+          </div>
         </div>
       </header>
 
@@ -148,6 +180,9 @@ export default function Layout() {
           Not affiliated with Real Sports.
         </p>
         <div className="footer-actions">
+          <NavLink className="footer-help-link" to="/help">
+            Help
+          </NavLink>
           {!accountDevBypass ? (
             <button
               className="button auth-sign-out"

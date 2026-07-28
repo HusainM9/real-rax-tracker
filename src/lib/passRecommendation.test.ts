@@ -711,6 +711,32 @@ describe('passRecommendation', () => {
     ).toBeGreaterThan(20)
   })
 
+  it('applyRecommendationBaseline omits Rare/Epic player passes from the collection', () => {
+    const ownedData: RaxTrackerData = {
+      ...data,
+      cards: [
+        ...data.cards,
+        card('owned-leg', 'Owned legendary', 'owned-leg|2025|NBA', 'Legendary 1'),
+        card('owned-rare', 'Owned rare', 'owned-rare|2025|NBA', 'Rare 1'),
+        card('owned-epic', 'Owned epic', 'owned-epic|2025|NBA', 'Epic 2'),
+      ],
+      performances: [
+        ...data.performances,
+        perf('p-leg', 'owned-leg', 20, '2026-03-01'),
+        perf('p-rare', 'owned-rare', 10, '2026-03-02'),
+        perf('p-epic', 'owned-epic', 12, '2026-03-03'),
+      ],
+    }
+
+    const baseline = applyRecommendationBaseline(ownedData, new Map(), [])
+    expect(baseline.cards.map((item) => item.id)).toContain('owned-leg')
+    expect(baseline.cards.map((item) => item.id)).not.toContain('owned-rare')
+    expect(baseline.cards.map((item) => item.id)).not.toContain('owned-epic')
+    expect(baseline.performances.map((item) => item.id)).toContain('p-leg')
+    expect(baseline.performances.map((item) => item.id)).not.toContain('p-rare')
+    expect(baseline.performances.map((item) => item.id)).not.toContain('p-epic')
+  })
+
   it('excludes adjusted passes from recommendation candidates', () => {
     const profiles = [
       catalogProfile('target|2025|NBA', 'Target', [{ claimDay: '2026-03-01', baseRaxEarned: 40 }]),

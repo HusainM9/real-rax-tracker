@@ -351,6 +351,51 @@ describe('importFromUsername', () => {
     }
   })
 
+  it('imports Rare when includeRare is enabled', async () => {
+    const originalFetch = globalThis.fetch
+    const rareFetch: typeof fetch = (input, init) => {
+      const url = String(input)
+      if (url.includes('resolve-listing')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...samplePassesResponse,
+              rarities: {
+                ...samplePassesResponse.rarities,
+                '200-2026-nfl': ['Rare 3'],
+              },
+              passSnapshots: samplePassesResponse.passSnapshots.map((pass) =>
+                pass.entityId === 200 ? { ...pass, rarityLabel: 'Rare 3' } : pass,
+              ),
+            }),
+            { status: 200 },
+          ),
+        )
+      }
+      return mockFetch(input, init)
+    }
+    globalThis.fetch = rareFetch
+
+    try {
+      const off = await importFromUsername(createEmptyData(), 'testuser')
+      expect(off.result.cardsCreated).toBe(2)
+      expect(off.result.passesSkipped).toBe(2)
+      expect(off.data.cards.some((card) => card.externalKey === '200|2026|NFL')).toBe(false)
+
+      const on = await importFromUsername(createEmptyData(), 'testuser', {
+        includeRare: true,
+      })
+      expect(on.result.cardsCreated).toBe(3)
+      expect(on.result.passesSkipped).toBe(1)
+      expect(on.data.cards.some((card) => card.externalKey === '200|2026|NFL')).toBe(true)
+      expect(on.data.cards.find((card) => card.externalKey === '200|2026|NFL')?.rarityLabel).toBe(
+        'Rare 3',
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('forces calendar-year season labels for MLB admin snapshot imports', async () => {
     const originalFetch = globalThis.fetch
     const snapshotFetch: typeof fetch = (input) => {
