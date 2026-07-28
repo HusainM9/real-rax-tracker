@@ -524,13 +524,14 @@ export async function getShopEarningsTotal(
   }
 }
 
-/** One Real play event from `/players/.../plays/recent` (rating is string `value`). */
+/** One Real play event from `/players/.../plays/{recent|top}` (rating is string `value`). */
 export type RealPlayerPlay = {
   id?: number | string
   value?: string | number
   day?: string
   season?: number | string
   primaryPlayerId?: number | string
+  secondaryPlayerId?: number | string
   [key: string]: unknown
 }
 
@@ -548,7 +549,8 @@ export type RealPlayerPlaysQuery = {
 }
 
 /**
- * Recent / season plays for a player. Rating contribution is `value` (Real Rating).
+ * Recent plays for a player. Empty for many MLB pitchers who never bat;
+ * prefer {@link listPlayerTopPlays} for season pack averages.
  * Paginate with `beforeDay` set to the oldest `day` from the previous page.
  */
 export async function listPlayerRecentPlays(
@@ -563,6 +565,59 @@ export async function listPlayerRecentPlays(
     beforeDay: query.beforeDay,
   })
   return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
+}
+
+/**
+ * Season play sample for pack averages. Use `viewFrame=season` (required — `default` 500s).
+ * Returns pitcher-involved plays (player as secondary) that `/plays/recent` often omits.
+ */
+export async function listPlayerTopPlays(
+  query: RealPlayerPlaysQuery,
+  context: RealApiContext,
+): Promise<RealPlayerPlay[]> {
+  const path = `/players/${query.entityId}/sport/${encodeURIComponent(query.sport)}/plays/top`
+  const data = await realGetJson<{ plays?: unknown }>(path, context, {
+    limit: query.limit ?? 1000,
+    season: query.season,
+    viewFrame: query.viewFrame ?? 'season',
+    beforeDay: query.beforeDay,
+  })
+  return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
+}
+
+export type PlayerPlaysForPackAverage = {
+  plays: RealPlayerPlay[]
+  /** `top` = `/plays/top?viewFrame=season`; `recent` = fallback for sports/seasons where top is empty. */
+  source: 'top' | 'recent'
+}
+
+/**
+ * Pack-average play sample that works across sports:
+ * 1. Prefer `/plays/top?viewFrame=season` (needed for MLB pitchers; good season sample elsewhere).
+ * 2. If top is empty or errors, fall back to `/plays/recent` so NBA/NFL/NHL seasons that
+ *    lack a top sample still get averages (prior behavior).
+ */
+export async function listPlayerPlaysForPackAverage(
+  query: Omit<RealPlayerPlaysQuery, 'beforeDay' | 'viewFrame'>,
+  context: RealApiContext,
+): Promise<PlayerPlaysForPackAverage> {
+  try {
+    const topPlays = await listPlayerTopPlays(
+      { ...query, viewFrame: 'season' },
+      context,
+    )
+    if (topPlays.length > 0) {
+      return { plays: topPlays, source: 'top' }
+    }
+  } catch {
+    // Top can 500 with viewFrame=default; season usually works, but never block recent fallback.
+  }
+
+  const recentPlays = await listPlayerRecentPlays(
+    { ...query, viewFrame: 'default' },
+    context,
+  )
+  return { plays: recentPlays, source: 'recent' }
 }
 
 /**

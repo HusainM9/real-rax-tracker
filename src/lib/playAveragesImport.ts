@@ -15,6 +15,8 @@ export type PlayAverageResult = {
   averagePlayRating: number
   averageRatingPerPack: number
   ratingPerPack: number
+  /** True when Real returned no plays and we fell back to the pack minimum. */
+  noPlaysFallback?: boolean
 }
 
 export type PlayAveragesImportResult = {
@@ -34,8 +36,9 @@ type PlayAveragesResponse = {
 }
 
 /**
- * Fetches Real recent plays for each pass and returns average rating
- * (per play and per pack = ×3 plays).
+ * Fetches Real season plays (`/plays/top`, falling back to `/plays/recent`) for each pass
+ * and returns average rating (per play and per pack = ×3 plays). Negatives are absolutized;
+ * pack rating floors at min.
  */
 export async function fetchPlayAverages(
   passes: PlayAveragePassInput[],

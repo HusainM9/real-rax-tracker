@@ -351,11 +351,11 @@ function hydratePackTracker(value: unknown): PackTracker | null {
     ),
     averagePlayRating: (() => {
       const n = Number(value.averagePlayRating)
-      return Number.isFinite(n) && n > 0 ? n : undefined
+      return Number.isFinite(n) ? n : undefined
     })(),
     playCount: (() => {
       const n = Number(value.playCount)
-      return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined
     })(),
     lastPlaysImportedAt:
       typeof value.lastPlaysImportedAt === 'string' ? value.lastPlaysImportedAt : undefined,
