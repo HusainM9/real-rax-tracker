@@ -17,6 +17,13 @@ import {
   type OwnedIconicUpgradeImpactResult,
   type PassRecommendationRow,
 } from './passRecommendation'
+import {
+  rankAllRemovedCards,
+  rankAllRemovedCardsAsync,
+  type BulkSellRankResult,
+  type BulkSellRankRow,
+  type SellRankProgress,
+} from './removeCardAnalysis'
 import type {
   PackTracker,
   PlayerCard,
@@ -440,6 +447,129 @@ export function analyzePlanCollection(
     combinedNetDelta,
     combinedGuaranteedNetDelta,
   }
+}
+
+/** Where a card in the post-plan sell simulation came from. */
+export type PlanFinishedCardSource = 'owned' | 'planned' | 'plan-upgrade'
+
+export type PlanFinishedCollection = {
+  data: RaxTrackerData
+  sourceByCardId: Map<string, PlanFinishedCardSource>
+  plannedExternalKeys: Set<string>
+}
+
+export type PlanFinishedSellRankRow = BulkSellRankRow & {
+  source: PlanFinishedCardSource
+  externalKey?: string
+}
+
+export type PlanFinishedSellRankResult = Omit<BulkSellRankResult, 'rankings'> & {
+  rankings: PlanFinishedSellRankRow[]
+}
+
+/**
+ * Simulate finishing the plan: optional collection→Iconic 1, then apply every planned
+ * buy/upgrade at Iconic 1. Used for post-plan sell ranking (not persisted).
+ */
+export function buildPlanFinishedCollection(
+  data: RaxTrackerData,
+  plannedPasses: PlannedPass[],
+  profilesByKey: Map<string, CatalogImportProfile>,
+  options?: { assumeCollectionIconic1?: boolean },
+): PlanFinishedCollection {
+  let working: RaxTrackerData = {
+    ...data,
+    settings: { ...data.settings, proBonusEnabled: true },
+  }
+  if (options?.assumeCollectionIconic1) {
+    working = withCollectionAssumedIconic1(working)
+  }
+
+  const beforeIds = new Set(working.cards.map((card) => card.id))
+  const plannedExternalKeys = new Set(
+    plannedPasses.map((pass) => pass.externalKey.trim()).filter(Boolean),
+  )
+
+  const profiles: CatalogImportProfile[] = []
+  const seenIdentities = new Set<string>()
+  for (const pass of plannedPasses) {
+    const profile = profileForPlannedPass(pass, profilesByKey, RECOMMENDATION_SIMULATED_RARITY)
+    if (!profile || profile.rows.length === 0) continue
+    if (isRecommendationPassOwnedAtIconic(working, profile)) continue
+    const identity = profile.externalKey
+    if (seenIdentities.has(identity)) continue
+    seenIdentities.add(identity)
+    profiles.push(profile)
+  }
+
+  const finished = applyCatalogProfilesAtOwnRarities(working, profiles)
+  const sourceByCardId = new Map<string, PlanFinishedCardSource>()
+  for (const card of finished.cards) {
+    const key = card.externalKey?.trim()
+    const onPlan = Boolean(key && plannedExternalKeys.has(key))
+    if (!beforeIds.has(card.id)) {
+      sourceByCardId.set(card.id, 'planned')
+    } else if (onPlan) {
+      sourceByCardId.set(card.id, 'plan-upgrade')
+    } else {
+      sourceByCardId.set(card.id, 'owned')
+    }
+  }
+
+  return { data: finished, sourceByCardId, plannedExternalKeys }
+}
+
+function attachPlanFinishedSources(
+  result: BulkSellRankResult,
+  sourceByCardId: Map<string, PlanFinishedCardSource>,
+): PlanFinishedSellRankResult {
+  return {
+    ...result,
+    rankings: result.rankings.map((row) => ({
+      ...row,
+      source: sourceByCardId.get(row.analysis.card.id) ?? 'owned',
+      externalKey: row.analysis.card.externalKey,
+    })),
+  }
+}
+
+/** Sync sell-rank of collection + planned cards (planned at Iconic 1). */
+export function rankPlanFinishedForSales(
+  data: RaxTrackerData,
+  plannedPasses: PlannedPass[],
+  profilesByKey: Map<string, CatalogImportProfile>,
+  options?: { assumeCollectionIconic1?: boolean },
+): PlanFinishedSellRankResult {
+  const built = buildPlanFinishedCollection(data, plannedPasses, profilesByKey, options)
+  return attachPlanFinishedSources(rankAllRemovedCards(built.data), built.sourceByCardId)
+}
+
+/** Async sell-rank after plan finishes — same math as /sell, on the simulated collection. */
+export function rankPlanFinishedForSalesAsync(
+  data: RaxTrackerData,
+  plannedPasses: PlannedPass[],
+  profilesByKey: Map<string, CatalogImportProfile>,
+  options?: {
+    assumeCollectionIconic1?: boolean
+    onProgress?: (progress: SellRankProgress) => void
+    signal?: AbortSignal
+    batchSize?: number
+  },
+): Promise<PlanFinishedSellRankResult> {
+  const built = buildPlanFinishedCollection(data, plannedPasses, profilesByKey, {
+    assumeCollectionIconic1: options?.assumeCollectionIconic1,
+  })
+  return rankAllRemovedCardsAsync(built.data, {
+    onProgress: options?.onProgress,
+    signal: options?.signal,
+    batchSize: options?.batchSize,
+  }).then((result) => attachPlanFinishedSources(result, built.sourceByCardId))
+}
+
+export function planFinishedSourceLabel(source: PlanFinishedCardSource): string {
+  if (source === 'planned') return 'Plan'
+  if (source === 'plan-upgrade') return 'Plan upgrade'
+  return 'Owned'
 }
 
 export function plannedPassSimulatedTotalRax(
