@@ -17,6 +17,7 @@ import OverlapsPage from './pages/OverlapsPage'
 import PotentialPage from './pages/PotentialPage'
 import PlanPage from './pages/PlanPage'
 import PlanPacksPage from './pages/PlanPacksPage'
+import ProfilePage from './pages/ProfilePage'
 import SellPage from './pages/SellPage'
 import AdminLoginPage from './pages/AdminLoginPage'
 import AdminPage from './pages/AdminPage'
@@ -66,6 +67,7 @@ export default function App() {
                   <Route path="/packs" element={<PlanPacksPage />} />
                   <Route path="/plan/packs" element={<Navigate to="/packs" replace />} />
                   <Route path="/cards" element={<CardsPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/sell" element={<SellPage />} />
                   <Route path="/help" element={<HelpPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

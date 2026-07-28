@@ -16,6 +16,7 @@ const links = [
   { to: '/plan', label: 'Plan' },
   { to: '/packs', label: 'Packs' },
   { to: '/cards', label: 'Cards' },
+  { to: '/profile', label: 'Profile' },
   { to: '/sell', label: 'If sold' },
   { to: '/help', label: 'Help' },
 ]
@@ -135,7 +136,11 @@ export default function Layout() {
         <p>
           {username ? (
             <>
-              Signed in as <strong>@{username}</strong>. Collection saves to your account.
+              Signed in as{' '}
+              <NavLink className="footer-profile-link" to="/profile">
+                @{username}
+              </NavLink>
+              . Collection saves to your account.
             </>
           ) : (
             <>Collection saves to your account.</>
