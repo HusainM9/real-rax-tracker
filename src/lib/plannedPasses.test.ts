@@ -3,9 +3,11 @@ import type { CatalogImportProfile } from './catalogApi'
 import {
   analyzePlanCollection,
   applyPackEtaToPlannedPasses,
+  buildPlanFinishedCollection,
   plannedPassFromOwnedCard,
   plannedPassSimulatedTotalRax,
   planProgressFromPackDaysRemaining,
+  rankPlanFinishedForSales,
 } from './plannedPasses'
 import { DEFAULT_PACK_RATING_INCREMENT } from './packTracker'
 import { withoutCards } from './removeCardAnalysis'
@@ -512,5 +514,42 @@ describe('plannedPasses', () => {
     expect(next.find((pass) => pass.id === 'plan-near')?.progress).toBe('nearly-finished')
     expect(next.find((pass) => pass.id === 'plan-far')?.progress).toBe('future')
     expect(next.find((pass) => pass.id === 'plan-idle')?.progress).toBe('just-started')
+  })
+
+  it('buildPlanFinishedCollection applies planned buys at Iconic 1 for post-plan sell rank', () => {
+    const owned = card('c-owned', 'Keeper', '10|2025|NBA', 'Legendary 1')
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [owned],
+      performances: [perf('p-owned', 'c-owned', 50, '2026-03-01')],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const buy = catalogProfile('20|2025|NBA', 'Plan Buy', [
+      { claimDay: '2026-03-02', baseRaxEarned: 1 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-buy',
+        externalKey: '20|2025|NBA',
+        name: 'Plan Buy',
+        simulatedRarityLabel: 'Legendary 1',
+      }),
+    ]
+    const profilesByKey = new Map([[buy.externalKey, buy]])
+
+    const finished = buildPlanFinishedCollection(data, passes, profilesByKey)
+    expect(finished.data.cards.length).toBeGreaterThan(data.cards.length)
+    const plannedCard = finished.data.cards.find((item) => item.externalKey === '20|2025|NBA')
+    expect(plannedCard?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
+    expect(finished.sourceByCardId.get(plannedCard!.id)).toBe('planned')
+    expect(finished.sourceByCardId.get('c-owned')).toBe('owned')
+
+    const ranked = rankPlanFinishedForSales(data, passes, profilesByKey)
+    expect(ranked.rankings.length).toBeGreaterThanOrEqual(2)
+    expect(ranked.rankings.some((row) => row.source === 'planned')).toBe(true)
+    expect(ranked.rankings.some((row) => row.source === 'owned')).toBe(true)
   })
 })

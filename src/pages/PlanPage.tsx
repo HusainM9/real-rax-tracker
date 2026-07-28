@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
@@ -12,12 +12,15 @@ import {
   analyzePlanCollection,
   applyPackEtaToPlannedPasses,
   normalizePlannedPassProgress,
+  planFinishedSourceLabel,
   PLANNED_PASS_PROGRESS_OPTIONS,
   plannedPassFromOwnedCard,
   plannedPassProgressLabel,
   plannedPassProgressSortIndex,
   plannedPassProgressTone,
+  rankPlanFinishedForSalesAsync,
   withCollectionAssumedIconic1,
+  type PlanFinishedSellRankResult,
   type PlannedPassCardAnalysis,
 } from '../lib/plannedPasses'
 import {
@@ -26,7 +29,12 @@ import {
 } from '../lib/passRecommendation'
 import { isLegendaryPlusRarity } from '../lib/rarityFilter'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
-import { formatSignedRax, withoutCards } from '../lib/removeCardAnalysis'
+import {
+  formatSignedRax,
+  isNotNeededForClaims,
+  withoutCards,
+  type SellRankProgress,
+} from '../lib/removeCardAnalysis'
 import type { PlannedPassProgress, PlayerCard } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
@@ -175,6 +183,14 @@ export default function PlanPage() {
   const [soldFilter, setSoldFilter] = useState('')
   /** Opt-in: Plan if-sold / composition assumes every owned player pass is Iconic 1. */
   const [assumeCollectionIconic1, setAssumeCollectionIconic1] = useState(false)
+  const [planSellRankResult, setPlanSellRankResult] = useState<PlanFinishedSellRankResult | null>(
+    null,
+  )
+  const [planSellRankBusy, setPlanSellRankBusy] = useState(false)
+  const [planSellRankProgress, setPlanSellRankProgress] = useState<SellRankProgress | null>(null)
+  const [planSellRankStatus, setPlanSellRankStatus] = useState('')
+  const [planSellRankFilter, setPlanSellRankFilter] = useState<'all' | 'owned' | 'planned'>('all')
+  const planSellRankAbortRef = useRef<AbortController | null>(null)
 
   const plannedPasses = data.plannedPasses ?? []
   const soldCardIds = data.planSoldCardIds ?? []
@@ -565,6 +581,58 @@ export default function PlanPage() {
     }
   }
 
+  const runPlanFinishedSellRank = async () => {
+    if (plannedPasses.length === 0 && data.cards.length === 0) {
+      setPlanSellRankStatus('Add planned passes or collection cards first.')
+      return
+    }
+    planSellRankAbortRef.current?.abort()
+    const controller = new AbortController()
+    planSellRankAbortRef.current = controller
+    setPlanSellRankBusy(true)
+    setPlanSellRankProgress(null)
+    setPlanSellRankStatus('Building plan-finished collection and ranking…')
+    try {
+      const result = await rankPlanFinishedForSalesAsync(data, plannedPasses, profilesByKey, {
+        assumeCollectionIconic1,
+        signal: controller.signal,
+        onProgress: setPlanSellRankProgress,
+      })
+      setPlanSellRankResult(result)
+      const notNeeded = result.rankings.filter((row) =>
+        isNotNeededForClaims(row.analysis.netClaimableDelta),
+      ).length
+      setPlanSellRankStatus(
+        `Ranked ${result.rankings.length} pass${result.rankings.length === 1 ? '' : 'es'} after plan (buys at ${RECOMMENDATION_SIMULATED_RARITY}${assumeCollectionIconic1 ? ', collection at Iconic 1' : ''})${notNeeded > 0 ? ` · ${notNeeded} not needed for claims` : ''}.`,
+      )
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setPlanSellRankStatus('Ranking cancelled.')
+      } else {
+        setPlanSellRankStatus(error instanceof Error ? error.message : 'Ranking failed.')
+      }
+    } finally {
+      setPlanSellRankBusy(false)
+      setPlanSellRankProgress(null)
+      planSellRankAbortRef.current = null
+    }
+  }
+
+  const cancelPlanFinishedSellRank = () => {
+    planSellRankAbortRef.current?.abort()
+  }
+
+  const filteredPlanSellRankings = useMemo(() => {
+    if (!planSellRankResult) return []
+    if (planSellRankFilter === 'all') return planSellRankResult.rankings
+    if (planSellRankFilter === 'owned') {
+      return planSellRankResult.rankings.filter((row) => row.source === 'owned')
+    }
+    return planSellRankResult.rankings.filter(
+      (row) => row.source === 'planned' || row.source === 'plan-upgrade',
+    )
+  }, [planSellRankFilter, planSellRankResult])
+
   return (
     <div className="page-stack plan-page">
       <section className="hero-card">
@@ -572,9 +640,9 @@ export default function PlanPage() {
         <h1>Plan</h1>
         <p>
           Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
-          Future; Just started stays manual. Mark planned sells so Plan scoring treats those owned
-          passes as sold with planned buys at {RECOMMENDATION_SIMULATED_RARITY} — simulation only;
-          collection unchanged. The separate If sold page stays collection-only.
+          Future. Use <strong>Sell rank after plan</strong> to simulate finishing the plan (buys at{' '}
+          {RECOMMENDATION_SIMULATED_RARITY}) and rank every pass like If sold — see which planned buys
+          to drop and which owned passes become unused.
         </p>
         <div className="button-row">
           <Link className="button" to="/potential">
@@ -703,6 +771,129 @@ export default function PlanPage() {
           )}
         </CollapsiblePanel>
       ) : null}
+
+      <CollapsiblePanel
+        className="nested-panel"
+        title="Sell rank after plan"
+        description={`Simulate finishing your plan: apply every planned buy/upgrade at ${RECOMMENDATION_SIMULATED_RARITY}, then rank the whole collection like If sold. Highest net (or “not needed”) = safest to sell or drop from the plan. Simulation only — does not change /sell or your collection.`}
+        badge={
+          planSellRankResult
+            ? `${planSellRankResult.rankings.length} ranked`
+            : plannedPasses.length > 0
+              ? `${plannedPasses.length} planned`
+              : undefined
+        }
+        defaultOpen={Boolean(planSellRankResult)}
+      >
+        <div className="sort-controls">
+          <button
+            className={`button${assumeCollectionIconic1 ? ' is-selected' : ''}`}
+            type="button"
+            aria-pressed={assumeCollectionIconic1}
+            disabled={planSellRankBusy}
+            title="Also treat every owned player pass as Iconic 1 in this simulation"
+            onClick={() => setAssumeCollectionIconic1((current) => !current)}
+          >
+            Assume collection Iconic 1
+          </button>
+          <button
+            className="button"
+            type="button"
+            disabled={planSellRankBusy || (plannedPasses.length === 0 && data.cards.length === 0)}
+            onClick={() => void runPlanFinishedSellRank()}
+          >
+            {planSellRankBusy ? 'Ranking…' : 'Rank sales after plan'}
+          </button>
+          {planSellRankBusy ? (
+            <button className="button" type="button" onClick={cancelPlanFinishedSellRank}>
+              Cancel
+            </button>
+          ) : null}
+          {planSellRankResult ? (
+            <label className="field inline-field">
+              <span>Show</span>
+              <select
+                value={planSellRankFilter}
+                disabled={planSellRankBusy}
+                onChange={(event) =>
+                  setPlanSellRankFilter(event.target.value as 'all' | 'owned' | 'planned')
+                }
+              >
+                <option value="all">All passes</option>
+                <option value="owned">Owned only</option>
+                <option value="planned">Plan / upgrades</option>
+              </select>
+            </label>
+          ) : null}
+        </div>
+        {planSellRankProgress ? (
+          <p className="import-progress">
+            Ranking {planSellRankProgress.current}/{planSellRankProgress.total}
+            {planSellRankProgress.label ? ` · ${planSellRankProgress.label}` : ''}
+          </p>
+        ) : null}
+        {planSellRankStatus ? <p className="import-status">{planSellRankStatus}</p> : null}
+        {filteredPlanSellRankings.length > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Pass</th>
+                  <th>Source</th>
+                  <th>Claimable</th>
+                  <th>Net if sold</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPlanSellRankings.map((row, index) => {
+                  const notNeeded = isNotNeededForClaims(row.analysis.netClaimableDelta)
+                  return (
+                    <tr key={row.analysis.card.id}>
+                      <td>{index + 1}</td>
+                      <td>
+                        {row.analysis.card.name}
+                        <br />
+                        <small className="table-sub">
+                          {row.analysis.card.sport} · {row.analysis.card.season}
+                          {row.analysis.card.rarityLabel
+                            ? ` · ${row.analysis.card.rarityLabel}`
+                            : ''}
+                          {notNeeded ? ' · not needed' : ''}
+                        </small>
+                      </td>
+                      <td>
+                        <span className="badge">{planFinishedSourceLabel(row.source)}</span>
+                      </td>
+                      <td>{displayRaxValue(row.claimableNow).toLocaleString()}</td>
+                      <td>
+                        <strong className={signedRaxClass(row.analysis.netClaimableDelta)}>
+                          {formatSignedRax(displayRaxValue(row.analysis.netClaimableDelta))}
+                        </strong>
+                        {row.analysis.freedClaimableRax > 0 ? (
+                          <>
+                            <br />
+                            <small className="table-sub">
+                              frees {displayRaxValue(row.analysis.freedClaimableRax).toLocaleString()}
+                            </small>
+                          </>
+                        ) : null}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : planSellRankResult ? (
+          <p className="empty">No rows match that filter.</p>
+        ) : (
+          <p className="empty">
+            Run the rank to see which planned buys are weakest and which owned passes become unused
+            once the plan is finished.
+          </p>
+        )}
+      </CollapsiblePanel>
 
       {profilesLoading ? <p className="import-progress">{profilesStatus || 'Loading plan…'}</p> : null}
       {profilesStatus && !profilesLoading ? <p className="import-status">{profilesStatus}</p> : null}
