@@ -112,3 +112,23 @@ describe('normalizeData ignoredPassKeys migration', () => {
     expect(normalized.ignoredPassKeys).toEqual(['100|2026|NBA', '200|2026|UFC'])
   })
 })
+
+describe('normalizeData planSoldCardIds', () => {
+  it('hydrates planned sells and prunes ids not in the collection', () => {
+    const normalized = normalizeData({
+      ...createEmptyData(),
+      cards: [
+        {
+          id: 'keep-me',
+          name: 'Keep',
+          sport: 'NBA',
+          season: '2025-26',
+          notes: '',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      planSoldCardIds: ['keep-me', 'keep-me', 'gone', '', 12],
+    })
+    expect(normalized.planSoldCardIds).toEqual(['keep-me'])
+  })
+})

@@ -157,6 +157,8 @@ export default function PlanPage() {
     addPlannedPassFromCatalog,
     removePlannedPass,
     updatePlannedPass,
+    togglePlanSoldCard,
+    clearPlanSoldCardIds,
   } = useRaxData()
   const [profilesByKey, setProfilesByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
   const [profilesLoading, setProfilesLoading] = useState(false)
@@ -169,10 +171,10 @@ export default function PlanPage() {
   const [ownedAddStatus, setOwnedAddStatus] = useState('')
   const [ownedAddRarity, setOwnedAddRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [passSortMode, setPassSortMode] = useState<PlanPassSortMode>('progress')
-  const [soldCardIds, setSoldCardIds] = useState<string[]>([])
   const [soldFilter, setSoldFilter] = useState('')
 
   const plannedPasses = data.plannedPasses ?? []
+  const soldCardIds = data.planSoldCardIds ?? []
   const packTrackers = data.packTrackers ?? []
   const packEtaFingerprint = useMemo(
     () =>
@@ -241,14 +243,6 @@ export default function PlanPage() {
   )
 
   const soldCardIdSet = useMemo(() => new Set(soldCardIds), [soldCardIds])
-
-  useEffect(() => {
-    const validIds = new Set(data.cards.map((card) => card.id))
-    setSoldCardIds((current) => {
-      const next = current.filter((id) => validIds.has(id))
-      return next.length === current.length ? current : next
-    })
-  }, [data.cards])
 
   const filteredSellableCards = useMemo(() => {
     const query = soldFilter.trim().toLowerCase()
@@ -389,6 +383,19 @@ export default function PlanPage() {
     ],
   )
 
+  const unsoldPlanNet = useMemo(() => {
+    if (soldCardIds.length === 0) return null
+    return analyzePlanCollection(data, plannedPasses, profilesByKey).combinedNetDelta
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- collection + plan fingerprints
+  }, [
+    data.cards,
+    data.performances,
+    data.settings.proBonusEnabled,
+    planScoringFingerprint,
+    profilesByKey,
+    soldCardIdsFingerprint,
+  ])
+
   const analysis = useMemo(() => {
     const byId = new Map(plannedPasses.map((pass) => [pass.id, pass]))
     return {
@@ -500,16 +507,10 @@ export default function PlanPage() {
     )
   }
 
-  const toggleSoldCard = (cardId: string) => {
-    setSoldCardIds((current) =>
-      current.includes(cardId) ? current.filter((id) => id !== cardId) : [...current, cardId],
-    )
-  }
-
-  const clearSoldCards = () => setSoldCardIds([])
-
   const soldOnlyNetDelta = analysis.currentClaimable - unsoldClaimable
   const hasSoldScenario = soldCardIds.length > 0
+  const planNetVsUnsold =
+    unsoldPlanNet != null ? analysis.combinedNetDelta - unsoldPlanNet : null
 
   const handleCatalogSelect = async (
     result: Parameters<typeof addPlannedPassFromCatalog>[0],
@@ -536,7 +537,8 @@ export default function PlanPage() {
         <h1>Plan</h1>
         <p>
           Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
-          Future; Just started stays manual. Toggle If sold to try buy/sell mixes.
+          Future; Just started stays manual. Mark planned sells so Plan scoring treats those owned
+          passes as sold — simulation only; your collection stays unchanged.
         </p>
         <div className="button-row">
           <Link className="button" to="/potential">
@@ -562,19 +564,21 @@ export default function PlanPage() {
           value={formatSignedRax(displayRaxValue(analysis.combinedNetDelta))}
           hint={
             hasSoldScenario
-              ? `After treating ${soldCardIds.length} pass${soldCardIds.length === 1 ? '' : 'es'} as sold · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+              ? planNetVsUnsold != null && planNetVsUnsold !== 0
+                ? `${formatSignedRax(displayRaxValue(planNetVsUnsold))} vs no planned sells · ${soldCardIds.length} sold in plan · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+                : `With ${soldCardIds.length} planned sell${soldCardIds.length === 1 ? '' : 's'} · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
               : `${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
           }
         />
         {hasSoldScenario ? (
           <>
             <StatCard
-              label="Collection if sold"
+              label="Collection after planned sells"
               value={displayRaxValue(analysis.currentClaimable).toLocaleString()}
               hint={`${formatSignedRax(displayRaxValue(soldOnlyNetDelta))} vs keeping · before planned buys`}
             />
             <StatCard
-              label="With plan if sold"
+              label="With plan after sells"
               value={displayRaxValue(analysis.withPlanClaimable).toLocaleString()}
               hint={`${formatSignedRax(displayRaxValue(analysis.withPlanClaimable - unsoldClaimable))} vs current collection`}
             />
@@ -585,10 +589,12 @@ export default function PlanPage() {
       {sellableCards.length > 0 ? (
         <CollapsiblePanel
           className="nested-panel"
-          title="If sold"
-          description="Temporarily remove owned player passes from the Plan baseline (session only — does not sell or delete). Plan nets then assume those passes are gone."
+          title="Plan to sell"
+          description="Mark owned player passes as planned sells. Plan scoring treats them as sold so planned buys can claim freed slots — simulation only; does not sell or delete from your collection. Saved with your plan."
           badge={
-            soldCardIds.length > 0 ? `${soldCardIds.length} treated as sold` : undefined
+            soldCardIds.length > 0
+              ? `${soldCardIds.length} sold in plan`
+              : undefined
           }
           defaultOpen={soldCardIds.length > 0}
         >
@@ -605,9 +611,9 @@ export default function PlanPage() {
               className="button"
               type="button"
               disabled={soldCardIds.length === 0}
-              onClick={clearSoldCards}
+              onClick={clearPlanSoldCardIds}
             >
-              Clear sold
+              Clear planned sells
             </button>
           </div>
           {filteredSellableCards.length > 0 ? (
@@ -622,10 +628,10 @@ export default function PlanPage() {
                     aria-pressed={selected}
                     title={
                       selected
-                        ? 'Stop treating as sold'
-                        : 'Treat as sold for Plan scoring'
+                        ? 'Remove planned sell (keep in Plan baseline)'
+                        : 'Plan to sell — treat as sold for all Plan scoring'
                     }
-                    onClick={() => toggleSoldCard(card.id)}
+                    onClick={() => togglePlanSoldCard(card.id)}
                   >
                     {card.name}
                     {card.season ? ` · ${card.season}` : ''}

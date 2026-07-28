@@ -147,6 +147,13 @@ export default function HelpPage() {
             <dt>If sold</dt>
             <dd>Lost vs freed claimable RAX if you sell a pass.</dd>
           </div>
+          <div>
+            <dt>Plan to sell</dt>
+            <dd>
+              On Plan, mark owned passes as planned sells (simulation). Plan nets assume they are
+              gone so planned buys can claim freed slots — collection unchanged.
+            </dd>
+          </div>
         </dl>
       </section>
 
