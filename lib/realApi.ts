@@ -523,3 +523,87 @@ export async function getShopEarningsTotal(
     items: Array.isArray(data.items) ? (data.items as RealShopEarningsTotalItem[]) : [],
   }
 }
+
+/** One Real play event from `/players/.../plays/recent` (rating is string `value`). */
+export type RealPlayerPlay = {
+  id?: number | string
+  value?: string | number
+  day?: string
+  season?: number | string
+  primaryPlayerId?: number | string
+  [key: string]: unknown
+}
+
+export type RealPlayerPlaysQuery = {
+  /** Real entity id for the player. */
+  entityId: number
+  /** Real path slug (`mlb`, `nfl`, `soccer`, …). */
+  sport: string
+  season: number
+  /** Page size (Real accepts up to at least 1000). */
+  limit?: number
+  /** Exclusive upper bound on play `day` (YYYY-MM-DD) for pagination. */
+  beforeDay?: string
+  viewFrame?: string
+}
+
+/**
+ * Recent / season plays for a player. Rating contribution is `value` (Real Rating).
+ * Paginate with `beforeDay` set to the oldest `day` from the previous page.
+ */
+export async function listPlayerRecentPlays(
+  query: RealPlayerPlaysQuery,
+  context: RealApiContext,
+): Promise<RealPlayerPlay[]> {
+  const path = `/players/${query.entityId}/sport/${encodeURIComponent(query.sport)}/plays/recent`
+  const data = await realGetJson<{ plays?: unknown }>(path, context, {
+    limit: query.limit ?? 1000,
+    season: query.season,
+    viewFrame: query.viewFrame ?? 'default',
+    beforeDay: query.beforeDay,
+  })
+  return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
+}
+
+/**
+ * Walk `beforeDay` pages until exhausted (or maxPages). Dedupes by play id.
+ * Default page size is 1000 — most seasons fit in one Real request.
+ */
+export async function listAllPlayerRecentPlays(
+  query: Omit<RealPlayerPlaysQuery, 'beforeDay'>,
+  context: RealApiContext,
+  options?: { maxPages?: number; pageSize?: number },
+): Promise<RealPlayerPlay[]> {
+  const pageSize = options?.pageSize ?? 1000
+  const maxPages = options?.maxPages ?? 40
+  const byId = new Map<string, RealPlayerPlay>()
+  let beforeDay: string | undefined
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const plays = await listPlayerRecentPlays(
+      { ...query, limit: pageSize, beforeDay },
+      context,
+    )
+    if (plays.length === 0) break
+
+    let oldestDay: string | undefined
+    let added = 0
+    for (const play of plays) {
+      const id = play.id != null ? String(play.id) : ''
+      if (id && byId.has(id)) continue
+      if (id) byId.set(id, play)
+      else byId.set(`anon-${byId.size}`, play)
+      added += 1
+      const day = typeof play.day === 'string' ? play.day : ''
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day) && (!oldestDay || day < oldestDay)) {
+        oldestDay = day
+      }
+    }
+
+    if (added === 0 || !oldestDay || oldestDay === beforeDay) break
+    beforeDay = oldestDay
+    if (plays.length < pageSize) break
+  }
+
+  return [...byId.values()]
+}

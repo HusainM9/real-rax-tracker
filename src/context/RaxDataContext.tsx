@@ -119,7 +119,12 @@ type RaxDataContextValue = {
   trackAllUntrackedPlayerPacks: () => { tracked: number }
   updatePackTracker: (
     id: string,
-    patch: Partial<Pick<PackTracker, 'accounts' | 'ratingPerPack'>>,
+    patch: Partial<
+      Pick<
+        PackTracker,
+        'accounts' | 'ratingPerPack' | 'averagePlayRating' | 'playCount' | 'lastPlaysImportedAt'
+      >
+    >,
   ) => void
   addPackTrackerAccount: (trackerId: string, input?: Partial<PackTrackerAccount>) => string | null
   updatePackTrackerAccount: (
@@ -667,12 +672,30 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           ...current,
           packTrackers: (current.packTrackers ?? []).map((tracker) => {
             if (tracker.id !== id) return tracker
+            const averagePlayRating = Number(patch.averagePlayRating)
+            const playCount = Number(patch.playCount)
             return {
               ...tracker,
               ratingPerPack:
                 patch.ratingPerPack !== undefined
                   ? normalizeRatingPerPack(patch.ratingPerPack)
                   : tracker.ratingPerPack,
+              averagePlayRating:
+                patch.averagePlayRating !== undefined
+                  ? Number.isFinite(averagePlayRating) && averagePlayRating > 0
+                    ? averagePlayRating
+                    : undefined
+                  : tracker.averagePlayRating,
+              playCount:
+                patch.playCount !== undefined
+                  ? Number.isFinite(playCount) && playCount > 0
+                    ? Math.floor(playCount)
+                    : undefined
+                  : tracker.playCount,
+              lastPlaysImportedAt:
+                patch.lastPlaysImportedAt !== undefined
+                  ? patch.lastPlaysImportedAt
+                  : tracker.lastPlaysImportedAt,
               accounts: patch.accounts !== undefined ? patch.accounts : tracker.accounts,
               updatedAt: nowIso(),
             }

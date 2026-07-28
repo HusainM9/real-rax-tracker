@@ -11,6 +11,8 @@ import {
   normalizePackUsername,
 } from '../lib/packTracker'
 import { fetchPackRatings } from '../lib/packRatingsImport'
+import { fetchPlayAverages } from '../lib/playAveragesImport'
+import { PLAYS_PER_PACK } from '../lib/playAveragesImport'
 import type { PackAccountTemplate, PackTracker, PackTrackerAccount, PlannedPass } from '../types/rax'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -48,6 +50,7 @@ function PackPassRow({
   onIgnoreMissing,
   onImportAccount,
   onImportAll,
+  onImportPlayAverage,
   onMarkFinished,
 }: {
   pass: PlannedPass
@@ -68,6 +71,7 @@ function PackPassRow({
   onIgnoreMissing: (accountId: string) => void
   onImportAccount: (account: PackTrackerAccount) => void
   onImportAll: () => void
+  onImportPlayAverage: () => void
   onMarkFinished: () => void
 }) {
   const estimate = tracker
@@ -120,6 +124,14 @@ function PackPassRow({
             <button
               className="button compact"
               type="button"
+              disabled={importBusy}
+              onClick={onImportPlayAverage}
+            >
+              Avg from plays
+            </button>
+            <button
+              className="button compact"
+              type="button"
               disabled={importBusy || importableCount === 0}
               onClick={onImportAll}
             >
@@ -169,13 +181,29 @@ function PackPassRow({
               <input
                 type="number"
                 min={1}
-                step={1}
+                step={0.1}
                 value={tracker.ratingPerPack ?? DEFAULT_PACK_RATING_INCREMENT}
                 onChange={(event) => onUpdateRatingPerPack(Number(event.target.value))}
                 aria-label={`Rating per pack for ${pass.name}`}
               />
             </label>
           </div>
+
+          {tracker.averagePlayRating != null && tracker.playCount != null ? (
+            <p className="import-hint pack-play-average-hint">
+              Avg play rating {tracker.averagePlayRating.toFixed(2)} across {tracker.playCount}{' '}
+              play{tracker.playCount === 1 ? '' : 's'}
+              {` · ≈ ${(tracker.averagePlayRating * PLAYS_PER_PACK).toFixed(1)}/pack (${PLAYS_PER_PACK} plays/pack)`}
+              {tracker.lastPlaysImportedAt
+                ? ` · Imported ${new Date(tracker.lastPlaysImportedAt).toLocaleString()}`
+                : ''}
+            </p>
+          ) : (
+            <p className="import-hint pack-play-average-hint">
+              Use Avg from plays to pull Real play ratings for this player (packs have{' '}
+              {PLAYS_PER_PACK} plays).
+            </p>
+          )}
 
           <div className="pack-accounts">
             <div className="pack-accounts-header">
@@ -739,6 +767,115 @@ export default function PlanPacksPage() {
     }
   }
 
+  const importPlayAverageForPass = async (pass: PlannedPass, tracker: PackTracker) => {
+    setImportBusyKey(`${tracker.id}:avg`)
+    setImportStatusByPass((current) => ({
+      ...current,
+      [pass.id]: `Fetching play ratings for ${pass.name}…`,
+    }))
+    try {
+      const { results, errors } = await fetchPlayAverages([
+        {
+          externalKey: pass.externalKey,
+          sport: pass.sport,
+        },
+      ])
+      const result = results.find((row) => row.externalKey === pass.externalKey) ?? results[0]
+      if (!result) {
+        const detail = errors[0]?.error ?? 'No play average returned.'
+        setImportStatusByPass((current) => ({
+          ...current,
+          [pass.id]: detail,
+        }))
+        return
+      }
+      updatePackTracker(tracker.id, {
+        averagePlayRating: result.averagePlayRating,
+        playCount: result.playCount,
+        lastPlaysImportedAt: new Date().toISOString(),
+        ratingPerPack: result.ratingPerPack,
+      })
+      setImportStatusByPass((current) => ({
+        ...current,
+        [pass.id]: `Avg ${result.averagePlayRating.toFixed(2)}/play across ${result.playCount} plays → ${result.ratingPerPack}/pack (${PLAYS_PER_PACK} plays/pack).`,
+      }))
+    } catch (error) {
+      setImportStatusByPass((current) => ({
+        ...current,
+        [pass.id]: error instanceof Error ? error.message : 'Could not import play averages.',
+      }))
+    } finally {
+      setImportBusyKey('')
+    }
+  }
+
+  const importPlayAveragesForAllTracked = async () => {
+    const targets = playerPasses
+      .map((pass) => {
+        const tracker = trackerByPassId.get(pass.id)
+        return tracker ? { pass, tracker } : null
+      })
+      .filter((row): row is { pass: PlannedPass; tracker: PackTracker } => row !== null)
+
+    if (targets.length === 0) {
+      setSyncStatus('Track at least one player pass before averaging plays.')
+      return
+    }
+
+    setImportBusyKey('play-avg:all')
+    setSyncStatus(
+      `Averaging plays for ${targets.length} tracked pass${targets.length === 1 ? '' : 'es'}…`,
+    )
+
+    try {
+      const { results, errors } = await fetchPlayAverages(
+        targets.map(({ pass }) => ({
+          externalKey: pass.externalKey,
+          sport: pass.sport,
+        })),
+      )
+
+      const byKey = new Map(results.map((row) => [row.externalKey, row]))
+      const nameByKey = new Map(targets.map(({ pass }) => [pass.externalKey, pass.name]))
+      const importedAt = new Date().toISOString()
+      let updated = 0
+      const errorNotes: string[] = errors.map((row) => {
+        const name = nameByKey.get(row.externalKey) ?? row.externalKey
+        return `${name}: ${row.error}`
+      })
+
+      for (const { pass, tracker } of targets) {
+        const result = byKey.get(pass.externalKey)
+        if (!result) {
+          if (!errors.some((row) => row.externalKey === pass.externalKey)) {
+            errorNotes.push(`${pass.name}: no play average returned`)
+          }
+          continue
+        }
+        updatePackTracker(tracker.id, {
+          averagePlayRating: result.averagePlayRating,
+          playCount: result.playCount,
+          lastPlaysImportedAt: importedAt,
+          ratingPerPack: result.ratingPerPack,
+        })
+        updated += 1
+      }
+
+      const parts = [
+        `Updated ${updated}/${targets.length} pass${targets.length === 1 ? '' : 'es'} from play averages (${PLAYS_PER_PACK} plays/pack).`,
+      ]
+      if (errorNotes.length > 0) {
+        parts.push(errorNotes.slice(0, 4).join(' · '))
+        if (errorNotes.length > 4) parts.push(`(+${errorNotes.length - 4} more)`)
+      }
+      setSyncStatus(parts.join(' '))
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : 'Could not import play averages.')
+    } finally {
+      setImportBusyKey('')
+    }
+  }
+
   return (
     <div className="page-stack plan-packs-page">
       <section className="hero-card">
@@ -760,40 +897,52 @@ export default function PlanPacksPage() {
           <h2>Sync all tracked</h2>
           <p className="table-sub">
             Sync one Real account, or Sync all to walk each username one by one — pulls live ratings
-            across every tracked player.
+            across every tracked player. Avg from plays pulls each player’s Real play ratings
+            (packs = {PLAYS_PER_PACK} plays) to set rating/pack.
           </p>
         </div>
-        {knownUsernames.length === 0 ? (
-          <p className="import-hint">
-            Add a Real username on a shared account or pass row below, then sync from here.
-          </p>
-        ) : (
-          <div className="button-row pack-sync-accounts">
-            <button
-              className="button"
-              type="button"
-              disabled={anyImportBusy}
-              onClick={() => void syncAllKnownUsernames()}
-            >
-              {isSyncAllRunning && syncAllProgress
-                ? `Syncing @${syncBusyUsername}… ${syncAllProgress.index}/${syncAllProgress.total}`
-                : 'Sync all'}
-            </button>
-            {knownUsernames.map((username) => (
+        <div className="button-row pack-sync-accounts">
+          <button
+            className="button"
+            type="button"
+            disabled={anyImportBusy || packTrackers.length === 0}
+            onClick={() => void importPlayAveragesForAllTracked()}
+          >
+            {importBusyKey === 'play-avg:all' ? 'Averaging plays…' : 'Avg from plays (all)'}
+          </button>
+          {knownUsernames.length === 0 ? null : (
+            <>
               <button
-                key={username.toLowerCase()}
                 className="button"
                 type="button"
                 disabled={anyImportBusy}
-                onClick={() => void syncAllTracked(username)}
+                onClick={() => void syncAllKnownUsernames()}
               >
-                {syncBusyUsername.toLowerCase() === username.toLowerCase()
-                  ? `Syncing @${username}…`
-                  : `Sync @${username}`}
+                {isSyncAllRunning && syncAllProgress
+                  ? `Syncing @${syncBusyUsername}… ${syncAllProgress.index}/${syncAllProgress.total}`
+                  : 'Sync all'}
               </button>
-            ))}
-          </div>
-        )}
+              {knownUsernames.map((username) => (
+                <button
+                  key={username.toLowerCase()}
+                  className="button"
+                  type="button"
+                  disabled={anyImportBusy}
+                  onClick={() => void syncAllTracked(username)}
+                >
+                  {syncBusyUsername.toLowerCase() === username.toLowerCase()
+                    ? `Syncing @${username}…`
+                    : `Sync @${username}`}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+        {knownUsernames.length === 0 ? (
+          <p className="import-hint">
+            Add a Real username on a shared account or pass row below to sync live ownership ratings.
+          </p>
+        ) : null}
         {syncStatus ? <p className="import-status">{syncStatus}</p> : null}
       </section>
 
@@ -980,13 +1129,14 @@ export default function PlanPacksPage() {
           {sortedPlayerPasses.map((pass) => {
             const tracker = trackerByPassId.get(pass.id)
             const busyAll = importBusyKey === `${tracker?.id ?? ''}:all`
+            const busyAvg = importBusyKey === `${tracker?.id ?? ''}:avg`
             return (
               <PackPassRow
                 key={pass.id}
                 pass={pass}
                 tracker={tracker}
                 importBusy={anyImportBusy}
-                importBusyLabel={busyAll ? 'Importing…' : ''}
+                importBusyLabel={busyAll ? 'Importing…' : busyAvg ? 'Averaging…' : ''}
                 importStatus={importStatusByPass[pass.id] ?? ''}
                 onEnsureTracker={() => upsertPackTracker(pass.id)}
                 onUpdateRatingPerPack={(value) => {
@@ -1016,6 +1166,10 @@ export default function PlanPacksPage() {
                 onImportAll={() => {
                   if (!tracker) return
                   void importAllAccounts(pass, tracker)
+                }}
+                onImportPlayAverage={() => {
+                  if (!tracker) return
+                  void importPlayAverageForPass(pass, tracker)
                 }}
                 onMarkFinished={() => markPassFinished(pass)}
               />

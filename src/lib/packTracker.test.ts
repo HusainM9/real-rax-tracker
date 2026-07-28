@@ -43,8 +43,9 @@ describe('normalizeRatingPerPack', () => {
     expect(normalizeRatingPerPack(Number.NaN)).toBe(10)
   })
 
-  it('floors positive values', () => {
-    expect(normalizeRatingPerPack(12.7)).toBe(12)
+  it('keeps one decimal for positive values', () => {
+    expect(normalizeRatingPerPack(12.74)).toBe(12.7)
+    expect(normalizeRatingPerPack(8.95)).toBe(9)
     expect(normalizeRatingPerPack(1)).toBe(1)
   })
 })

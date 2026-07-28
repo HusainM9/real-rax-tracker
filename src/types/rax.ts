@@ -186,6 +186,12 @@ export type PackTracker = {
   accounts: PackTrackerAccount[]
   /** Estimate divisor for packs needed / days remaining (default 10). */
   ratingPerPack?: number
+  /** Mean Real Rating per play from `/players/.../plays/recent`. */
+  averagePlayRating?: number
+  /** Number of rated plays included in the average. */
+  playCount?: number
+  /** When play averages were last imported from Real. */
+  lastPlaysImportedAt?: string
   /** @deprecated Auto-increment removed — ratings come from Real import. */
   lastAutoIncrementDay?: string
   createdAt: string

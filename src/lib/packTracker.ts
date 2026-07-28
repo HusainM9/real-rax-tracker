@@ -29,11 +29,11 @@ function clampRating(value: number): number {
   return Math.floor(value)
 }
 
-/** Floor to ≥1 for estimate math; invalid values fall back to the default. */
+/** Keep ≥1 with one decimal for estimate math; invalid values fall back to the default. */
 export function normalizeRatingPerPack(value: number | undefined | null): number {
   const n = Number(value)
   if (!Number.isFinite(n) || n < 1) return DEFAULT_PACK_RATING_INCREMENT
-  return Math.floor(n)
+  return Math.round(n * 10) / 10
 }
 
 export function sumAccountRatings(accounts: PackTrackerAccount[]): number {
