@@ -394,6 +394,16 @@ describe('plannedPasses', () => {
     expect(keeping.combinedNetDelta).toBe(0)
     expect(withPlannedSell.combinedNetDelta).toBeGreaterThan(keeping.combinedNetDelta)
     expect(withPlannedSell.combinedNetDelta).toBeGreaterThan(0)
+
+    // Plan sold impact = with-plan claimable change (buys applied), not sell-only.
+    const sellOnlyDelta = withPlannedSell.currentClaimable - keeping.currentClaimable
+    const soldImpactWithPlan =
+      withPlannedSell.withPlanClaimable - keeping.withPlanClaimable
+    expect(sellOnlyDelta).toBeLessThan(0)
+    expect(soldImpactWithPlan).toBeGreaterThan(sellOnlyDelta)
+    expect(soldImpactWithPlan).toBe(
+      sellOnlyDelta + (withPlannedSell.combinedNetDelta - keeping.combinedNetDelta),
+    )
   })
 
   it('maps pack days-until-Iconic onto Plan tags (Just started stays manual)', () => {

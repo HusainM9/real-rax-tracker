@@ -150,8 +150,8 @@ export default function HelpPage() {
           <div>
             <dt>Plan to sell</dt>
             <dd>
-              On Plan, mark owned passes as planned sells (simulation). Plan nets assume they are
-              gone so planned buys can claim freed slots — collection unchanged.
+              On Plan only: mark owned passes as planned sells (simulation). Plan nets and sold
+              impact include planned buys after those sells — If sold (/sell) stays collection-only.
             </dd>
           </div>
         </dl>
