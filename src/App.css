@@ -2280,6 +2280,17 @@ button.plan-tag:hover {
   background: color-mix(in srgb, var(--warn-soft) 80%, transparent);
 }
 
+.pack-tracker-list .pack-tracker-row.pack-tracker-row-done.panel {
+  border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+  background: color-mix(in srgb, var(--good-soft) 80%, transparent);
+}
+
+.pack-tracker-list .pack-tracker-row.pack-tracker-row-done .badge {
+  border-color: rgba(62, 207, 158, 0.45);
+  background: color-mix(in srgb, var(--good) 22%, transparent);
+  color: #86efcc;
+}
+
 .pack-tracker-row .collapsible-header {
   align-items: center;
   flex-wrap: nowrap;
