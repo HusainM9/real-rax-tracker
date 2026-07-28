@@ -636,6 +636,49 @@ describe('passRecommendation', () => {
     ).toBeNull()
   })
 
+  it('analyzeCatalogCandidate reports overlap RAX when the new pass loses claim days', () => {
+    // Two guaranteed + one pro-bonus slot; a 4th weak pass is pure overlap.
+    const stacked: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [
+        card('a', 'Star A', 'a|2025|NBA', 'Iconic 1'),
+        card('b', 'Star B', 'b|2025|NBA', 'Iconic 1'),
+        card('c', 'Star C', 'c|2025|NBA', 'Iconic 1'),
+      ],
+      performances: [
+        perf('pa', 'a', 500, '2026-03-01'),
+        perf('pb', 'b', 400, '2026-03-01'),
+        perf('pc', 'c', 300, '2026-03-01'),
+      ],
+      potentialCards: [],
+      savedCardProfiles: [],
+    }
+    const overlapped = analyzeCatalogCandidate(
+      stacked,
+      catalogProfile('low|2025|NBA', 'Low overlap pass', [
+        { claimDay: '2026-03-01', baseRaxEarned: 1 },
+      ]),
+    )
+    expect(overlapped).not.toBeNull()
+    expect(overlapped!.newClaimableRax).toBe(0)
+    expect(overlapped!.overlapRax).toBeGreaterThan(0)
+    expect(overlapped!.netClaimableDelta).toBe(0)
+
+    const check = analyzePotentialCard(
+      stacked,
+      {
+        name: 'Low overlap pass',
+        sport: 'NBA',
+        season: '2025-26',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        passKind: 'player',
+      },
+      [{ claimDay: '2026-03-01', raxEarned: 1, baseRaxEarned: 1, note: '' }],
+    )
+    expect(check?.overlapRax).toBe(overlapped!.overlapRax)
+  })
+
   it('applyRecommendationBaseline upgrades an owned lower-tier pass to Iconic 1', () => {
     const profile = catalogProfile('owned-leg|2025|NBA', 'Owned legendary', [
       { claimDay: '2026-03-01', baseRaxEarned: 20 },

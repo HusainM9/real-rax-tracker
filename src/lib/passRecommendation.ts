@@ -694,7 +694,9 @@ export function analyzeCatalogImportAtRarity(
   const after = addProfileToDataAtRarity(data, profile, rarity)
   const deltas = collectionNetDeltas(data, after)
   const cardId = after.cards.find((card) => card.externalKey === simulated.externalKey)?.id
-  const totals = cardId ? cardClaimableTotals(after, cardId) : { claimable: 0, guaranteed: 0 }
+  const totals = cardId
+    ? cardClaimableTotals(after, cardId)
+    : { claimable: 0, guaranteed: 0, overlap: 0 }
   const sport = sportFromCatalog(simulated.sport)
   const passKind = recommendationPassKind(simulated)
   return {
@@ -710,7 +712,7 @@ export function analyzeCatalogImportAtRarity(
     rowCount: simulated.rows.length,
     newClaimableRax: totals.claimable,
     displacedRax: Math.max(0, totals.claimable - deltas.withPro),
-    overlapRax: 0,
+    overlapRax: totals.overlap,
     netClaimableDelta: deltas.withPro,
     netGuaranteedDelta: deltas.guaranteed,
   }
@@ -747,7 +749,7 @@ export function analyzeOwnedCardUpgradeAtRarity(
     rowCount: simulated.rows.length,
     newClaimableRax: totals.claimable,
     displacedRax: Math.max(0, totals.claimable - deltas.withPro),
-    overlapRax: 0,
+    overlapRax: totals.overlap,
     netClaimableDelta: deltas.withPro,
     netGuaranteedDelta: deltas.guaranteed,
   }
@@ -1016,12 +1018,13 @@ function findCardIdForCandidate(
 function cardClaimableTotals(
   data: RaxTrackerData,
   cardId: string,
-): { claimable: number; guaranteed: number } {
+): { claimable: number; guaranteed: number; overlap: number } {
   const rollup = computeYearRollup(withProBonusAnalysisData(data))
   const row = rollup.cards.find((entry) => entry.card.id === cardId)
   return {
     claimable: row?.totalClaimableRax ?? 0,
     guaranteed: row?.guaranteedRax ?? 0,
+    overlap: row?.overlapRax ?? 0,
   }
 }
 
