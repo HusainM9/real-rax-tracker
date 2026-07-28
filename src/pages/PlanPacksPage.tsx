@@ -76,6 +76,7 @@ function PackPassRow({
         accounts: [],
         ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
       })
+  const isDone = Boolean(tracker && estimate.atTarget)
   const accountCount = tracker?.accounts.length ?? 0
   const importableCount = tracker
     ? tracker.accounts.filter((account) => Boolean(accountUsername(account))).length
@@ -86,28 +87,29 @@ function PackPassRow({
       (account) => account.ownershipStatus === 'missing' && !account.ignoredMissing,
     ),
   )
-  const showPassMissingWarn = hasIncompleteOwnership && !open
+  // Yellow incomplete-ownership only for unfinished passes (collapsed).
+  const showPassMissingWarn = hasIncompleteOwnership && !open && !isDone
 
   const summary = !tracker
     ? `${pass.passKind === 'team' ? 'Team' : 'Player'} · ${pass.sport} · ${pass.season} · Not tracking yet`
     : [
         `${pass.sport} · ${pass.season}`,
         `${estimate.totalRating.toLocaleString()} / ${ICONIC_RATING_TARGET.toLocaleString()}`,
-        formatDays(estimate.daysRemaining) === 'Done'
-          ? 'Done'
+        isDone
+          ? 'DONE'
           : `${formatDays(estimate.daysRemaining)} left`,
         `${accountCount} account${accountCount === 1 ? '' : 's'}`,
       ].join(' · ')
 
   return (
     <CollapsiblePanel
-      className={`pack-tracker-row${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
+      className={`pack-tracker-row${isDone ? ' pack-tracker-row-done' : ''}${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
       title={pass.name}
       description={summary}
       defaultOpen={false}
       open={open}
       onOpenChange={setOpen}
-      badge={tracker && estimate.atTarget ? 'Iconic' : undefined}
+      badge={isDone ? 'DONE' : undefined}
       actions={
         !tracker ? (
           <button className="button compact" type="button" onClick={onEnsureTracker}>
@@ -287,7 +289,7 @@ function PackPassRow({
           </div>
 
           {estimate.atTarget ? (
-            <p className="import-hint plan-pass-status owned">Reached Iconic rating target.</p>
+            <p className="import-hint plan-pass-status owned">DONE — reached Iconic rating target.</p>
           ) : estimate.daysRemaining === null ? (
             <p className="import-hint plan-pass-status warning">
               No effective pack openers for estimates — enable “Opens packs” on an owned account, or
@@ -388,6 +390,10 @@ export default function PlanPacksPage() {
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
       .sort((a, b) => {
+        // DONE (at Iconic) first, then soonest estimated finish.
+        if (a.estimate.atTarget !== b.estimate.atTarget) {
+          return a.estimate.atTarget ? -1 : 1
+        }
         if (a.estimate.daysRemaining === null && b.estimate.daysRemaining === null) {
           return a.pass.name.localeCompare(b.pass.name)
         }
@@ -414,6 +420,18 @@ export default function PlanPacksPage() {
     () => playerPasses.filter((pass) => !trackerByPassId.has(pass.id)),
     [playerPasses, trackerByPassId],
   )
+
+  /** DONE (remaining ≤ 0 / at Iconic) first; stable order within each group. */
+  const sortedPlayerPasses = useMemo(() => {
+    return [...playerPasses].sort((a, b) => {
+      const aTracker = trackerByPassId.get(a.id)
+      const bTracker = trackerByPassId.get(b.id)
+      const aDone = aTracker ? estimatePackProgress(aTracker).atTarget : false
+      const bDone = bTracker ? estimatePackProgress(bTracker).atTarget : false
+      if (aDone !== bDone) return aDone ? -1 : 1
+      return 0
+    })
+  }, [playerPasses, trackerByPassId])
 
   const trackAllUntracked = () => {
     if (untrackedPlayerPasses.length === 0) {
@@ -959,7 +977,7 @@ export default function PlanPacksPage() {
             </button>
           </div>
           {trackAllStatus ? <p className="import-status">{trackAllStatus}</p> : null}
-          {playerPasses.map((pass) => {
+          {sortedPlayerPasses.map((pass) => {
             const tracker = trackerByPassId.get(pass.id)
             const busyAll = importBusyKey === `${tracker?.id ?? ''}:all`
             return (
