@@ -672,6 +672,19 @@ label.button input.sr-only {
   color: var(--good);
 }
 
+.admin-page .admin-account-tracker-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-page .admin-account-tracker-row.panel {
+  margin: 0;
+}
+
+.admin-page .admin-account-tracker-templates {
+  margin-bottom: 0.75rem;
+}
+
 .form-subsection h3 {
   margin: 0;
   font-size: 0.95rem;
@@ -2197,6 +2210,360 @@ button.plan-tag:hover {
   text-align: center;
 }
 
+/* —— Player packs (/packs) —— */
+.pack-sync-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pack-sync-copy h2 {
+  margin: 0 0 0.25rem;
+}
+
+.pack-sync-copy p {
+  margin: 0;
+}
+
+.pack-sync-accounts {
+  flex-wrap: wrap;
+}
+
+.pack-shared-accounts-panel .collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pack-shared-accounts-panel .section-actions {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.pack-finish-summary .table-wrap {
+  margin-top: 0.25rem;
+}
+
+.pack-tracker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.pack-tracker-list-header {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.pack-tracker-list-header .pack-sync-copy {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.pack-tracker-list-header .button {
+  margin-left: auto;
+}
+
+.pack-tracker-list .pack-tracker-row.panel {
+  padding: 1.05rem 1.1rem;
+}
+
+.pack-tracker-list .pack-tracker-row.panel.is-open {
+  padding: 1.1rem 1.15rem;
+}
+
+.pack-tracker-list .pack-tracker-row.pack-tracker-row-incomplete.panel {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 80%, transparent);
+}
+
+.pack-tracker-row .collapsible-header {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.55rem 0.85rem;
+}
+
+.pack-tracker-row.is-open .collapsible-header {
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.pack-tracker-row .collapsible-toggle {
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.pack-tracker-row .collapsible-chevron {
+  font-size: 0.9rem;
+  line-height: 1.3;
+  margin-top: 0;
+}
+
+.pack-tracker-row .collapsible-heading-text {
+  gap: 0.3rem;
+}
+
+.pack-tracker-row .collapsible-title {
+  font-size: 1.18rem;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.pack-tracker-row .collapsible-description {
+  font-size: 0.88rem;
+  line-height: 1.4;
+  max-width: none;
+}
+
+.pack-tracker-row .section-actions {
+  flex-shrink: 0;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.pack-tracker-row .button.compact {
+  font-size: 0.88rem;
+  min-height: 2.7rem;
+  padding: 0.45rem 0.9rem;
+}
+
+.pack-tracker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pack-progress-bar {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  height: 0.35rem;
+  overflow: hidden;
+}
+
+.pack-progress-bar span {
+  background: linear-gradient(90deg, rgba(228, 160, 36, 0.55), rgba(228, 160, 36, 0.95));
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  transition: width 0.2s ease;
+}
+
+.pack-stat-strip {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pack-stat {
+  align-items: flex-start;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  padding-top: 0.45rem;
+}
+
+.pack-stat span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pack-stat strong {
+  font-size: 1.05rem;
+}
+
+.pack-stat small {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.pack-stat-input input {
+  max-width: 5.5rem;
+  width: 100%;
+}
+
+.pack-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.pack-accounts-header {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.pack-accounts-header h4 {
+  margin: 0;
+}
+
+.pack-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.pack-account-row {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.pack-account-row-missing {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 80%, transparent);
+}
+
+.pack-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.pack-account-field span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pack-account-name {
+  flex: 1 1 9rem;
+}
+
+.pack-account-username {
+  flex: 1 1 8rem;
+}
+
+.pack-account-rating {
+  flex: 0 1 6.5rem;
+}
+
+.pack-account-rating input {
+  max-width: 6.5rem;
+}
+
+.pack-opens-toggle {
+  align-items: center;
+  color: var(--text-soft);
+  display: inline-flex;
+  gap: 0.45rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.pack-opens-toggle input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.pack-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.pack-account-ownership-flag {
+  align-items: center;
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
+.pack-account-ownership-warning {
+  color: var(--warn);
+  flex: 1 1 auto;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.pack-account-import-meta {
+  color: var(--muted);
+  flex: 1 1 100%;
+  font-size: 0.76rem;
+  margin: 0;
+}
+
+.pack-plan-teaser {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.pack-plan-teaser h2 {
+  margin: 0 0 0.25rem;
+}
+
+.pack-plan-teaser p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .pack-stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .pack-plan-teaser {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pack-stat-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pack-account-row {
+    align-items: stretch;
+  }
+
+  .pack-account-name,
+  .pack-account-username,
+  .pack-account-rating {
+    flex: 1 1 calc(50% - 0.4rem);
+  }
+
+  .pack-opens-toggle {
+    flex: 1 1 auto;
+  }
+
+  .pack-account-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .pack-tracker-row .collapsible-header,
+  .pack-tracker-row.is-open .collapsible-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .pack-tracker-row .section-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
 .recommendation-bundle-row {
   gap: 0.55rem;
 }
@@ -3542,6 +3909,14 @@ button.linkish {
   .hero-card,
   .panel {
     padding: 1rem;
+  }
+
+  .pack-tracker-list .pack-tracker-row.panel {
+    padding: 1rem;
+  }
+
+  .pack-tracker-list .pack-tracker-row.panel.is-open {
+    padding: 1rem 1.05rem;
   }
 
   .stats-grid {

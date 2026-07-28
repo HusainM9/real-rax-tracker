@@ -45,5 +45,6 @@ describe('createEmptyData', () => {
   it('starts empty', () => {
     expect(createEmptyData().cards).toHaveLength(0)
     expect(createEmptyData().ignoredPassKeys).toEqual([])
+    expect(createEmptyData().packAccountTemplates).toEqual([])
   })
 })

@@ -2,7 +2,9 @@ import {
   adminDeleteAllTrackerProfiles,
   adminDeleteTrackerProfile,
   adminResetTrackerProfilePin,
+  listTrackerProfilesForAdmin,
   lookupTrackerProfileForAdmin,
+  lookupTrackerProfilePacksForAdmin,
   profileSyncConfigured,
 } from '../../lib/trackerProfileStore'
 import { requireAdminSession } from './_helpers'
@@ -32,10 +34,29 @@ export default async function handler(request: Request): Promise<Response> {
   const url = new URL(request.url)
   const usernameParam = url.searchParams.get('username') ?? ''
   const purgeAll = url.searchParams.get('all') === '1'
+  const listAll = url.searchParams.get('list') === '1'
+  const includePacks = url.searchParams.get('packs') === '1'
 
   if (request.method === 'GET') {
+    if (listAll) {
+      const result = await listTrackerProfilesForAdmin()
+      return Response.json({
+        profiles: result.profiles,
+        storageConfigured: result.storageConfigured,
+      })
+    }
+
     if (!usernameParam.trim()) {
       return Response.json({ error: 'Username is required.' }, { status: 400 })
+    }
+
+    if (includePacks) {
+      const result = await lookupTrackerProfilePacksForAdmin(usernameParam)
+      return Response.json({
+        profile: result.profile,
+        packs: result.packs,
+        storageConfigured: result.storageConfigured,
+      })
     }
 
     const result = await lookupTrackerProfileForAdmin(usernameParam)

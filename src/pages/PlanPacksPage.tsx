@@ -2,9 +2,15 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { useRaxData } from '../context/RaxDataContext'
-import { estimatePackProgress, formatProjectedFinishDate, ICONIC_RATING_TARGET } from '../lib/packTracker'
+import {
+  DEFAULT_PACK_RATING_INCREMENT,
+  estimatePackProgress,
+  formatProjectedFinishDate,
+  ICONIC_RATING_TARGET,
+  normalizePackUsername,
+} from '../lib/packTracker'
 import { fetchPackRatings } from '../lib/packRatingsImport'
-import type { PackTracker, PackTrackerAccount, PlannedPass } from '../types/rax'
+import type { PackAccountTemplate, PackTracker, PackTrackerAccount, PlannedPass } from '../types/rax'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
@@ -24,7 +30,7 @@ function formatDays(days: number | null): string {
 }
 
 function accountUsername(account: PackTrackerAccount): string {
-  return (account.username ?? '').replace(/^@/, '').trim()
+  return normalizePackUsername(account.username)
 }
 
 function PackPassRow({
@@ -34,9 +40,11 @@ function PackPassRow({
   importBusyLabel,
   importStatus,
   onEnsureTracker,
+  onUpdateRatingPerPack,
   onAddAccount,
   onUpdateAccount,
   onRemoveAccount,
+  onIgnoreMissing,
   onImportAccount,
   onImportAll,
 }: {
@@ -46,6 +54,7 @@ function PackPassRow({
   importBusyLabel: string
   importStatus: string
   onEnsureTracker: () => void
+  onUpdateRatingPerPack: (value: number) => void
   onAddAccount: () => void
   onUpdateAccount: (
     accountId: string,
@@ -54,16 +63,27 @@ function PackPassRow({
     >,
   ) => void
   onRemoveAccount: (accountId: string) => void
+  onIgnoreMissing: (accountId: string) => void
   onImportAccount: (account: PackTrackerAccount) => void
   onImportAll: () => void
 }) {
-  const estimate = estimatePackProgress({
-    accounts: tracker?.accounts ?? [],
-  })
+  const estimate = tracker
+    ? estimatePackProgress(tracker)
+    : estimatePackProgress({
+        accounts: [],
+        ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
+      })
   const accountCount = tracker?.accounts.length ?? 0
   const importableCount = tracker
     ? tracker.accounts.filter((account) => Boolean(accountUsername(account))).length
     : 0
+  const [open, setOpen] = useState(false)
+  const hasIncompleteOwnership = Boolean(
+    tracker?.accounts.some(
+      (account) => account.ownershipStatus === 'missing' && !account.ignoredMissing,
+    ),
+  )
+  const showPassMissingWarn = hasIncompleteOwnership && !open
 
   const summary = !tracker
     ? `${pass.passKind === 'team' ? 'Team' : 'Player'} · ${pass.sport} · ${pass.season} · Not tracking yet`
@@ -78,10 +98,12 @@ function PackPassRow({
 
   return (
     <CollapsiblePanel
-      className="pack-tracker-row"
+      className={`pack-tracker-row${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
       title={pass.name}
       description={summary}
       defaultOpen={false}
+      open={open}
+      onOpenChange={setOpen}
       badge={tracker && estimate.atTarget ? 'Iconic' : undefined}
       actions={
         !tracker ? (
@@ -110,7 +132,7 @@ function PackPassRow({
             <span style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} />
           </div>
 
-          <div className="pack-stat-strip pack-stat-strip-three">
+          <div className="pack-stat-strip">
             <div className="pack-stat">
               <span>Remaining</span>
               <strong>{estimate.remaining.toLocaleString()}</strong>
@@ -118,7 +140,7 @@ function PackPassRow({
             <div className="pack-stat">
               <span>Packs needed</span>
               <strong>{estimate.packsNeeded.toLocaleString()}</strong>
-              <small>est. at {estimate.ratingPerPack}/pack min</small>
+              <small>est. at {estimate.ratingPerPack}/pack</small>
             </div>
             <div className="pack-stat">
               <span>Days remaining</span>
@@ -127,6 +149,17 @@ function PackPassRow({
                 {estimate.openingAccounts} open · est. {estimate.dailyGain}/day
               </small>
             </div>
+            <label className="pack-stat pack-stat-input">
+              <span>Rating / pack</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={tracker.ratingPerPack ?? DEFAULT_PACK_RATING_INCREMENT}
+                onChange={(event) => onUpdateRatingPerPack(Number(event.target.value))}
+                aria-label={`Rating per pack for ${pass.name}`}
+              />
+            </label>
           </div>
 
           <div className="pack-accounts">
@@ -141,8 +174,14 @@ function PackPassRow({
               <p className="import-hint">No accounts yet. Add one to start tracking.</p>
             ) : (
               <div className="pack-account-list">
-                {tracker.accounts.map((account) => (
-                  <div className="pack-account-row" key={account.id}>
+                {tracker.accounts.map((account) => {
+                  const showMissing =
+                    account.ownershipStatus === 'missing' && !account.ignoredMissing
+                  return (
+                  <div
+                    className={`pack-account-row${showMissing ? ' pack-account-row-missing' : ''}`}
+                    key={account.id}
+                  >
                     <label className="pack-account-field pack-account-name">
                       <span>Name</span>
                       <input
@@ -204,6 +243,18 @@ function PackPassRow({
                         Remove
                       </button>
                     </div>
+                    {showMissing ? (
+                      <div className="pack-account-ownership-flag">
+                        <p className="pack-account-ownership-warning">Doesn't own this pass</p>
+                        <button
+                          className="button compact"
+                          type="button"
+                          onClick={() => onIgnoreMissing(account.id)}
+                        >
+                          Ignore
+                        </button>
+                      </div>
+                    ) : null}
                     {account.rarityLabel || account.lastImportedAt ? (
                       <p className="pack-account-import-meta">
                         {account.rarityLabel ? account.rarityLabel : null}
@@ -214,7 +265,8 @@ function PackPassRow({
                       </p>
                     ) : null}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
@@ -225,7 +277,8 @@ function PackPassRow({
             <p className="import-hint plan-pass-status owned">Reached Iconic rating target.</p>
           ) : estimate.daysRemaining === null ? (
             <p className="import-hint plan-pass-status warning">
-              Enable “Opens packs” on at least one account to estimate days remaining.
+              No effective pack openers for estimates — enable “Opens packs” on an owned account, or
+              Ignore missing ownership.
             </p>
           ) : null}
         </div>
@@ -238,19 +291,28 @@ export default function PlanPacksPage() {
   const {
     data,
     upsertPackTracker,
+    trackAllUntrackedPlayerPacks,
+    updatePackTracker,
     addPackTrackerAccount,
     updatePackTrackerAccount,
     removePackTrackerAccount,
     applyPackRatingsFromImport,
+    addPackAccountTemplate,
+    updatePackAccountTemplate,
+    removePackAccountTemplate,
+    applyPackAccountTemplatesToTracked,
   } = useRaxData()
 
   const [syncBusyUsername, setSyncBusyUsername] = useState('')
   const [syncStatus, setSyncStatus] = useState('')
+  const [applyTemplatesStatus, setApplyTemplatesStatus] = useState('')
+  const [trackAllStatus, setTrackAllStatus] = useState('')
   const [importBusyKey, setImportBusyKey] = useState('')
   const [importStatusByPass, setImportStatusByPass] = useState<Record<string, string>>({})
 
   const plannedPasses = data.plannedPasses ?? []
   const packTrackers = data.packTrackers ?? []
+  const packAccountTemplates = data.packAccountTemplates ?? []
   const anyImportBusy = syncBusyUsername !== '' || importBusyKey !== ''
 
   const playerPasses = useMemo(
@@ -261,18 +323,23 @@ export default function PlanPacksPage() {
   const knownUsernames = useMemo(() => {
     const seen = new Set<string>()
     const list: string[] = []
+    const pushUsername = (raw: string) => {
+      if (!raw || /^account\s*\d*$/i.test(raw)) return
+      const key = raw.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      list.push(raw)
+    }
+    for (const template of packAccountTemplates) {
+      pushUsername(normalizePackUsername(template.username))
+    }
     for (const tracker of packTrackers) {
       for (const account of tracker.accounts) {
-        const raw = accountUsername(account)
-        if (!raw || /^account\s*\d*$/i.test(raw)) continue
-        const key = raw.toLowerCase()
-        if (seen.has(key)) continue
-        seen.add(key)
-        list.push(raw)
+        pushUsername(accountUsername(account))
       }
     }
     return list.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  }, [packTrackers])
+  }, [packAccountTemplates, packTrackers])
 
   const trackerByPassId = useMemo(() => {
     const map = new Map<string, PackTracker>()
@@ -324,6 +391,24 @@ export default function PlanPacksPage() {
     return { tracked, complete, soonest: soonest ?? null }
   }, [trackedEstimates])
 
+  const untrackedPlayerPasses = useMemo(
+    () => playerPasses.filter((pass) => !trackerByPassId.has(pass.id)),
+    [playerPasses, trackerByPassId],
+  )
+
+  const trackAllUntracked = () => {
+    if (untrackedPlayerPasses.length === 0) {
+      setTrackAllStatus('All planned player passes are already tracked.')
+      return
+    }
+    const result = trackAllUntrackedPlayerPacks()
+    setTrackAllStatus(
+      result.tracked > 0
+        ? `Started tracking ${result.tracked} player pass${result.tracked === 1 ? '' : 'es'}.`
+        : 'All planned player passes are already tracked.',
+    )
+  }
+
   const ratingsMapFromResult = (
     passes: Awaited<ReturnType<typeof fetchPackRatings>>['passes'],
   ) => {
@@ -369,6 +454,36 @@ export default function PlanPacksPage() {
     }
   }
 
+  const applySharedAccounts = () => {
+    if (packAccountTemplates.length === 0) {
+      setApplyTemplatesStatus('Add at least one shared account first.')
+      return
+    }
+    if (packTrackers.length === 0) {
+      setApplyTemplatesStatus('Track at least one player pack first, then apply.')
+      return
+    }
+    const result = applyPackAccountTemplatesToTracked()
+    if (result.trackersTouched === 0) {
+      setApplyTemplatesStatus('All tracked passes already have these shared accounts.')
+      return
+    }
+    const parts = [
+      `Updated ${result.trackersTouched} tracked pass${result.trackersTouched === 1 ? '' : 'es'}.`,
+    ]
+    if (result.accountsAdded > 0) {
+      parts.push(
+        `Added ${result.accountsAdded} account${result.accountsAdded === 1 ? '' : 's'}.`,
+      )
+    }
+    if (result.accountsUpdated > 0) {
+      parts.push(
+        `Updated ${result.accountsUpdated} existing row${result.accountsUpdated === 1 ? '' : 's'}.`,
+      )
+    }
+    setApplyTemplatesStatus(parts.join(' '))
+  }
+
   const importOneAccount = async (
     pass: PlannedPass,
     tracker: PackTracker,
@@ -394,6 +509,10 @@ export default function PlanPacksPage() {
       const ratingsByExternalKey = ratingsMapFromResult(result.passes)
       const match = ratingsByExternalKey[pass.externalKey]
       if (!match) {
+        applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+          plannedPassId: pass.id,
+          accountId: account.id,
+        })
         setImportStatusByPass((current) => ({
           ...current,
           [pass.id]: `@${result.username} does not own ${pass.name} (or rating was unavailable).`,
@@ -454,6 +573,9 @@ export default function PlanPacksPage() {
           const ratingsByExternalKey = ratingsMapFromResult(result.passes)
           if (!ratingsByExternalKey[pass.externalKey]) {
             missing += group.length
+            applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+              plannedPassId: pass.id,
+            })
             continue
           }
           for (const account of group) {
@@ -512,7 +634,7 @@ export default function PlanPacksPage() {
         </div>
         {knownUsernames.length === 0 ? (
           <p className="import-hint">
-            Add a Real username on an account row below, then sync from here.
+            Add a Real username on a shared account or pass row below, then sync from here.
           </p>
         ) : (
           <div className="button-row pack-sync-accounts">
@@ -533,6 +655,86 @@ export default function PlanPacksPage() {
         )}
         {syncStatus ? <p className="import-status">{syncStatus}</p> : null}
       </section>
+
+      <CollapsiblePanel
+        className="pack-shared-accounts-panel"
+        title="Shared accounts"
+        description="Define your Real accounts once. New “Track packs” rows seed from these, or apply them to every tracked pass without retyping."
+        defaultOpen={false}
+        badge={`${packAccountTemplates.length}`}
+        actions={
+          <>
+            <button className="button compact" type="button" onClick={() => addPackAccountTemplate()}>
+              Add shared account
+            </button>
+            <button
+              className="button compact"
+              type="button"
+              disabled={packAccountTemplates.length === 0 || packTrackers.length === 0}
+              onClick={applySharedAccounts}
+            >
+              Apply shared accounts to all tracked passes
+            </button>
+          </>
+        }
+      >
+        {packAccountTemplates.length === 0 ? (
+          <p className="import-hint">
+            No shared accounts yet. Add the accounts you open packs on, then apply to tracked
+            passes.
+          </p>
+        ) : (
+          <div className="pack-account-list">
+            {packAccountTemplates.map((template: PackAccountTemplate) => (
+              <div className="pack-account-row" key={template.id}>
+                <label className="pack-account-field pack-account-name">
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    value={template.name}
+                    onChange={(event) =>
+                      updatePackAccountTemplate(template.id, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="pack-account-field pack-account-username">
+                  <span>Real username</span>
+                  <input
+                    type="text"
+                    placeholder="@username"
+                    value={template.username}
+                    onChange={(event) =>
+                      updatePackAccountTemplate(template.id, { username: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="pack-opens-toggle">
+                  <input
+                    type="checkbox"
+                    checked={template.opensPacks}
+                    onChange={(event) =>
+                      updatePackAccountTemplate(template.id, {
+                        opensPacks: event.target.checked,
+                      })
+                    }
+                  />
+                  <span>Opens packs</span>
+                </label>
+                <div className="pack-account-actions">
+                  <button
+                    className="button danger compact"
+                    type="button"
+                    onClick={() => removePackAccountTemplate(template.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {applyTemplatesStatus ? <p className="import-status">{applyTemplatesStatus}</p> : null}
+      </CollapsiblePanel>
 
       <section className="stats-grid plan-summary-grid">
         <StatCard
@@ -560,7 +762,7 @@ export default function PlanPacksPage() {
         <CollapsiblePanel
           className="pack-finish-summary"
           title="Finish order"
-          description="Tracked passes sorted by soonest estimated Iconic date (assuming 10 rating/pack on opening accounts)."
+          description="Tracked passes sorted by soonest estimated Iconic date (using each pass’s rating/pack and opening accounts)."
           defaultOpen={false}
           badge={`${finishOrder.length}`}
         >
@@ -614,6 +816,26 @@ export default function PlanPacksPage() {
         </section>
       ) : (
         <section className="pack-tracker-list">
+          <div className="pack-tracker-list-header">
+            <div className="pack-sync-copy">
+              <h2>Planned players</h2>
+              <p className="table-sub">
+                {untrackedPlayerPasses.length === 0
+                  ? 'Every planned player pass is already tracked.'
+                  : `${untrackedPlayerPasses.length} pass${untrackedPlayerPasses.length === 1 ? '' : 'es'} not tracking yet — same seeding as “Track packs” (shared accounts when set).`}
+              </p>
+            </div>
+            <button
+              className="button compact"
+              type="button"
+              disabled={untrackedPlayerPasses.length === 0}
+              onClick={trackAllUntracked}
+            >
+              Track all
+              {untrackedPlayerPasses.length > 0 ? ` (${untrackedPlayerPasses.length})` : ''}
+            </button>
+          </div>
+          {trackAllStatus ? <p className="import-status">{trackAllStatus}</p> : null}
           {playerPasses.map((pass) => {
             const tracker = trackerByPassId.get(pass.id)
             const busyAll = importBusyKey === `${tracker?.id ?? ''}:all`
@@ -626,6 +848,10 @@ export default function PlanPacksPage() {
                 importBusyLabel={busyAll ? 'Importing…' : ''}
                 importStatus={importStatusByPass[pass.id] ?? ''}
                 onEnsureTracker={() => upsertPackTracker(pass.id)}
+                onUpdateRatingPerPack={(value) => {
+                  if (!tracker) return
+                  updatePackTracker(tracker.id, { ratingPerPack: value })
+                }}
                 onAddAccount={() => {
                   const id = tracker?.id ?? upsertPackTracker(pass.id)
                   if (id) addPackTrackerAccount(id)
@@ -637,6 +863,10 @@ export default function PlanPacksPage() {
                 onRemoveAccount={(accountId) => {
                   if (!tracker) return
                   removePackTrackerAccount(tracker.id, accountId)
+                }}
+                onIgnoreMissing={(accountId) => {
+                  if (!tracker) return
+                  updatePackTrackerAccount(tracker.id, accountId, { ignoredMissing: true })
                 }}
                 onImportAccount={(account) => {
                   if (!tracker) return

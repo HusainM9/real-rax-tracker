@@ -46,6 +46,7 @@ import type { CatalogImportProfile } from '../lib/catalogApi'
 import { applyCardRarityChange } from '../lib/cardRarity'
 import type {
   AppSettings,
+  PackAccountTemplate,
   PackTracker,
   PackTrackerAccount,
   PlayerCard,
@@ -59,6 +60,13 @@ import type {
 import type { CatalogSearchResult } from '../lib/catalogApi'
 import { plannedPassFromCatalogResult, type PlannedPassInput } from '../lib/plannedPasses'
 import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
+import {
+  accountsFromPackTemplates,
+  applyPackTemplatesToAccounts,
+  DEFAULT_PACK_RATING_INCREMENT,
+  normalizePackUsername,
+  normalizeRatingPerPack,
+} from '../lib/packTracker'
 
 type CardInput = Pick<
   PlayerCard,
@@ -106,16 +114,28 @@ type RaxDataContextValue = {
     source?: PlannedPass['source'],
   ) => string | null
   upsertPackTracker: (plannedPassId: string) => string
+  /** Start tracking every untracked planned player pass (same seeding as upsertPackTracker). */
+  trackAllUntrackedPlayerPacks: () => { tracked: number }
   updatePackTracker: (
     id: string,
-    patch: Partial<Pick<PackTracker, 'accounts'>>,
+    patch: Partial<Pick<PackTracker, 'accounts' | 'ratingPerPack'>>,
   ) => void
   addPackTrackerAccount: (trackerId: string, input?: Partial<PackTrackerAccount>) => string | null
   updatePackTrackerAccount: (
     trackerId: string,
     accountId: string,
     patch: Partial<
-      Pick<PackTrackerAccount, 'name' | 'rating' | 'opensPacks' | 'username' | 'rarityLabel' | 'lastImportedAt'>
+      Pick<
+        PackTrackerAccount,
+        | 'name'
+        | 'rating'
+        | 'opensPacks'
+        | 'username'
+        | 'rarityLabel'
+        | 'lastImportedAt'
+        | 'ownershipStatus'
+        | 'ignoredMissing'
+      >
     >,
   ) => void
   applyPackRatingsFromImport: (
@@ -124,6 +144,17 @@ type RaxDataContextValue = {
     options?: { plannedPassId?: string; accountId?: string; ensureAccounts?: boolean },
   ) => { updatedAccounts: number; missingPasses: number }
   removePackTrackerAccount: (trackerId: string, accountId: string) => void
+  addPackAccountTemplate: (input?: Partial<PackAccountTemplate>) => string
+  updatePackAccountTemplate: (
+    id: string,
+    patch: Partial<Pick<PackAccountTemplate, 'name' | 'username' | 'opensPacks'>>,
+  ) => void
+  removePackAccountTemplate: (id: string) => void
+  applyPackAccountTemplatesToTracked: () => {
+    trackersTouched: number
+    accountsAdded: number
+    accountsUpdated: number
+  }
   saveCardProfile: (cardId: string, rawJson?: string) => void
   restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
   deleteCardProfile: (profileId: string) => void
@@ -555,6 +586,18 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           const id = createId('pack')
           trackerId = id
           const stamp = nowIso()
+          const templates = current.packAccountTemplates ?? []
+          const accounts =
+            templates.length > 0
+              ? accountsFromPackTemplates(templates, createId)
+              : [
+                  {
+                    id: createId('pacc'),
+                    name: 'Account 1',
+                    rating: 0,
+                    opensPacks: true,
+                  },
+                ]
           return {
             ...current,
             packTrackers: [
@@ -562,14 +605,8 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               {
                 id,
                 plannedPassId,
-                accounts: [
-                  {
-                    id: createId('pacc'),
-                    name: 'Account 1',
-                    rating: 0,
-                    opensPacks: true,
-                  },
-                ],
+                accounts,
+                ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
                 createdAt: stamp,
                 updatedAt: stamp,
               },
@@ -578,6 +615,47 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         })
         return trackerId
       },
+      trackAllUntrackedPlayerPacks: () => {
+        let tracked = 0
+        setData((current) => {
+          const existingPassIds = new Set(
+            (current.packTrackers ?? []).map((tracker) => tracker.plannedPassId),
+          )
+          const templates = current.packAccountTemplates ?? []
+          const stamp = nowIso()
+          const additions: PackTracker[] = []
+          for (const pass of current.plannedPasses ?? []) {
+            if (pass.passKind === 'team') continue
+            if (existingPassIds.has(pass.id)) continue
+            const accounts =
+              templates.length > 0
+                ? accountsFromPackTemplates(templates, createId)
+                : [
+                    {
+                      id: createId('pacc'),
+                      name: 'Account 1',
+                      rating: 0,
+                      opensPacks: true,
+                    },
+                  ]
+            additions.push({
+              id: createId('pack'),
+              plannedPassId: pass.id,
+              accounts,
+              ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
+              createdAt: stamp,
+              updatedAt: stamp,
+            })
+          }
+          tracked = additions.length
+          if (additions.length === 0) return current
+          return {
+            ...current,
+            packTrackers: [...(current.packTrackers ?? []), ...additions],
+          }
+        })
+        return { tracked }
+      },
       updatePackTracker: (id, patch) => {
         setData((current) => ({
           ...current,
@@ -585,6 +663,10 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             if (tracker.id !== id) return tracker
             return {
               ...tracker,
+              ratingPerPack:
+                patch.ratingPerPack !== undefined
+                  ? normalizeRatingPerPack(patch.ratingPerPack)
+                  : tracker.ratingPerPack,
               accounts: patch.accounts !== undefined ? patch.accounts : tracker.accounts,
               updatedAt: nowIso(),
             }
@@ -600,6 +682,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             const id = createId('pacc')
             accountId = id
             const rating = Number(input?.rating)
+            const username = normalizePackUsername(input?.username)
             return {
               ...tracker,
               accounts: [
@@ -612,6 +695,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                       : `Account ${tracker.accounts.length + 1}`,
                   rating: Number.isFinite(rating) && rating > 0 ? Math.floor(rating) : 0,
                   opensPacks: input?.opensPacks !== false,
+                  username: username || undefined,
                 },
               ],
               updatedAt: nowIso(),
@@ -657,6 +741,14 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                     patch.lastImportedAt !== undefined
                       ? patch.lastImportedAt
                       : account.lastImportedAt,
+                  ownershipStatus:
+                    patch.ownershipStatus !== undefined
+                      ? patch.ownershipStatus
+                      : account.ownershipStatus,
+                  ignoredMissing:
+                    patch.ignoredMissing !== undefined
+                      ? patch.ignoredMissing || undefined
+                      : account.ignoredMissing,
                 }
               }),
               updatedAt: nowIso(),
@@ -712,18 +804,31 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                   opensPacks: true,
                   rarityLabel: imported.rarityLabel,
                   lastImportedAt: stamp,
+                  ownershipStatus: 'owned',
+                  ignoredMissing: undefined,
                 },
               ]
               updatedAccounts += 1
               return { ...tracker, accounts, updatedAt: stamp }
             }
 
+            const targetIds = new Set(matchingAccounts.map((account) => account.id))
+
             if (!imported) {
               missingPasses += matchingAccounts.length
-              return tracker
+              return {
+                ...tracker,
+                accounts: accounts.map((account) => {
+                  if (!targetIds.has(account.id)) return account
+                  return {
+                    ...account,
+                    ownershipStatus: 'missing' as const,
+                  }
+                }),
+                updatedAt: stamp,
+              }
             }
 
-            const targetIds = new Set(matchingAccounts.map((account) => account.id))
             return {
               ...tracker,
               accounts: accounts.map((account) => {
@@ -740,6 +845,8 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                   rating: imported.rating,
                   rarityLabel: imported.rarityLabel ?? account.rarityLabel,
                   lastImportedAt: stamp,
+                  ownershipStatus: 'owned' as const,
+                  ignoredMissing: undefined,
                 }
               }),
               updatedAt: stamp,
@@ -764,6 +871,96 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               : tracker,
           ),
         }))
+      },
+      addPackAccountTemplate: (input) => {
+        const id = createId('ptpl')
+        setData((current) => {
+          const templates = current.packAccountTemplates ?? []
+          const username = normalizePackUsername(input?.username)
+          return {
+            ...current,
+            packAccountTemplates: [
+              ...templates,
+              {
+                id,
+                name:
+                  typeof input?.name === 'string' && input.name.trim()
+                    ? input.name.trim()
+                    : `Account ${templates.length + 1}`,
+                username,
+                opensPacks: input?.opensPacks !== false,
+              },
+            ],
+          }
+        })
+        return id
+      },
+      updatePackAccountTemplate: (id, patch) => {
+        setData((current) => ({
+          ...current,
+          packAccountTemplates: (current.packAccountTemplates ?? []).map((template) => {
+            if (template.id !== id) return template
+            return {
+              ...template,
+              name:
+                patch.name !== undefined
+                  ? patch.name.trim() || template.name
+                  : template.name,
+              username:
+                patch.username !== undefined
+                  ? normalizePackUsername(patch.username)
+                  : template.username,
+              opensPacks:
+                patch.opensPacks !== undefined ? patch.opensPacks : template.opensPacks,
+            }
+          }),
+        }))
+      },
+      removePackAccountTemplate: (id) => {
+        setData((current) => ({
+          ...current,
+          packAccountTemplates: (current.packAccountTemplates ?? []).filter(
+            (template) => template.id !== id,
+          ),
+        }))
+      },
+      applyPackAccountTemplatesToTracked: () => {
+        let trackersTouched = 0
+        let accountsAdded = 0
+        let accountsUpdated = 0
+        setData((current) => {
+          trackersTouched = 0
+          accountsAdded = 0
+          accountsUpdated = 0
+          const templates = current.packAccountTemplates ?? []
+          if (templates.length === 0) return current
+
+          const playerPassIds = new Set(
+            (current.plannedPasses ?? [])
+              .filter((pass) => pass.passKind !== 'team')
+              .map((pass) => pass.id),
+          )
+          const stamp = nowIso()
+          let changed = false
+
+          const packTrackers = (current.packTrackers ?? []).map((tracker) => {
+            if (!playerPassIds.has(tracker.plannedPassId)) return tracker
+            const applied = applyPackTemplatesToAccounts(tracker.accounts, templates, createId)
+            if (applied.added === 0 && applied.updated === 0) return tracker
+            trackersTouched += 1
+            accountsAdded += applied.added
+            accountsUpdated += applied.updated
+            changed = true
+            return {
+              ...tracker,
+              accounts: applied.accounts,
+              updatedAt: stamp,
+            }
+          })
+
+          return changed ? { ...current, packTrackers } : current
+        })
+        return { trackersTouched, accountsAdded, accountsUpdated }
       },
       saveCardProfile: (cardId, rawJson) => {
         setData((current) => {

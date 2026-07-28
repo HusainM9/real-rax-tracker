@@ -21,13 +21,34 @@ const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'
 const MAX_COMPRESSED_PROFILE_BYTES = 4_000_000
 const MAX_UNCOMPRESSED_PROFILE_BYTES = 15_000_000
 
-const EMPTY_ACCOUNT_DATA = {
-  version: 1,
-  settings: {},
-  cards: [],
-  performances: [],
-  potentialCards: [],
-  savedCardProfiles: [],
+function emptyAccountDataForUsername(username: string) {
+  return {
+    version: 1,
+    settings: {
+      proBonusEnabled: true,
+      savedUsername: username,
+      importRarePasses: false,
+      importEpicPasses: false,
+    },
+    cards: [],
+    performances: [],
+    potentialCards: [],
+    savedCardProfiles: [],
+    cachedPlayerEarnings: [],
+    savedSellRankings: null,
+    plannedPasses: [],
+    packTrackers: [],
+    /** Seed one shared pack-account template so Packs / Admin account trackers start ready. */
+    packAccountTemplates: [
+      {
+        id: `ptpl-${username}`,
+        name: username,
+        username,
+        opensPacks: true,
+      },
+    ],
+    ignoredPassKeys: [],
+  }
 }
 
 function profileTooLargeError(input: {
@@ -164,7 +185,7 @@ export async function registerAccount(input: {
     return { ok: false, storageConfigured: true, alreadyExists: true }
   }
 
-  const encoded = await encodeAndAssertSize(EMPTY_ACCOUNT_DATA)
+  const encoded = await encodeAndAssertSize(emptyAccountDataForUsername(normalizedUsername))
   const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
   const updatedAt = new Date().toISOString()
   const stored: StoredTrackerProfile = {
@@ -582,6 +603,86 @@ export async function lookupTrackerProfileForAdmin(
       updatedAt: stored.updatedAt,
       cardCount: stored.cardCount,
       performanceCount: stored.performanceCount,
+    },
+    storageConfigured: true,
+  }
+}
+
+/** List every registered tracker account (no payload decode). */
+export async function listTrackerProfilesForAdmin(): Promise<{
+  profiles: TrackerProfileAdminSummary[]
+  storageConfigured: boolean
+}> {
+  if (!profileSyncConfigured()) {
+    return { profiles: [], storageConfigured: false }
+  }
+
+  const members = await kv.smembers(TRACKER_PROFILE_USERNAMES_KEY)
+  const usernames = (members ?? [])
+    .map((value) => normalizeRealUsername(String(value)))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+
+  const profiles: TrackerProfileAdminSummary[] = []
+  for (const username of usernames) {
+    const stored = await kv.get<StoredTrackerProfile | null>(profileKey(username))
+    if (!stored) continue
+    profiles.push({
+      username: stored.username,
+      updatedAt: stored.updatedAt,
+      cardCount: stored.cardCount,
+      performanceCount: stored.performanceCount,
+    })
+  }
+
+  return { profiles, storageConfigured: true }
+}
+
+export type TrackerProfilePackSnapshot = {
+  plannedPasses: unknown[]
+  packTrackers: unknown[]
+  packAccountTemplates: unknown[]
+}
+
+/** Decode an account’s pack-tracking slice for Admin account trackers. */
+export async function lookupTrackerProfilePacksForAdmin(
+  username: string,
+): Promise<{
+  profile: TrackerProfileAdminSummary | null
+  packs: TrackerProfilePackSnapshot | null
+  storageConfigured: boolean
+}> {
+  if (!profileSyncConfigured()) {
+    return { profile: null, packs: null, storageConfigured: false }
+  }
+
+  const normalizedUsername = normalizeRealUsername(username)
+  if (!normalizedUsername) {
+    return { profile: null, packs: null, storageConfigured: true }
+  }
+
+  const stored = await kv.get<StoredTrackerProfile | null>(profileKey(normalizedUsername))
+  if (!stored) {
+    return { profile: null, packs: null, storageConfigured: true }
+  }
+
+  const data = await decodeStoredProfilePayload(stored)
+  const record =
+    data && typeof data === 'object' ? (data as Record<string, unknown>) : ({} as Record<string, unknown>)
+
+  return {
+    profile: {
+      username: stored.username,
+      updatedAt: stored.updatedAt,
+      cardCount: stored.cardCount,
+      performanceCount: stored.performanceCount,
+    },
+    packs: {
+      plannedPasses: Array.isArray(record.plannedPasses) ? record.plannedPasses : [],
+      packTrackers: Array.isArray(record.packTrackers) ? record.packTrackers : [],
+      packAccountTemplates: Array.isArray(record.packAccountTemplates)
+        ? record.packAccountTemplates
+        : [],
     },
     storageConfigured: true,
   }
