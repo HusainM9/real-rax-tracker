@@ -269,3 +269,28 @@ export function summarizeAccountAcrossPacks(
     return a.passName.localeCompare(b.passName)
   })
 }
+
+export type RemoveFinishedPlannedPassResult = {
+  plannedPasses: PlannedPass[]
+  packTrackers: PackTracker[]
+}
+
+/**
+ * Mark a planned pass finished: drop it from Plan and remove any pack tracker
+ * linked by `plannedPassId` (not externalKey).
+ */
+export function removeFinishedPlannedPass(
+  plannedPasses: PlannedPass[],
+  packTrackers: PackTracker[],
+  plannedPassId: string,
+): RemoveFinishedPlannedPassResult {
+  return {
+    plannedPasses: plannedPasses.filter((pass) => pass.id !== plannedPassId),
+    packTrackers: packTrackers.filter((tracker) => tracker.plannedPassId !== plannedPassId),
+  }
+}
+
+export function formatMarkPackFinishedConfirmMessage(passName: string): string {
+  const label = passName.trim() || 'this pass'
+  return `Mark “${label}” as finished? This removes it from Packs and your purchase plan.`
+}
