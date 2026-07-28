@@ -1,0 +1,12 @@
+---
+description: Require a successful npm run build before any git commit, push, or merge
+alwaysApply: true
+---
+
+# Build before commit / push / merge
+
+Before any `git commit`, `git push`, or merge / PR merge:
+
+1. Run `npm run build` and confirm it exits **0**.
+2. If the build fails, **do not** commit, push, or merge — fix TypeScript and build errors first, then re-run the build.
+3. Only proceed with git publish steps after a clean build.
