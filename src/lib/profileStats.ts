@@ -1,6 +1,10 @@
 import { computeClaimDayResults, computeYearRollup } from './claimOptimizer'
 import { formatClaimDay } from './format'
+import { RARITY_TIERS } from './rarityFilter'
 import type { RaxTrackerData, Sport } from '../types/rax'
+
+/** Highest-first display order: Iconic → Mystic → Legendary → … */
+const PROFILE_RARITY_ORDER: readonly string[] = [...RARITY_TIERS].reverse()
 
 export type ProfileSportShare = {
   sport: Sport
@@ -158,7 +162,13 @@ export function buildProfileSnapshot(
       count,
       share: cardCount > 0 ? count / cardCount : 0,
     }))
-    .sort((a, b) => b.count - a.count)
+    .sort((a, b) => {
+      const aRank = PROFILE_RARITY_ORDER.indexOf(a.label)
+      const bRank = PROFILE_RARITY_ORDER.indexOf(b.label)
+      const aOrder = aRank === -1 ? PROFILE_RARITY_ORDER.length : aRank
+      const bOrder = bRank === -1 ? PROFILE_RARITY_ORDER.length : bRank
+      return aOrder - bOrder || b.count - a.count || a.label.localeCompare(b.label)
+    })
 
   const topCards: ProfileTopCard[] = [...rollup.cards]
     .sort((a, b) => b.totalClaimableRax - a.totalClaimableRax)

@@ -75,9 +75,43 @@ describe('buildProfileSnapshot', () => {
     expect(snapshot.cardCount).toBe(3)
     expect(snapshot.claimableRax).toBeGreaterThan(0)
     expect(snapshot.sports.some((row) => row.sport === 'NBA')).toBe(true)
-    expect(snapshot.rarities.some((row) => row.label === 'Iconic')).toBe(true)
+    expect(snapshot.rarities.map((row) => row.label)).toEqual([
+      'Iconic',
+      'Mystic',
+      'Legendary',
+    ])
     expect(snapshot.title.length).toBeGreaterThan(0)
     expect(snapshot.topCards[0]?.name).toBeTruthy()
+  })
+
+  it('includes every sport with cards, not a top-N slice', () => {
+    const base = sampleData()
+    const sports = ['NBA', 'MLB', 'NFL', 'NHL', 'Golf', 'FC', 'CFB', 'CBB', 'UFC'] as const
+    const data: RaxTrackerData = {
+      ...base,
+      cards: sports.map((sport, index) => ({
+        id: `c${index}`,
+        name: `Pass ${sport}`,
+        sport,
+        season: '2025',
+        notes: '',
+        rarityLabel: 'Legendary 1',
+        passKind: 'player' as const,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })),
+      performances: sports.map((_, index) => ({
+        id: `p${index}`,
+        cardId: `c${index}`,
+        claimDay: '01-15',
+        // Descending RAX so sort order is stable; NBA still last by claimable.
+        raxEarned: sports.length - index,
+        note: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })),
+    }
+    const snapshot = buildProfileSnapshot(data, 'nine-sports')
+    expect(snapshot.sports).toHaveLength(9)
+    expect(snapshot.sports.map((row) => row.sport).sort()).toEqual([...sports].sort())
   })
 
   it('handles an empty collection', () => {
