@@ -201,20 +201,47 @@ describe('importFromUsername', () => {
     }
   })
 
-  it('replaces performances for imported cards on re-import', async () => {
+  it('replaces the full collection on re-import and drops stale cards', async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = mockFetch as typeof fetch
 
     try {
       const first = await importFromUsername(createEmptyData(), 'testuser')
-      const second = await importFromUsername(first.data, 'testuser')
+      const withStaleCard = {
+        ...first.data,
+        cards: [
+          ...first.data.cards,
+          {
+            id: 'stale-card',
+            name: 'Stale Pass',
+            sport: 'NBA' as const,
+            season: '2025-26',
+            notes: 'Should be removed',
+            externalKey: 'stale|2026|NBA',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        performances: [
+          ...first.data.performances,
+          {
+            id: 'stale-perf',
+            cardId: 'stale-card',
+            claimDay: '01-01',
+            raxEarned: 99,
+            note: '',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      } as typeof first.data
+      const second = await importFromUsername(withStaleCard, 'testuser')
 
-      expect(second.result.cardsCreated).toBe(0)
-      expect(second.result.cardsUpdated).toBe(2)
+      expect(second.result.cardsCreated).toBe(2)
+      expect(second.result.cardsUpdated).toBe(0)
       expect(second.result.rowsImported).toBe(2)
-      expect(second.result.skipped).toBe(0)
       expect(second.data.cards).toHaveLength(2)
+      expect(second.data.cards.some((card) => card.id === 'stale-card')).toBe(false)
       expect(second.data.performances).toHaveLength(2)
+      expect(second.data.performances.some((row) => row.cardId === 'stale-card')).toBe(false)
     } finally {
       globalThis.fetch = originalFetch
     }

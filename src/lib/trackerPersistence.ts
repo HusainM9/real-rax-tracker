@@ -138,12 +138,12 @@ export function storageWarningMessage(result: StoragePersistResult): string {
   if (result.reason === 'quota' || (!result.localSaved && !result.idbSaved)) {
     return `Your collection (${sizeLabel}) could not be saved in this browser${
       result.reason === 'quota' ? ' — storage is full' : ''
-    }. Use Dashboard → Save to cloud with a sync PIN, or Export JSON. Safari Private Browsing also clears data when you close the window.`
+    }. Sign in so your collection can save to your account, or Export JSON from Dashboard. Safari Private Browsing also clears data when you close the window.`
   }
   if (!result.localSaved && result.idbSaved) {
     return ''
   }
-  return `Could not save your collection (${sizeLabel}). Export a JSON backup from Dashboard and set up cloud sync with a PIN.`
+  return `Could not save your collection (${sizeLabel}). Export a JSON backup from Dashboard and sign in so your account can keep a copy.`
 }
 
 export async function loadPersistedTrackerData(): Promise<StorageLoadResult> {

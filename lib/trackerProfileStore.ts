@@ -1,6 +1,10 @@
 import { kv } from '@vercel/kv'
 import { adminStorageConfigured } from './adminEventStore'
 import {
+  validateAccountPassword,
+  validateAccountUsername,
+} from './accountPasswordRules'
+import {
   decodeStoredProfilePayload,
   encodeStoredProfilePayload,
   encodedProfileByteLength,
@@ -10,15 +14,21 @@ import {
   trackerProfileJsonByteLength,
 } from './cloudSyncPayload'
 import { normalizeRealUsername } from './importOwnershipTypes'
-import { validateSyncPin } from './syncPinRules'
 import { hashSyncPassphrase } from './syncPassphrase'
 
 const PROFILE_PREFIX = 'rax:tracker-profile:'
 const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'
-/** Max gzip-compressed blob stored in KV (Upstash allows up to 100 MB). */
 const MAX_COMPRESSED_PROFILE_BYTES = 4_000_000
-/** Reject absurd payloads before compression work. */
 const MAX_UNCOMPRESSED_PROFILE_BYTES = 15_000_000
+
+const EMPTY_ACCOUNT_DATA = {
+  version: 1,
+  settings: {},
+  cards: [],
+  performances: [],
+  potentialCards: [],
+  savedCardProfiles: [],
+}
 
 function profileTooLargeError(input: {
   compressedBytes?: number
@@ -28,13 +38,13 @@ function profileTooLargeError(input: {
   if (input.compressedBytes !== undefined) {
     const usedKb = Math.ceil(input.compressedBytes / 1024)
     return new Error(
-      `Tracker profile is too large for cloud sync (${usedKb} KB compressed; limit ${limitKb} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
+      `Account data is too large (${usedKb} KB compressed; limit ${limitKb} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
     )
   }
 
   const usedKb = Math.ceil(input.uncompressedBytes / 1024)
   return new Error(
-    `Tracker profile is too large for cloud sync (${usedKb} KB uncompressed; limit ${Math.ceil(MAX_UNCOMPRESSED_PROFILE_BYTES / 1024)} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
+    `Account data is too large (${usedKb} KB uncompressed; limit ${Math.ceil(MAX_UNCOMPRESSED_PROFILE_BYTES / 1024)} KB). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.`,
   )
 }
 
@@ -47,8 +57,8 @@ export type TrackerProfileAdminSummary = {
 
 export type StoredTrackerProfile = {
   username: string
+  /** Password hash (legacy field name passphraseHash for KV compatibility). */
   passphraseHash: string
-  /** Legacy uncompressed payload — still read for older saves. */
   data?: unknown
   dataBlob?: string
   dataEncoding?: 'gzip-base64'
@@ -71,6 +81,10 @@ export function profileSyncConfigured(): boolean {
   return adminStorageConfigured()
 }
 
+export function accountsConfigured(): boolean {
+  return profileSyncConfigured()
+}
+
 export function validateTrackerProfileData(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
@@ -85,12 +99,244 @@ function profileMeta(data: unknown): Pick<StoredTrackerProfile, 'cardCount' | 'p
   }
 }
 
-function assertValidSyncPin(passphrase: string): string {
-  const validated = validateSyncPin(passphrase)
+function assertValidAccountPassword(password: string): string {
+  const validated = validateAccountPassword(password)
   if (!validated.ok) {
     throw new Error(validated.error)
   }
-  return validated.pin
+  return validated.password
+}
+
+function assertValidAccountUsername(username: string): string {
+  const validated = validateAccountUsername(username)
+  if (!validated.ok) {
+    throw new Error(validated.error)
+  }
+  return validated.username
+}
+
+async function encodeAndAssertSize(data: unknown): Promise<{
+  dataBlob: string
+  dataEncoding: 'gzip-base64'
+  counts: Pick<StoredTrackerProfile, 'cardCount' | 'performanceCount'>
+}> {
+  if (!validateTrackerProfileData(data)) {
+    throw new Error('Invalid tracker profile payload.')
+  }
+
+  const profileData = compactTrackerProfileForCloudSync(data)
+  const uncompressedBytes = trackerProfileJsonByteLength(profileData)
+  if (uncompressedBytes > MAX_UNCOMPRESSED_PROFILE_BYTES) {
+    throw profileTooLargeError({ uncompressedBytes })
+  }
+
+  const encoded = await encodeStoredProfilePayload(profileData)
+  const compressedBytes = encodedProfileByteLength(encoded.dataBlob)
+  if (compressedBytes > MAX_COMPRESSED_PROFILE_BYTES) {
+    throw profileTooLargeError({ compressedBytes, uncompressedBytes })
+  }
+
+  return {
+    dataBlob: encoded.dataBlob,
+    dataEncoding: encoded.dataEncoding,
+    counts: profileMeta(profileData),
+  }
+}
+
+export async function registerAccount(input: {
+  username: string
+  password: string
+}): Promise<{
+  ok: boolean
+  storageConfigured: boolean
+  alreadyExists: boolean
+  username?: string
+}> {
+  if (!accountsConfigured()) {
+    return { ok: false, storageConfigured: false, alreadyExists: false }
+  }
+
+  const normalizedUsername = assertValidAccountUsername(input.username)
+  const password = assertValidAccountPassword(input.password)
+  const key = profileKey(normalizedUsername)
+  const existing = await kv.get<StoredTrackerProfile | null>(key)
+  if (existing) {
+    return { ok: false, storageConfigured: true, alreadyExists: true }
+  }
+
+  const encoded = await encodeAndAssertSize(EMPTY_ACCOUNT_DATA)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
+  const updatedAt = new Date().toISOString()
+  const stored: StoredTrackerProfile = {
+    username: normalizedUsername,
+    passphraseHash,
+    dataBlob: encoded.dataBlob,
+    dataEncoding: encoded.dataEncoding,
+    updatedAt,
+    ...encoded.counts,
+  }
+
+  await kv.set(key, stored)
+  await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
+
+  return {
+    ok: true,
+    storageConfigured: true,
+    alreadyExists: false,
+    username: normalizedUsername,
+  }
+}
+
+export async function verifyAccountCredentials(
+  username: string,
+  password: string,
+): Promise<{
+  ok: boolean
+  storageConfigured: boolean
+  unauthorized: boolean
+  notFound: boolean
+  username?: string
+}> {
+  if (!accountsConfigured()) {
+    return { ok: false, storageConfigured: false, unauthorized: false, notFound: false }
+  }
+
+  let normalizedUsername: string
+  let validatedPassword: string
+  try {
+    normalizedUsername = assertValidAccountUsername(username)
+    validatedPassword = assertValidAccountPassword(password)
+  } catch {
+    return { ok: false, storageConfigured: true, unauthorized: true, notFound: false }
+  }
+
+  const stored = await kv.get<StoredTrackerProfile | null>(profileKey(normalizedUsername))
+  if (!stored) {
+    return { ok: false, storageConfigured: true, unauthorized: false, notFound: true }
+  }
+
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, validatedPassword)
+  if (stored.passphraseHash !== passphraseHash) {
+    return { ok: false, storageConfigured: true, unauthorized: true, notFound: false }
+  }
+
+  return {
+    ok: true,
+    storageConfigured: true,
+    unauthorized: false,
+    notFound: false,
+    username: normalizedUsername,
+  }
+}
+
+export async function getAccountProfileForSession(username: string): Promise<{
+  transfer: {
+    username: string
+    updatedAt: string
+    cardCount: number
+    performanceCount: number
+    data?: unknown
+    dataBlob?: string
+    dataEncoding?: 'gzip-base64'
+  } | null
+  storageConfigured: boolean
+  notFound: boolean
+}> {
+  if (!accountsConfigured()) {
+    return { transfer: null, storageConfigured: false, notFound: false }
+  }
+
+  const normalizedUsername = normalizeRealUsername(username)
+  if (!normalizedUsername) {
+    return { transfer: null, storageConfigured: true, notFound: true }
+  }
+
+  const stored = await kv.get<StoredTrackerProfile | null>(profileKey(normalizedUsername))
+  if (!stored) {
+    return { transfer: null, storageConfigured: true, notFound: true }
+  }
+
+  return {
+    transfer: {
+      username: stored.username,
+      updatedAt: stored.updatedAt,
+      cardCount: stored.cardCount,
+      performanceCount: stored.performanceCount,
+      data: stored.data,
+      dataBlob: stored.dataBlob,
+      dataEncoding: stored.dataEncoding,
+    },
+    storageConfigured: true,
+    notFound: false,
+  }
+}
+
+export async function saveAccountProfileForSession(input: {
+  username: string
+  data: unknown
+  ifUnmodifiedSince?: string
+}): Promise<{
+  ok: boolean
+  storageConfigured: boolean
+  notFound: boolean
+  conflict: boolean
+  meta?: TrackerProfileMeta
+  existingMeta?: TrackerProfileMeta
+}> {
+  if (!accountsConfigured()) {
+    return { ok: false, storageConfigured: false, notFound: false, conflict: false }
+  }
+
+  const normalizedUsername = normalizeRealUsername(input.username)
+  if (!normalizedUsername) {
+    return { ok: false, storageConfigured: true, notFound: true, conflict: false }
+  }
+
+  const key = profileKey(normalizedUsername)
+  const existing = await kv.get<StoredTrackerProfile | null>(key)
+  if (!existing) {
+    return { ok: false, storageConfigured: true, notFound: true, conflict: false }
+  }
+
+  if (input.ifUnmodifiedSince && existing.updatedAt !== input.ifUnmodifiedSince) {
+    return {
+      ok: false,
+      storageConfigured: true,
+      notFound: false,
+      conflict: true,
+      existingMeta: {
+        updatedAt: existing.updatedAt,
+        cardCount: existing.cardCount,
+        performanceCount: existing.performanceCount,
+      },
+    }
+  }
+
+  const encoded = await encodeAndAssertSize(input.data)
+  const updatedAt = new Date().toISOString()
+  const stored: StoredTrackerProfile = {
+    username: normalizedUsername,
+    passphraseHash: existing.passphraseHash,
+    dataBlob: encoded.dataBlob,
+    dataEncoding: encoded.dataEncoding,
+    updatedAt,
+    ...encoded.counts,
+  }
+
+  await kv.set(key, stored)
+  await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
+
+  return {
+    ok: true,
+    storageConfigured: true,
+    notFound: false,
+    conflict: false,
+    meta: {
+      updatedAt,
+      cardCount: encoded.counts.cardCount,
+      performanceCount: encoded.counts.performanceCount,
+    },
+  }
 }
 
 export async function getTrackerProfileMeta(
@@ -102,9 +348,9 @@ export async function getTrackerProfileMeta(
   }
 
   const normalizedUsername = normalizeRealUsername(username)
-  let pin: string
+  let password: string
   try {
-    pin = assertValidSyncPin(passphrase)
+    password = assertValidAccountPassword(passphrase)
   } catch (error) {
     if (!normalizedUsername) {
       return { meta: null, storageConfigured: true, unauthorized: true }
@@ -120,7 +366,7 @@ export async function getTrackerProfileMeta(
     return { meta: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
   if (stored.passphraseHash !== passphraseHash) {
     return { meta: null, storageConfigured: true, unauthorized: true }
   }
@@ -149,9 +395,9 @@ export async function getTrackerProfile(
   }
 
   const normalizedUsername = normalizeRealUsername(username)
-  let pin: string
+  let password: string
   try {
-    pin = assertValidSyncPin(passphrase)
+    password = assertValidAccountPassword(passphrase)
   } catch (error) {
     if (!normalizedUsername) {
       return { profile: null, storageConfigured: true, unauthorized: true }
@@ -167,7 +413,7 @@ export async function getTrackerProfile(
     return { profile: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
   if (stored.passphraseHash !== passphraseHash) {
     return { profile: null, storageConfigured: true, unauthorized: true }
   }
@@ -203,9 +449,9 @@ export async function getTrackerProfileTransfer(
   }
 
   const normalizedUsername = normalizeRealUsername(username)
-  let pin: string
+  let password: string
   try {
-    pin = assertValidSyncPin(passphrase)
+    password = assertValidAccountPassword(passphrase)
   } catch (error) {
     if (!normalizedUsername) {
       return { transfer: null, storageConfigured: true, unauthorized: true }
@@ -221,7 +467,7 @@ export async function getTrackerProfileTransfer(
     return { transfer: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
   if (stored.passphraseHash !== passphraseHash) {
     return { transfer: null, storageConfigured: true, unauthorized: true }
   }
@@ -263,42 +509,17 @@ export async function saveTrackerProfile(input: {
     return { ok: false, storageConfigured: true, unauthorized: true, conflict: false }
   }
 
-  let pin: string
-  try {
-    pin = assertValidSyncPin(input.passphrase)
-  } catch (error) {
-    throw error
-  }
-
-  if (!validateTrackerProfileData(input.data)) {
-    throw new Error('Invalid tracker profile payload.')
-  }
-
-  const profileData = compactTrackerProfileForCloudSync(input.data)
-  const uncompressedBytes = trackerProfileJsonByteLength(profileData)
-  if (uncompressedBytes > MAX_UNCOMPRESSED_PROFILE_BYTES) {
-    throw profileTooLargeError({ uncompressedBytes })
-  }
-
-  const encoded = await encodeStoredProfilePayload(profileData)
-  const compressedBytes = encodedProfileByteLength(encoded.dataBlob)
-  if (compressedBytes > MAX_COMPRESSED_PROFILE_BYTES) {
-    throw profileTooLargeError({ compressedBytes, uncompressedBytes })
-  }
-
+  const password = assertValidAccountPassword(input.passphrase)
+  const encoded = await encodeAndAssertSize(input.data)
   const key = profileKey(normalizedUsername)
   const existing = await kv.get<StoredTrackerProfile | null>(key)
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
 
   if (existing && existing.passphraseHash !== passphraseHash) {
     return { ok: false, storageConfigured: true, unauthorized: true, conflict: false }
   }
 
-  if (
-    input.ifUnmodifiedSince &&
-    existing &&
-    existing.updatedAt !== input.ifUnmodifiedSince
-  ) {
+  if (input.ifUnmodifiedSince && existing && existing.updatedAt !== input.ifUnmodifiedSince) {
     return {
       ok: false,
       storageConfigured: true,
@@ -313,14 +534,13 @@ export async function saveTrackerProfile(input: {
   }
 
   const updatedAt = new Date().toISOString()
-  const counts = profileMeta(profileData)
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
     passphraseHash,
     dataBlob: encoded.dataBlob,
     dataEncoding: encoded.dataEncoding,
     updatedAt,
-    ...counts,
+    ...encoded.counts,
   }
 
   await kv.set(key, stored)
@@ -333,8 +553,8 @@ export async function saveTrackerProfile(input: {
     conflict: false,
     meta: {
       updatedAt,
-      cardCount: counts.cardCount,
-      performanceCount: counts.performanceCount,
+      cardCount: encoded.counts.cardCount,
+      performanceCount: encoded.counts.performanceCount,
     },
   }
 }
@@ -367,6 +587,7 @@ export async function lookupTrackerProfileForAdmin(
   }
 }
 
+/** Admin password reset — keeps account data intact. */
 export async function adminResetTrackerProfilePin(
   username: string,
   newPassphrase: string,
@@ -380,19 +601,15 @@ export async function adminResetTrackerProfilePin(
     return { ok: false, notFound: false, storageConfigured: false }
   }
 
-  const normalizedUsername = normalizeRealUsername(username)
-  if (!normalizedUsername) {
-    throw new Error('Username is required.')
-  }
-
-  const pin = assertValidSyncPin(newPassphrase)
+  const normalizedUsername = assertValidAccountUsername(username)
+  const password = assertValidAccountPassword(newPassphrase)
   const key = profileKey(normalizedUsername)
   const existing = await kv.get<StoredTrackerProfile | null>(key)
   if (!existing) {
     return { ok: false, notFound: true, storageConfigured: true }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, pin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
   const updatedAt = new Date().toISOString()
   await kv.set(key, {
     ...existing,
@@ -451,15 +668,11 @@ export async function changeTrackerProfilePin(input: {
     return { ok: false, notFound: false, unauthorized: false, storageConfigured: false }
   }
 
-  const normalizedUsername = normalizeRealUsername(input.username)
-  if (!normalizedUsername) {
-    throw new Error('Username is required.')
-  }
-
-  const currentPin = assertValidSyncPin(input.currentPassphrase)
-  const newPin = assertValidSyncPin(input.newPassphrase)
-  if (currentPin === newPin) {
-    throw new Error('New sync PIN must be different from the current PIN.')
+  const normalizedUsername = assertValidAccountUsername(input.username)
+  const currentPassword = assertValidAccountPassword(input.currentPassphrase)
+  const newPassword = assertValidAccountPassword(input.newPassphrase)
+  if (currentPassword === newPassword) {
+    throw new Error('New password must be different from the current password.')
   }
 
   const key = profileKey(normalizedUsername)
@@ -468,12 +681,12 @@ export async function changeTrackerProfilePin(input: {
     return { ok: false, notFound: true, unauthorized: false, storageConfigured: true }
   }
 
-  const currentHash = await hashSyncPassphrase(normalizedUsername, currentPin)
+  const currentHash = await hashSyncPassphrase(normalizedUsername, currentPassword)
   if (existing.passphraseHash !== currentHash) {
     return { ok: false, notFound: false, unauthorized: true, storageConfigured: true }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, newPin)
+  const passphraseHash = await hashSyncPassphrase(normalizedUsername, newPassword)
   const updatedAt = new Date().toISOString()
   await kv.set(key, {
     ...existing,

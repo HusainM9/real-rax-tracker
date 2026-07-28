@@ -6,6 +6,10 @@ import {
   verifySessionToken,
 } from './lib/authCookie'
 import {
+  getAccountCookieName,
+  verifyAccountSessionToken,
+} from './lib/accountAuth'
+import {
   getAdminCookieName,
   verifyAdminSessionToken,
 } from './lib/adminAuth'
@@ -16,6 +20,16 @@ export const config = {
 
 function isPublicPath(pathname: string): boolean {
   return pathname === '/login' || pathname.startsWith('/api/auth/')
+}
+
+function isAccountAuthPath(pathname: string): boolean {
+  return (
+    pathname === '/account' ||
+    pathname === '/api/account/login' ||
+    pathname === '/api/account/register' ||
+    pathname === '/api/account/logout' ||
+    pathname === '/api/account/session'
+  )
 }
 
 function isAdminLoginPath(pathname: string): boolean {
@@ -41,7 +55,10 @@ function assetRefererAllowsLoginBundle(request: Request): boolean {
   try {
     const refUrl = new URL(referer)
     const reqUrl = new URL(request.url)
-    return refUrl.origin === reqUrl.origin && refUrl.pathname === '/login'
+    return (
+      refUrl.origin === reqUrl.origin &&
+      (refUrl.pathname === '/login' || refUrl.pathname === '/account')
+    )
   } catch {
     return false
   }
@@ -50,6 +67,12 @@ function assetRefererAllowsLoginBundle(request: Request): boolean {
 async function hasValidSession(request: Request): Promise<boolean> {
   const token = readCookie(request, getSessionCookieName())
   return verifySessionToken(token)
+}
+
+async function hasValidAccountSession(request: Request): Promise<boolean> {
+  const token = readCookie(request, getAccountCookieName())
+  const result = await verifyAccountSessionToken(token)
+  return result.ok
 }
 
 async function hasValidAdminSession(request: Request): Promise<boolean> {
@@ -66,7 +89,10 @@ export default async function middleware(request: Request) {
   const method = request.method.toUpperCase()
 
   if (pathname.startsWith('/assets/')) {
-    if ((await hasValidSession(request)) || assetRefererAllowsLoginBundle(request)) {
+    if (
+      (await hasValidSession(request)) ||
+      assetRefererAllowsLoginBundle(request)
+    ) {
       return next()
     }
     return new Response('Unauthorized', { status: 401 })
@@ -121,15 +147,38 @@ export default async function middleware(request: Request) {
     return next()
   }
 
-  if (appSession) {
+  // Account auth endpoints + page: need site session only
+  if (isAccountAuthPath(pathname)) {
+    if (!appSession) {
+      if (pathname.startsWith('/api/')) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('next', pathname)
+      return Response.redirect(loginUrl)
+    }
     return next()
   }
 
-  if (pathname.startsWith('/api/')) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!appSession) {
+    if (pathname.startsWith('/api/')) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('next', pathname)
+    return Response.redirect(loginUrl)
   }
 
-  const loginUrl = new URL('/login', request.url)
-  loginUrl.searchParams.set('next', pathname)
-  return Response.redirect(loginUrl)
+  // Site session present — require account session for app + account data APIs
+  const accountOk = await hasValidAccountSession(request)
+  if (!accountOk) {
+    if (pathname.startsWith('/api/')) {
+      return Response.json({ error: 'Account login required' }, { status: 401 })
+    }
+    const accountUrl = new URL('/account', request.url)
+    accountUrl.searchParams.set('next', pathname)
+    return Response.redirect(accountUrl)
+  }
+
+  return next()
 }

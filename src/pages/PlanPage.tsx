@@ -15,13 +15,39 @@ import {
 import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
 import { formatSignedRax } from '../lib/removeCardAnalysis'
+import { SPORTS, type Sport } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
+
+type PlanSortKey = 'soloNet' | 'planNet' | 'name' | 'sport' | 'added'
+type PassKindFilter = 'all' | 'player' | 'team'
 
 function signedRaxClass(value: number): string {
   if (value > 0) return 'sale-positive'
   if (value < 0) return 'sale-negative'
   return ''
+}
+
+function matchesPlanSearch(entry: PlannedPassCardAnalysis, query: string): boolean {
+  const trimmed = query.trim().toLowerCase()
+  if (!trimmed) return true
+  const { pass } = entry
+  const haystack = [
+    pass.name,
+    pass.sport,
+    pass.season,
+    pass.passKind,
+    pass.simulatedRarityLabel,
+    pass.source,
+    pass.notes,
+  ]
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(trimmed)
+}
+
+function soloNetValue(entry: PlannedPassCardAnalysis): number {
+  return entry.solo?.netClaimableDelta ?? Number.NEGATIVE_INFINITY
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -47,81 +73,68 @@ function PlanPassCard({
   const iconic1Total = plannedPassIconic1TotalRax(pass, entry.profile)
 
   return (
-    <article className="plan-pass-card panel">
-      <div className="plan-pass-card-header">
-        <div>
+    <article className="panel plan-pass-row">
+      <div className="plan-pass-row-main">
+        <div className="plan-pass-identity">
           <h3>{pass.name}</h3>
           <p className="plan-pass-meta">
             {pass.passKind === 'team' ? 'Team' : 'Player'} · {pass.sport} · {pass.season} ·{' '}
             {pass.simulatedRarityLabel}
           </p>
         </div>
+
+        {ownedAtIconic ? (
+          <p className="import-hint plan-pass-status owned">Already owned at Iconic 1+</p>
+        ) : missingProfile ? (
+          <p className="import-hint plan-pass-status warning">Catalog profile not loaded yet</p>
+        ) : missingRows ? (
+          <p className="import-hint plan-pass-status warning">No catalog earnings for this pass</p>
+        ) : solo ? (
+          <div className="plan-pass-row-stats">
+            <div className="plan-pass-primary">
+              <span>Solo net</span>
+              <strong className={signedRaxClass(solo.netClaimableDelta)}>
+                {formatSignedRax(displayRaxValue(solo.netClaimableDelta))}
+              </strong>
+              <small>{formatSignedRax(displayRaxValue(solo.netGuaranteedDelta))} guaranteed</small>
+            </div>
+            {marginalNet != null ? (
+              <div className="plan-pass-primary">
+                <span>In plan</span>
+                <strong className={signedRaxClass(marginalNet)}>
+                  {formatSignedRax(displayRaxValue(marginalNet))}
+                </strong>
+                <small>after overlap</small>
+              </div>
+            ) : null}
+            <div className="plan-pass-secondary">
+              <span>
+                Claimable {formatRax(displayRaxValue(solo.newClaimableRax))}
+                {solo.displacedRax > 0
+                  ? ` · displaces ${formatRax(displayRaxValue(solo.displacedRax))}`
+                  : ''}
+                {solo.overlapRax > 0
+                  ? ` · overlap ${formatRax(displayRaxValue(solo.overlapRax))}`
+                  : ''}
+              </span>
+              <span>
+                {pass.simulatedRarityLabel} {formatRax(displayRaxValue(iconic1Total))} · base{' '}
+                {formatRax(displayRaxValue(pass.totalBaseRax))}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="import-hint plan-pass-status warning">Could not analyze this pass</p>
+        )}
+      </div>
+
+      <div className="plan-pass-row-actions">
+        <Link className="link-button" to="/potential">
+          Analyze
+        </Link>
         <button className="button danger compact" type="button" onClick={onRemove}>
           Remove
         </button>
-      </div>
-
-      {ownedAtIconic ? (
-        <p className="import-hint plan-pass-status owned">Already in your collection at Iconic 1+</p>
-      ) : missingProfile ? (
-        <p className="import-hint plan-pass-status warning">Catalog profile not loaded yet</p>
-      ) : missingRows ? (
-        <p className="import-hint plan-pass-status warning">No catalog earnings rows for this pass</p>
-      ) : solo ? (
-        <div className="plan-pass-metrics">
-          <div className="plan-pass-metric highlight">
-            <span>Solo net gain</span>
-            <strong className={signedRaxClass(solo.netClaimableDelta)}>
-              {formatSignedRax(displayRaxValue(solo.netClaimableDelta))}
-            </strong>
-            <small>
-              {formatSignedRax(displayRaxValue(solo.netGuaranteedDelta))} guaranteed
-            </small>
-          </div>
-          {marginalNet != null ? (
-            <div className="plan-pass-metric">
-              <span>In full plan</span>
-              <strong className={signedRaxClass(marginalNet)}>
-                {formatSignedRax(displayRaxValue(marginalNet))}
-              </strong>
-              <small>marginal after overlap</small>
-            </div>
-          ) : null}
-          <div className="plan-pass-metric">
-            <span>Claimable</span>
-            <strong>{formatRax(displayRaxValue(solo.newClaimableRax))}</strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Displaced</span>
-            <strong>
-              {solo.displacedRax > 0
-                ? `−${formatRax(displayRaxValue(solo.displacedRax))}`
-                : '—'}
-            </strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Overlap</span>
-            <strong>{formatRax(displayRaxValue(solo.overlapRax))}</strong>
-          </div>
-          <div className="plan-pass-metric">
-            <span>Base RAX</span>
-            <strong>{formatRax(displayRaxValue(pass.totalBaseRax))}</strong>
-            <small>{pass.rowCount} row{pass.rowCount === 1 ? '' : 's'}</small>
-          </div>
-          <div className="plan-pass-metric">
-            <span>{pass.simulatedRarityLabel} total</span>
-            <strong>{formatRax(displayRaxValue(iconic1Total))}</strong>
-          </div>
-        </div>
-      ) : (
-        <p className="import-hint plan-pass-status warning">Could not analyze this pass</p>
-      )}
-
-      <div className="plan-pass-footer">
-        <span className="badge">{pass.source === 'ranking' ? 'From ranking' : 'Catalog'}</span>
-        <Link className="link-button" to="/potential">
-          Analyze in Potential
-        </Link>
       </div>
     </article>
   )
@@ -136,12 +149,28 @@ export default function PlanPage() {
   const [catalogStatus, setCatalogStatus] = useState('')
   const [defaultRarity, setDefaultRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [rarityByKey, setRarityByKey] = useState<Record<string, string>>({})
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sportFilter, setSportFilter] = useState<Sport | 'All'>('All')
+  const [seasonFilter, setSeasonFilter] = useState('All')
+  const [passKindFilter, setPassKindFilter] = useState<PassKindFilter>('all')
+  const [sortKey, setSortKey] = useState<PlanSortKey>('soloNet')
 
   const plannedPasses = data.plannedPasses ?? []
   const plannedExternalKeys = useMemo(
     () => new Set(plannedPasses.map((pass) => pass.externalKey)),
     [plannedPasses],
   )
+
+  const availableSeasons = useMemo(() => {
+    return [...new Set(plannedPasses.map((pass) => pass.season).filter(Boolean))].sort((a, b) =>
+      b.localeCompare(a),
+    )
+  }, [plannedPasses])
+
+  const availableSports = useMemo(() => {
+    const used = new Set(plannedPasses.map((pass) => pass.sport))
+    return SPORTS.filter((sport) => used.has(sport))
+  }, [plannedPasses])
 
   useEffect(() => {
     const keys = plannedPasses.map((pass) => pass.externalKey)
@@ -193,6 +222,39 @@ export default function PlanPage() {
     return map
   }, [analysis.bundle])
 
+  const filteredPasses = useMemo(() => {
+    const filtered = analysis.passes.filter((entry) => {
+      if (!matchesPlanSearch(entry, searchQuery)) return false
+      if (sportFilter !== 'All' && entry.pass.sport !== sportFilter) return false
+      if (seasonFilter !== 'All' && entry.pass.season !== seasonFilter) return false
+      if (passKindFilter !== 'all' && entry.pass.passKind !== passKindFilter) return false
+      return true
+    })
+
+    const sorted = [...filtered]
+    sorted.sort((a, b) => {
+      if (sortKey === 'name') return a.pass.name.localeCompare(b.pass.name)
+      if (sortKey === 'sport') {
+        const sportCmp = a.pass.sport.localeCompare(b.pass.sport)
+        return sportCmp !== 0 ? sportCmp : a.pass.name.localeCompare(b.pass.name)
+      }
+      if (sortKey === 'added') return b.pass.addedAt.localeCompare(a.pass.addedAt)
+      if (sortKey === 'planNet') {
+        const aVal = marginalByExternalKey.get(a.pass.externalKey) ?? soloNetValue(a)
+        const bVal = marginalByExternalKey.get(b.pass.externalKey) ?? soloNetValue(b)
+        return bVal - aVal
+      }
+      return soloNetValue(b) - soloNetValue(a)
+    })
+    return sorted
+  }, [analysis.passes, searchQuery, sportFilter, seasonFilter, passKindFilter, sortKey, marginalByExternalKey])
+
+  const filtersActive =
+    searchQuery.trim() !== '' ||
+    sportFilter !== 'All' ||
+    seasonFilter !== 'All' ||
+    passKindFilter !== 'all'
+
   const handleCatalogSelect = async (
     result: Parameters<typeof addPlannedPassFromCatalog>[0],
     rarityLabel: string,
@@ -227,7 +289,22 @@ export default function PlanPage() {
           <Link className="button" to="/entry">
             Add to collection
           </Link>
+          <Link className="button" to="/packs">
+            Track player packs
+          </Link>
         </div>
+      </section>
+
+      <section className="panel pack-plan-teaser">
+        <div>
+          <h2>Player packs</h2>
+          <p className="table-sub">
+            Import Real play ratings across accounts and track progress to Iconic (3,380).
+          </p>
+        </div>
+        <Link className="button" to="/packs">
+          Open pack tracker
+        </Link>
       </section>
 
       <section className="stats-grid plan-summary-grid">
@@ -244,12 +321,7 @@ export default function PlanPage() {
         <StatCard
           label="Plan net gain"
           value={formatSignedRax(displayRaxValue(analysis.combinedNetDelta))}
-          hint={`${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${plannedPasses.length} pass${plannedPasses.length === 1 ? '' : 'es'}`}
-        />
-        <StatCard
-          label="Active in plan"
-          value={String(analysis.activeProfiles.length)}
-          hint={`${plannedPasses.length - analysis.activeProfiles.length} skipped (owned or missing rows)`}
+          hint={`${analysis.activeProfiles.length} active · ${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed`}
         />
       </section>
 
@@ -303,15 +375,105 @@ export default function PlanPage() {
             </CollapsiblePanel>
           ) : null}
 
-          <section className="plan-pass-grid">
-            {analysis.passes.map((entry) => (
-              <PlanPassCard
-                key={entry.pass.id}
-                entry={entry}
-                marginalNet={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
-                onRemove={() => removePlannedPass(entry.pass.id)}
-              />
-            ))}
+          <section className="panel plan-filters">
+            <div className="sort-controls">
+              <label className="field inline-field rank-search-field">
+                <span>Search plan</span>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  placeholder="Player, sport, season…"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+              </label>
+              <label className="field inline-field">
+                <span>Sport</span>
+                <select
+                  value={sportFilter}
+                  onChange={(event) => setSportFilter(event.target.value as Sport | 'All')}
+                >
+                  <option value="All">All sports</option>
+                  {(availableSports.length > 0 ? availableSports : SPORTS).map((sport) => (
+                    <option key={sport} value={sport}>
+                      {sport}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field inline-field">
+                <span>Season</span>
+                <select
+                  value={seasonFilter}
+                  onChange={(event) => setSeasonFilter(event.target.value)}
+                >
+                  <option value="All">All seasons</option>
+                  {availableSeasons.map((season) => (
+                    <option key={season} value={season}>
+                      {season}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field inline-field">
+                <span>Type</span>
+                <select
+                  value={passKindFilter}
+                  onChange={(event) => setPassKindFilter(event.target.value as PassKindFilter)}
+                >
+                  <option value="all">All types</option>
+                  <option value="player">Player</option>
+                  <option value="team">Team</option>
+                </select>
+              </label>
+              <label className="field inline-field">
+                <span>Sort by</span>
+                <select
+                  value={sortKey}
+                  onChange={(event) => setSortKey(event.target.value as PlanSortKey)}
+                >
+                  <option value="soloNet">Solo net</option>
+                  <option value="planNet">In-plan net</option>
+                  <option value="name">Name</option>
+                  <option value="sport">Sport</option>
+                  <option value="added">Recently added</option>
+                </select>
+              </label>
+            </div>
+            <p className="table-sub plan-filter-count">
+              Showing {filteredPasses.length} of {analysis.passes.length}
+              {filtersActive ? (
+                <>
+                  {' · '}
+                  <button
+                    className="link-button"
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('')
+                      setSportFilter('All')
+                      setSeasonFilter('All')
+                      setPassKindFilter('all')
+                    }}
+                  >
+                    Clear filters
+                  </button>
+                </>
+              ) : null}
+            </p>
+          </section>
+
+          <section className="plan-pass-list">
+            {filteredPasses.length === 0 ? (
+              <p className="empty">No planned passes match the current search or filters.</p>
+            ) : (
+              filteredPasses.map((entry) => (
+                <PlanPassCard
+                  key={entry.pass.id}
+                  entry={entry}
+                  marginalNet={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
+                  onRemove={() => removePlannedPass(entry.pass.id)}
+                />
+              ))
+            )}
           </section>
         </>
       ) : (

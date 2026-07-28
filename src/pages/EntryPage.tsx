@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
-import { usernameImportDisabled, realappToolsShutdownLabel, testAdminCacheImportEnabled } from '../lib/importShutdown'
+import { usernameImportDisabled, realappToolsShutdownLabel } from '../lib/importShutdown'
 import { parseRealAppToolsRows } from '../lib/realAppToolsImport'
 import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
@@ -17,6 +17,7 @@ import {
   type FailedPlayerPassImport,
   type UsernameImportProgress,
 } from '../lib/usernameImport'
+import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -120,19 +121,19 @@ export default function EntryPage() {
     updatePerformance,
     deletePerformance,
     importFromUsername,
-    importFromAdminOwnership,
     saveCardProfile,
     restoreCardProfile,
     deleteCardProfile,
     importCatalogProfile,
     addPlannedPassFromCatalog,
   } = useRaxData()
+  const { username: accountUsername } = useAccountAuth()
   const [cardEntry, setCardEntry] = useState(() => emptyCardEntry(data.cards))
   const [cardEntryStatus, setCardEntryStatus] = useState('')
   const [profileStatus, setProfileStatus] = useState('')
   const cardEntryRef = useRef<HTMLFormElement>(null)
   const [usernameImport, setUsernameImport] = useState({
-    username: data.settings.savedUsername ?? '',
+    username: accountUsername || data.settings.savedUsername || '',
   })
   const [showHeavyTables, setShowHeavyTables] = useState(
     () => data.cards.length <= HEAVY_TABLE_THRESHOLD && data.performances.length <= HEAVY_TABLE_THRESHOLD,
@@ -144,7 +145,6 @@ export default function EntryPage() {
     null,
   )
   const [usernameImporting, setUsernameImporting] = useState(false)
-  const [adminSnapshotImporting, setAdminSnapshotImporting] = useState(false)
   const [usernameImportFailedPasses, setUsernameImportFailedPasses] = useState<
     FailedPlayerPassImport[]
   >([])
@@ -165,7 +165,6 @@ export default function EntryPage() {
 
   const cardsById = useMemo(() => new Map(data.cards.map((card) => [card.id, card])), [data.cards])
   const importDisabled = usernameImportDisabled()
-  const testingAdminCache = testAdminCacheImportEnabled()
 
   const sortedExistingCards = useMemo(
     () => [...data.cards].sort((a, b) => a.name.localeCompare(b.name)),
@@ -529,51 +528,6 @@ export default function EntryPage() {
     importAbortRef.current?.abort()
   }
 
-  const importFromAdminSnapshot = async () => {
-    const username = usernameImport.username.trim()
-    if (!username) return
-    setAdminSnapshotImporting(true)
-    setUsernameImportStatus('')
-    setUsernameImportProgress(null)
-    setUsernameImportFailedPasses([])
-    try {
-      const result = await importFromAdminOwnership(username, {
-        onProgress: setUsernameImportProgress,
-      })
-      const failedPlayerPasses = getFailedPlayerPasses(result)
-      setUsernameImportFailedPasses(failedPlayerPasses)
-      const skipNote =
-        result.passesSkipped > 0
-          ? ` · skipped ${result.passesSkipped} pass${result.passesSkipped === 1 ? '' : 'es'} below Legendary`
-          : ''
-      const raxNote =
-        result.rowsImported > 0
-          ? ` · ${result.rowsImported} RAX row${result.rowsImported === 1 ? '' : 's'} from admin snapshot (OTD adjusted from saved rarity)`
-          : ' · no RAX rows found in admin snapshot yet'
-      const issueNote =
-        failedPlayerPasses.length > 0
-          ? ` · ${failedPlayerPasses.length} player pass${failedPlayerPasses.length === 1 ? '' : 'es'} need manual follow-up`
-          : ''
-      setUsernameImportStatus(
-        `Imported ${result.passesFetched} Legendary+ pass${result.passesFetched === 1 ? '' : 'es'} from admin cached ownership (${result.cardsCreated} new card${result.cardsCreated === 1 ? '' : 's'}, ${result.cardsUpdated} updated)${raxNote}${skipNote}${issueNote}.`,
-      )
-      setCardsPage(1)
-      if (result.rowsImported >= HEAVY_TABLE_THRESHOLD) {
-        setShowHeavyTables(false)
-      }
-      setPerformancesPage(1)
-    } catch (error) {
-      setUsernameImportStatus(
-        error instanceof Error
-          ? error.message
-          : 'Could not import from admin cached ownership.',
-      )
-    } finally {
-      setAdminSnapshotImporting(false)
-      setUsernameImportProgress(null)
-    }
-  }
-
   const cardEntrySubmitLabel =
     cardEntry.mode === 'new'
       ? cardEntry.earningsInput === 'paste' && cardEntry.rawJson.trim()
@@ -678,9 +632,7 @@ export default function EntryPage() {
               / Meowbot — no Real API key needed.
             </p>
           </div>
-          <span className="badge">
-            {testingAdminCache ? 'Admin cache test' : importDisabled ? 'Closed' : 'Until shutdown'}
-          </span>
+          <span className="badge">{importDisabled ? 'Closed' : 'Until shutdown'}</span>
         </div>
         <div className="form-grid">
           <label className="field">
@@ -688,7 +640,7 @@ export default function EntryPage() {
             <input
               value={usernameImport.username}
               placeholder="yourname"
-              disabled={usernameImporting || adminSnapshotImporting}
+              disabled={usernameImporting}
               onChange={(event) =>
                 setUsernameImport((current) => ({ ...current, username: event.target.value }))
               }
@@ -696,46 +648,15 @@ export default function EntryPage() {
           </label>
         </div>
         <p className="import-hint">
-          Imports Legendary, Mystic, and Iconic passes into your collection, and caches any player
-          earnings it can fetch to speed up future manual Entry and Potential checks. Your username
-          is saved in this browser after a successful import.
+          Each import replaces your full collection (cards and earnings) with Legendary, Mystic, and
+          Iconic passes for that username. Data saves to your account after a successful import.
         </p>
         {importDisabled ? (
-          <>
-            <section className="panel import-hint" aria-labelledby="admin-cache-info-heading">
-              <h3 id="admin-cache-info-heading">Recovering from admin cache</h3>
-              <p>
-                If you never imported while Meowbot was online, use{' '}
-                <strong>Import from admin cached passes</strong> below with your Real @username.
-                Admin may have saved a full snapshot before shutdown.
-              </p>
-              <ul className="help-list">
-                <li>
-                  Data may <strong>not be up to date</strong> — it reflects what was saved when admin
-                  ran the import, not live Meowbot.
-                </li>
-                <li>
-                  Some RAX or pass values <strong>could be wrong</strong>. Treat totals as estimates
-                  until you verify against Real.
-                </li>
-                <li>
-                  Everything is tied to the <strong>Real @username</strong> admin used at import time
-                  (before Meowbot shut down). Use that exact username below — a different spelling
-                  will not find your snapshot.
-                </li>
-                <li>
-                  After importing, set up a <strong>cloud sync PIN</strong> on the{' '}
-                  <Link to="/dashboard">Dashboard</Link> using the same Real username so you can
-                  back up and restore your collection on other devices.
-                </li>
-              </ul>
-            </section>
-            <p className="import-status">
-              Automatic username import is closed. If admin did not import your username, search the{' '}
-              <a href="#catalog-search">shared catalog</a> above instead. Existing local data stays
-              in this browser — use Export JSON on Dashboard for backups.
-            </p>
-          </>
+          <p className="import-status">
+            Automatic username import is closed. Search the{' '}
+            <a href="#catalog-search">shared catalog</a> above or use Manual add instead. Your
+            collection stays on your account — use Export JSON on Dashboard for backups.
+          </p>
         ) : null}
         <div className="button-row">
           <button
@@ -743,23 +664,12 @@ export default function EntryPage() {
             type="submit"
             disabled={
               usernameImporting ||
-              adminSnapshotImporting ||
               importDisabled ||
               usernameImport.username.trim().length === 0
             }
           >
             {usernameImporting ? 'Importing…' : 'Import Legendary+ passes'}
           </button>
-          {importDisabled ? (
-            <button
-              className="button"
-              type="button"
-              disabled={usernameImporting || adminSnapshotImporting || usernameImport.username.trim().length === 0}
-              onClick={() => void importFromAdminSnapshot()}
-            >
-              {adminSnapshotImporting ? 'Importing cached passes…' : 'Import from admin cached passes'}
-            </button>
-          ) : null}
           {usernameImporting ? (
             <button className="button" type="button" onClick={cancelUsernameImport}>
               Cancel

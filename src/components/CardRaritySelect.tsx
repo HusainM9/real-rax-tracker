@@ -53,8 +53,7 @@ export default function CardRaritySelect({ card, onConfirmChange }: CardRaritySe
         >
           <p>
             This permanently updates the card&apos;s rarity and recalculates all earnings rows for
-            OTD multipliers. The new rarity is saved with your collection — including cloud sync and
-            JSON export.
+            OTD multipliers. The new rarity is saved to your account and with JSON export.
           </p>
         </ConfirmDialog>
       ) : null}

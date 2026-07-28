@@ -52,6 +52,7 @@ import {
   type PassRecommendationBundle,
   type RecommendationPassAdjustment,
   type RecommendationPassAdjustmentMode,
+  DEFAULT_EXCLUDED_CATALOG_SPORT_SEASONS,
   sportSeasonFilterKey,
   type PassRecommendationProgress,
   type PassRecommendationRow,
@@ -152,6 +153,14 @@ type ExcludedSportSeason = {
 
 function formatExcludedSportSeason(entry: ExcludedSportSeason): string {
   return `${entry.sport} · ${entry.seasonLabel}`
+}
+
+function defaultExcludedSportSeasons(): ExcludedSportSeason[] {
+  return DEFAULT_EXCLUDED_CATALOG_SPORT_SEASONS.map((entry) => ({
+    key: sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+    sport: entry.sport,
+    seasonLabel: entry.seasonLabel,
+  }))
 }
 
 const EMPTY_FORM = {
@@ -829,7 +838,9 @@ export default function PotentialPage() {
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
-  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>([])
+  const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>(
+    defaultExcludedSportSeasons,
+  )
   const [excludeFormSport, setExcludeFormSport] = useState<Sport>('NFL')
   const [excludeFormSeasonLabel, setExcludeFormSeasonLabel] = useState('')
   const [excludeFormSeasonOptions, setExcludeFormSeasonOptions] = useState<CatalogSportSeasonOption[]>([])

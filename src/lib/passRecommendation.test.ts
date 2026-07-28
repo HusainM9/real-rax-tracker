@@ -25,6 +25,7 @@ import {
   recommendationCapsForSports,
   resolveProfileForRecommendationAdjustment,
   sportSeasonFilterKey,
+  defaultExcludedSportSeasonKeys,
   selectSummariesForBulkFetch,
   shouldSkipRecommendationPass,
 } from './passRecommendation'
@@ -259,6 +260,38 @@ describe('passRecommendation', () => {
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2023-24'])).toBe(true)
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 }, ['NBA|2024-25'])).toBe(false)
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
+  })
+
+  it('defaults catalog ranking exclusions to NFL, NHL, and CBB 2022-23', () => {
+    expect(defaultExcludedSportSeasonKeys()).toEqual([
+      sportSeasonFilterKey('NFL', '2022-23'),
+      sportSeasonFilterKey('NHL', '2022-23'),
+      sportSeasonFilterKey('CBB', '2022-23'),
+    ])
+    expect(
+      passSeasonIncluded(
+        { sport: 'NFL', seasonLabel: '2022-23', seasonYear: 2022 },
+        defaultExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'NHL', seasonLabel: '2022-23', seasonYear: 2023 },
+        defaultExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'CBB', seasonLabel: '2022-23', seasonYear: 2023 },
+        defaultExcludedSportSeasonKeys(),
+      ),
+    ).toBe(false)
+    expect(
+      passSeasonIncluded(
+        { sport: 'NBA', seasonLabel: '2022-23', seasonYear: 2023 },
+        defaultExcludedSportSeasonKeys(),
+      ),
+    ).toBe(true)
   })
 
   it('filters NFL seasons independently when labels share a catalog year', () => {

@@ -215,8 +215,8 @@ export default function HelpPage() {
         <p>
           On the Cards or Entry page, use the rarity dropdown on a card after you merge or upgrade
           in Real. This updates the stored rarity and recalculates all earnings rows for OTD
-          multipliers. Changes save with your collection — cloud sync, JSON export, and local storage
-          all include the updated rarity and earnings.
+          multipliers. Changes save with your collection — saved to your account, JSON export, and
+          local storage all include the updated rarity and earnings.
         </p>
       </section>
 

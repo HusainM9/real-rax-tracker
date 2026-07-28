@@ -13,7 +13,7 @@ export default function LoginPage() {
   const nextPath =
     searchParams.get('next') ||
     (location.state as { from?: string } | null)?.from ||
-    '/'
+    '/account'
 
   if (status === 'loading') {
     return (

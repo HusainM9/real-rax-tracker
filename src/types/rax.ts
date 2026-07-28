@@ -139,6 +139,36 @@ export type PlannedPass = {
   addedAt: string
 }
 
+/** One account contributing rating toward Iconic for a planned player pack. */
+export type PackTrackerAccount = {
+  id: string
+  name: string
+  rating: number
+  /** Whether this account opens the daily player pack for this pass. */
+  opensPacks: boolean
+  /** Optional Real @username used to import live play rating. */
+  username?: string
+  /** Last rarity label seen from a Real import. */
+  rarityLabel?: string
+  lastImportedAt?: string
+}
+
+/**
+ * Tracks player-pack rating progress toward Iconic for a planned pass.
+ * Rating is sourced from Real imports (and optional manual edits) across named accounts.
+ */
+export type PackTracker = {
+  id: string
+  plannedPassId: string
+  accounts: PackTrackerAccount[]
+  /** @deprecated Kept for older saved data; estimates use the fixed minimum pack gain. */
+  ratingPerPack?: number
+  /** @deprecated Auto-increment removed — ratings come from Real import. */
+  lastAutoIncrementDay?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type AppSettings = {
   proBonusEnabled: boolean
   savedUsername: string
@@ -156,6 +186,7 @@ export type RaxTrackerData = {
   cachedPlayerEarnings?: CachedPlayerEarningsProfile[]
   savedSellRankings?: SavedSellRankings | null
   plannedPasses?: PlannedPass[]
+  packTrackers?: PackTracker[]
 }
 
 export type ClaimStatus = 'guaranteed' | 'pro-bonus' | 'overlap'

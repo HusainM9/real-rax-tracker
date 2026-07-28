@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import ImportShutdownNotice from './ImportShutdownNotice'
 import StorageWarningBanner from './StorageWarningBanner'
+import { useAccountAuth } from '../context/AccountAuthContext'
 import { useAuth } from '../context/AuthContext'
 
 const MOBILE_NAV_QUERY = '(max-width: 1024px)'
@@ -13,20 +14,28 @@ const links = [
   { to: '/overlaps', label: 'Overlaps' },
   { to: '/potential', label: 'Potential' },
   { to: '/plan', label: 'Plan' },
+  { to: '/packs', label: 'Packs' },
   { to: '/cards', label: 'Cards' },
   { to: '/sell', label: 'If sold' },
   { to: '/help', label: 'Help' },
 ]
 
 export default function Layout() {
-  const { logout, devBypass } = useAuth()
+  const { logout: siteLogout, devBypass } = useAuth()
+  const { username, logout: accountLogout, devBypass: accountDevBypass } = useAccountAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
 
   const signOut = async () => {
-    await logout()
+    await accountLogout()
+    await siteLogout()
     navigate('/login', { replace: true })
+  }
+
+  const signOutAccount = async () => {
+    await accountLogout()
+    navigate('/account', { replace: true })
   }
 
   useEffect(() => {
@@ -125,14 +134,31 @@ export default function Layout() {
 
       <footer className="site-footer">
         <p>
-          Data stays in your browser unless you export a backup. Not affiliated with Real Sports
-          or Meowbot.
+          {username ? (
+            <>
+              Signed in as <strong>@{username}</strong>. Collection saves to your account.
+            </>
+          ) : (
+            <>Collection saves to your account.</>
+          )}{' '}
+          Not affiliated with Real Sports or Meowbot.
         </p>
-        {!devBypass ? (
-          <button className="button auth-sign-out" type="button" onClick={() => void signOut()}>
-            Sign out
-          </button>
-        ) : null}
+        <div className="footer-actions">
+          {!accountDevBypass ? (
+            <button
+              className="button auth-sign-out"
+              type="button"
+              onClick={() => void signOutAccount()}
+            >
+              Switch account
+            </button>
+          ) : null}
+          {!devBypass ? (
+            <button className="button auth-sign-out" type="button" onClick={() => void signOut()}>
+              Sign out
+            </button>
+          ) : null}
+        </div>
       </footer>
     </div>
   )

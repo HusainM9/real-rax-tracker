@@ -399,6 +399,16 @@ function isLegendaryPlusSnapshotPass(
   )
 }
 
+function baseForFullCollectionReplace(current: RaxTrackerData): RaxTrackerData {
+  return {
+    ...current,
+    cards: [],
+    performances: [],
+    cachedPlayerEarnings: [],
+    savedCardProfiles: [],
+  }
+}
+
 function upsertCards(
   current: RaxTrackerData,
   drafts: CardDraft[],
@@ -638,7 +648,7 @@ export async function importFromUsername(
   })
 
   const { data: withCards, cardsCreated, cardsUpdated, cardIdByExternalKey } = upsertCards(
-    current,
+    baseForFullCollectionReplace(current),
     cardDrafts,
   )
 

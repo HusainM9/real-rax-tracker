@@ -384,6 +384,16 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
   adjustments?: RecommendationPassAdjustment[]
 }
 
+/** Sport+season pairs auto-excluded from catalog ranking until the user removes them. */
+export const DEFAULT_EXCLUDED_CATALOG_SPORT_SEASONS: ReadonlyArray<{
+  sport: Sport
+  seasonLabel: string
+}> = [
+  { sport: 'NFL', seasonLabel: '2022-23' },
+  { sport: 'NHL', seasonLabel: '2022-23' },
+  { sport: 'CBB', seasonLabel: '2022-23' },
+]
+
 export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: number }): string {
   const label = item.seasonLabel.trim()
   return label || String(item.seasonYear)
@@ -391,6 +401,12 @@ export function seasonLabelForFilter(item: { seasonLabel: string; seasonYear: nu
 
 export function sportSeasonFilterKey(sport: Sport, seasonLabel: string): string {
   return `${sport}|${seasonLabel}`
+}
+
+export function defaultExcludedSportSeasonKeys(): string[] {
+  return DEFAULT_EXCLUDED_CATALOG_SPORT_SEASONS.map((entry) =>
+    sportSeasonFilterKey(entry.sport, entry.seasonLabel),
+  )
 }
 
 export function passSeasonIncluded(
