@@ -224,6 +224,11 @@ export type RaxTrackerData = {
    * Persisted with the plan; never removes cards from the collection.
    */
   planSoldCardIds?: string[]
+  /**
+   * Owned card ids omitted from If sold rankings / sell analysis baselines.
+   * Persisted with the account; never removes cards from the collection.
+   */
+  sellExcludedCardIds?: string[]
   packTrackers?: PackTracker[]
   /** Shared accounts reused when seeding / applying across pack trackers. */
   packAccountTemplates?: PackAccountTemplate[]

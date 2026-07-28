@@ -23,6 +23,10 @@ import {
   sortSellRankRows,
   type SellRankSortKey,
 } from '../lib/sellRankings'
+import {
+  isCardSellExcluded,
+  listSellExcludedCards,
+} from '../lib/sellExcludedPasses'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
 
@@ -61,7 +65,8 @@ function matchesCardSearch(
 }
 
 export default function SellPage() {
-  const { data, saveSellRankings, clearSellRankings, removeCardFromCollection } = useRaxData()
+  const { data, saveSellRankings, clearSellRankings, removeCardFromCollection, toggleSellExcludedCard } =
+    useRaxData()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedCardId = searchParams.get('card') ?? ''
   const [salePrice, setSalePrice] = useState('')
@@ -80,6 +85,11 @@ export default function SellPage() {
   const rankAbortRef = useRef<AbortController | null>(null)
 
   const savedRankings = data.savedSellRankings
+  const sellExcludedIds = useMemo(
+    () => new Set(data.sellExcludedCardIds ?? []),
+    [data.sellExcludedCardIds],
+  )
+  const excludedCards = useMemo(() => listSellExcludedCards(data), [data])
 
   const rollup = useMemo(() => {
     const results = computeClaimDayResults(data)
@@ -87,8 +97,11 @@ export default function SellPage() {
   }, [data])
 
   const playerCards = useMemo(
-    () => rollup.cards.filter((row) => isPlayerPassForSell(row.card)),
-    [rollup.cards],
+    () =>
+      rollup.cards.filter(
+        (row) => isPlayerPassForSell(row.card) && !sellExcludedIds.has(row.card.id),
+      ),
+    [rollup.cards, sellExcludedIds],
   )
 
   const sortedCards = useMemo(
@@ -124,12 +137,17 @@ export default function SellPage() {
     [selectedCardId, sortedCards],
   )
 
+  const selectedIsExcluded = isCardSellExcluded(data, selectedCardId)
+
   const sellAnalysis = useMemo(
     () =>
-      selectedCardId && selectedCard && isPlayerPassForSell(selectedCard)
+      selectedCardId &&
+      selectedCard &&
+      isPlayerPassForSell(selectedCard) &&
+      !selectedIsExcluded
         ? analyzeRemovedCard(data, selectedCardId)
         : null,
-    [data, selectedCard, selectedCardId],
+    [data, selectedCard, selectedCardId, selectedIsExcluded],
   )
 
   const parsedSalePrice = Number(salePrice.replace(/,/g, ''))
@@ -215,13 +233,21 @@ export default function SellPage() {
   const displayedRankings = useMemo(() => {
     if (!savedRankings) return []
     const filtered = filterSellRankRows(
-      savedRankings.rows,
+      savedRankings.rows.filter((row) => !sellExcludedIds.has(row.cardId)),
       rankSportFilter,
       rankRarityFilter,
       rankQuery,
     )
     return sortSellRankRows(filtered, rankSortKey, rankSortDirection)
-  }, [rankQuery, rankRarityFilter, rankSortDirection, rankSortKey, rankSportFilter, savedRankings])
+  }, [
+    rankQuery,
+    rankRarityFilter,
+    rankSortDirection,
+    rankSortKey,
+    rankSportFilter,
+    savedRankings,
+    sellExcludedIds,
+  ])
 
   useEffect(() => {
     setRankResultsPage(1)
@@ -522,20 +548,29 @@ export default function SellPage() {
                             ) : null}
                           </td>
                           <td>
-                            <button
-                              className="button danger compact"
-                              type="button"
-                              onClick={() =>
-                                handleRemoveFromCollection({
-                                  id: row.cardId,
-                                  name: row.name,
-                                  sport: row.sport,
-                                  season: row.season,
-                                })
-                              }
-                            >
-                              Remove
-                            </button>
+                            <span className="button-row compact-actions">
+                              <button
+                                className="button compact"
+                                type="button"
+                                onClick={() => toggleSellExcludedCard(row.cardId)}
+                              >
+                                Exclude
+                              </button>
+                              <button
+                                className="button danger compact"
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveFromCollection({
+                                    id: row.cardId,
+                                    name: row.name,
+                                    sport: row.sport,
+                                    season: row.season,
+                                  })
+                                }
+                              >
+                                Remove
+                              </button>
+                            </span>
                           </td>
                         </tr>
                       ))}
@@ -573,6 +608,56 @@ export default function SellPage() {
           <p className="empty">Click calculate to rank passes with earnings by net claimable if sold.</p>
         )}
       </CollapsiblePanel>
+
+      {excludedCards.length > 0 ? (
+        <CollapsiblePanel
+          title="Excluded"
+          description="Omitted from rankings and sale analysis."
+          badge={`${excludedCards.length}`}
+          defaultOpen={false}
+        >
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Player pass</th>
+                  <th>Sport</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {excludedCards.map((card) => (
+                  <tr key={card.id}>
+                    <td>
+                      <button
+                        className="link-button"
+                        type="button"
+                        onClick={() => selectCard(card.id)}
+                      >
+                        {card.name || 'Unnamed pass'}
+                      </button>
+                      <small className="table-sub">
+                        {card.season || 'No season'}
+                        {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                      </small>
+                    </td>
+                    <td>{card.sport}</td>
+                    <td>
+                      <button
+                        className="button compact"
+                        type="button"
+                        onClick={() => toggleSellExcludedCard(card.id)}
+                      >
+                        Include
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CollapsiblePanel>
+      ) : null}
 
       <CollapsiblePanel
         title="Choose a pass"
@@ -636,6 +721,30 @@ export default function SellPage() {
             Team passes are excluded from If sold. Pick a player pass above to analyze a sale.
           </p>
         </section>
+      ) : selectedIsExcluded && selectedCard ? (
+        <CollapsiblePanel
+          title={selectedCard.name || 'Unnamed pass'}
+          description={`${selectedCard.sport} · ${selectedCard.season || 'No season'}${selectedCard.rarityLabel ? ` · ${selectedCard.rarityLabel}` : ''}`}
+          badge="Excluded"
+          defaultOpen
+        >
+          <div className="button-row">
+            <button
+              className="button"
+              type="button"
+              onClick={() => toggleSellExcludedCard(selectedCard.id)}
+            >
+              Include
+            </button>
+            <button
+              className="button danger"
+              type="button"
+              onClick={() => handleRemoveFromCollection(selectedCard)}
+            >
+              Remove from collection
+            </button>
+          </div>
+        </CollapsiblePanel>
       ) : !sellAnalysis ? (
         <section className="panel">
           <p className="empty">Could not analyze that card.</p>
@@ -796,6 +905,13 @@ export default function SellPage() {
             <p className="empty">No other cards would gain claimable RAX if you sold this pass.</p>
           )}
           <div className="button-row">
+            <button
+              className="button"
+              type="button"
+              onClick={() => toggleSellExcludedCard(sellAnalysis.card.id)}
+            >
+              Exclude
+            </button>
             <button
               className="button danger"
               type="button"

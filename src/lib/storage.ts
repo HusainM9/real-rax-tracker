@@ -39,6 +39,7 @@ export function createEmptyData(): RaxTrackerData {
     savedSellRankings: null,
     plannedPasses: [],
     planSoldCardIds: [],
+    sellExcludedCardIds: [],
     packTrackers: [],
     packAccountTemplates: [],
     ignoredPassKeys: [],
@@ -458,6 +459,7 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .filter((pass): pass is PlannedPass => pass !== null)
       : [],
     planSoldCardIds: hydratePlanSoldCardIds(value.planSoldCardIds, validCardIds),
+    sellExcludedCardIds: hydratePlanSoldCardIds(value.sellExcludedCardIds, validCardIds),
     packTrackers: Array.isArray(value.packTrackers)
       ? value.packTrackers
           .map(hydratePackTracker)

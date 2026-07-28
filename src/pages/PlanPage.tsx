@@ -324,9 +324,15 @@ export default function PlanPage() {
   }, [sellableCards, soldFilter])
 
   const planBaselineData = useMemo(
-    () => withoutCards(data, soldCardIds),
+    () => withoutCards(data, [...soldCardIds, ...(data.sellExcludedCardIds ?? [])]),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sold fingerprint + collection slices below
-    [data.cards, data.performances, data.settings.proBonusEnabled, soldCardIdsFingerprint],
+    [
+      data.cards,
+      data.performances,
+      data.settings.proBonusEnabled,
+      soldCardIdsFingerprint,
+      data.sellExcludedCardIds,
+    ],
   )
 
   const unsoldClaimable = useMemo(() => {
