@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { CatalogImportProfile } from './catalogApi'
 import {
   analyzePlanCollection,
+  applyPackEtaToPlannedPasses,
   plannedPassFromOwnedCard,
   plannedPassSimulatedTotalRax,
+  planProgressFromPackDaysRemaining,
 } from './plannedPasses'
+import { DEFAULT_PACK_RATING_INCREMENT } from './packTracker'
+import { withoutCards } from './removeCardAnalysis'
 import {
   analyzeCatalogBundleImpacts,
   analyzeCatalogBundleImpactsAtProfileRarities,
@@ -13,7 +17,7 @@ import {
   profileAtSimulatedRarity,
   RECOMMENDATION_SIMULATED_RARITY,
 } from './passRecommendation'
-import type { PlannedPass, PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
+import type { PackTracker, PlannedPass, PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
 
 function card(
   id: string,
@@ -307,5 +311,98 @@ describe('plannedPasses', () => {
     expect(analysis.passes[0]?.ownedAtIconic).toBe(true)
     expect(analysis.activeProfiles).toHaveLength(0)
     expect(analysis.bundle).toBeNull()
+  })
+
+  it('scores plan nets against an if-sold collection baseline', () => {
+    const owned = card('c-owned', 'Owned Star', '50|2025|NBA', 'Legendary 1')
+    const data: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [owned],
+      performances: [{ ...perf('p1', 'c-owned', 20, '2026-03-01'), baseRaxEarned: 1 }],
+      potentialCards: [],
+      savedCardProfiles: [],
+      plannedPasses: [],
+    }
+    const profile = catalogProfile('50|2025|NBA', 'Owned Star', [
+      { claimDay: '2026-03-01', baseRaxEarned: 1 },
+    ])
+    const passes = [
+      plannedPass({
+        id: 'plan-owned',
+        externalKey: '50|2025|NBA',
+        name: 'Owned Star',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+        source: 'manual',
+      }),
+    ]
+    const profilesByKey = new Map([[profile.externalKey, profile]])
+
+    const asUpgrade = analyzePlanCollection(data, passes, profilesByKey)
+    const ifSold = analyzePlanCollection(withoutCards(data, ['c-owned']), passes, profilesByKey)
+
+    expect(asUpgrade.passes[0]?.ownedBelowIconic).toBe(true)
+    expect(ifSold.passes[0]?.ownedBelowIconic).toBe(false)
+    expect(ifSold.currentClaimable).toBeLessThan(asUpgrade.currentClaimable)
+    expect(ifSold.combinedNetDelta).not.toBe(asUpgrade.combinedNetDelta)
+    expect(ifSold.withPlanClaimable).toBeGreaterThan(ifSold.currentClaimable)
+  })
+
+  it('maps pack days-until-Iconic onto Plan tags (Just started stays manual)', () => {
+    expect(planProgressFromPackDaysRemaining(null)).toBeNull()
+    expect(planProgressFromPackDaysRemaining(0)).toBeNull()
+    expect(planProgressFromPackDaysRemaining(1)).toBe('nearly-finished')
+    expect(planProgressFromPackDaysRemaining(7)).toBe('nearly-finished')
+    expect(planProgressFromPackDaysRemaining(8)).toBe('on-the-way')
+    expect(planProgressFromPackDaysRemaining(31)).toBe('on-the-way')
+    expect(planProgressFromPackDaysRemaining(32)).toBe('future')
+  })
+
+  it('applies pack ETA tags onto planned passes without writing Just started', () => {
+    const nearTracker: PackTracker = {
+      id: 'pack_near',
+      plannedPassId: 'plan-near',
+      accounts: [{ id: 'a1', name: 'Main', rating: 3320, opensPacks: true }],
+      ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    }
+    const farTracker: PackTracker = {
+      id: 'pack_far',
+      plannedPassId: 'plan-far',
+      accounts: [{ id: 'a2', name: 'Main', rating: 100, opensPacks: true }],
+      ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    }
+    const noEtaTracker: PackTracker = {
+      id: 'pack_idle',
+      plannedPassId: 'plan-idle',
+      accounts: [{ id: 'a3', name: 'Main', rating: 100, opensPacks: false }],
+      ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    }
+
+    const passes = [
+      plannedPass({ id: 'plan-near', externalKey: '1|2025|NBA', name: 'Near' }),
+      plannedPass({ id: 'plan-far', externalKey: '2|2025|NBA', name: 'Far' }),
+      plannedPass({
+        id: 'plan-idle',
+        externalKey: '3|2025|NBA',
+        name: 'Idle',
+        progress: 'just-started',
+      }),
+    ]
+
+    const { plannedPasses: next, changed } = applyPackEtaToPlannedPasses(passes, [
+      nearTracker,
+      farTracker,
+      noEtaTracker,
+    ])
+    expect(changed).toBe(true)
+    expect(next.find((pass) => pass.id === 'plan-near')?.progress).toBe('nearly-finished')
+    expect(next.find((pass) => pass.id === 'plan-far')?.progress).toBe('future')
+    expect(next.find((pass) => pass.id === 'plan-idle')?.progress).toBe('just-started')
   })
 })

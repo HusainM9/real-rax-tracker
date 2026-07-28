@@ -5,10 +5,12 @@ import CollapsiblePanel from '../components/CollapsiblePanel'
 import { useRaxData } from '../context/RaxDataContext'
 import type { CatalogImportProfile } from '../lib/catalogApi'
 import { fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
+import { computeYearRollup } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
-import { isPlayerPass } from '../lib/passKind'
+import { isPlayerPass, isPlayerPassForSell } from '../lib/passKind'
 import {
   analyzePlanCollection,
+  applyPackEtaToPlannedPasses,
   normalizePlannedPassProgress,
   PLANNED_PASS_PROGRESS_OPTIONS,
   plannedPassFromOwnedCard,
@@ -23,7 +25,7 @@ import {
 } from '../lib/passRecommendation'
 import { isLegendaryPlusRarity } from '../lib/rarityFilter'
 import { RARITY_PREVIEW_OPTIONS } from '../lib/effectiveRax'
-import { formatSignedRax } from '../lib/removeCardAnalysis'
+import { formatSignedRax, withoutCards } from '../lib/removeCardAnalysis'
 import type { PlannedPassProgress, PlayerCard } from '../types/rax'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
@@ -149,8 +151,13 @@ function PlanPassCard({
 }
 
 export default function PlanPage() {
-  const { data, addPlannedPass, addPlannedPassFromCatalog, removePlannedPass, updatePlannedPass } =
-    useRaxData()
+  const {
+    data,
+    addPlannedPass,
+    addPlannedPassFromCatalog,
+    removePlannedPass,
+    updatePlannedPass,
+  } = useRaxData()
   const [profilesByKey, setProfilesByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
   const [profilesLoading, setProfilesLoading] = useState(false)
   const [profilesStatus, setProfilesStatus] = useState('')
@@ -162,8 +169,42 @@ export default function PlanPage() {
   const [ownedAddStatus, setOwnedAddStatus] = useState('')
   const [ownedAddRarity, setOwnedAddRarity] = useState(RECOMMENDATION_SIMULATED_RARITY)
   const [passSortMode, setPassSortMode] = useState<PlanPassSortMode>('progress')
+  const [soldCardIds, setSoldCardIds] = useState<string[]>([])
+  const [soldFilter, setSoldFilter] = useState('')
 
   const plannedPasses = data.plannedPasses ?? []
+  const packTrackers = data.packTrackers ?? []
+  const packEtaFingerprint = useMemo(
+    () =>
+      packTrackers
+        .map((tracker) => {
+          const accounts = tracker.accounts
+            .map(
+              (account) =>
+                `${account.id}:${account.rating}:${account.opensPacks ? 1 : 0}:${account.ownershipStatus ?? ''}:${account.ignoredMissing ? 1 : 0}`,
+            )
+            .join(',')
+          return `${tracker.plannedPassId}|${tracker.ratingPerPack ?? ''}|${accounts}`
+        })
+        .sort((a, b) => a.localeCompare(b))
+        .join('\0'),
+    [packTrackers],
+  )
+
+  // Backfill / refresh Plan tags from Packs days-until-Iconic (never writes Just started).
+  useEffect(() => {
+    const { plannedPasses: nextPasses, changed } = applyPackEtaToPlannedPasses(
+      plannedPasses,
+      packTrackers,
+    )
+    if (!changed) return
+    for (const pass of nextPasses) {
+      const current = plannedPasses.find((item) => item.id === pass.id)
+      if (!current || current.progress === pass.progress) continue
+      updatePlannedPass(pass.id, { progress: pass.progress })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when pack ETA inputs change
+  }, [packEtaFingerprint])
   const plannedExternalKeys = useMemo(
     () => new Set(plannedPasses.map((pass) => pass.externalKey)),
     [plannedPasses],
@@ -181,6 +222,65 @@ export default function PlanPage() {
         .join('\0'),
     [plannedPasses],
   )
+  const soldCardIdsFingerprint = useMemo(
+    () => [...soldCardIds].sort((a, b) => a.localeCompare(b)).join('\0'),
+    [soldCardIds],
+  )
+
+  const sellableCards = useMemo(
+    () =>
+      [...data.cards]
+        .filter((card) => isPlayerPassForSell(card))
+        .sort(
+          (a, b) =>
+            a.name.localeCompare(b.name) ||
+            a.sport.localeCompare(b.sport) ||
+            a.season.localeCompare(b.season),
+        ),
+    [data.cards],
+  )
+
+  const soldCardIdSet = useMemo(() => new Set(soldCardIds), [soldCardIds])
+
+  useEffect(() => {
+    const validIds = new Set(data.cards.map((card) => card.id))
+    setSoldCardIds((current) => {
+      const next = current.filter((id) => validIds.has(id))
+      return next.length === current.length ? current : next
+    })
+  }, [data.cards])
+
+  const filteredSellableCards = useMemo(() => {
+    const query = soldFilter.trim().toLowerCase()
+    if (!query) return sellableCards
+    return sellableCards.filter((card) => {
+      const haystack = [
+        card.name,
+        card.sport,
+        card.season,
+        card.rarityLabel ?? '',
+        card.externalKey ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [sellableCards, soldFilter])
+
+  const planBaselineData = useMemo(
+    () => withoutCards(data, soldCardIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sold fingerprint + collection slices below
+    [data.cards, data.performances, data.settings.proBonusEnabled, soldCardIdsFingerprint],
+  )
+
+  const unsoldClaimable = useMemo(() => {
+    const analysisData = {
+      ...data,
+      settings: { ...data.settings, proBonusEnabled: true },
+    }
+    return computeYearRollup(analysisData).totalClaimableRax
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- collection slices drive claimable
+  }, [data.cards, data.performances, data.settings.proBonusEnabled])
 
   const ownedAdjustableCards = useMemo(
     () =>
@@ -279,13 +379,11 @@ export default function PlanPage() {
   }, [plannedExternalKeysFingerprint])
 
   const scoredAnalysis = useMemo(
-    () => analyzePlanCollection(data, plannedPasses, profilesByKey),
+    () => analyzePlanCollection(planBaselineData, plannedPasses, profilesByKey),
     // Tag/progress-only edits keep the same fingerprints so scoring is skipped.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: omit progress-only plannedPasses / full data identity
     [
-      data.cards,
-      data.performances,
-      data.settings.proBonusEnabled,
+      planBaselineData,
       planScoringFingerprint,
       profilesByKey,
     ],
@@ -402,6 +500,17 @@ export default function PlanPage() {
     )
   }
 
+  const toggleSoldCard = (cardId: string) => {
+    setSoldCardIds((current) =>
+      current.includes(cardId) ? current.filter((id) => id !== cardId) : [...current, cardId],
+    )
+  }
+
+  const clearSoldCards = () => setSoldCardIds([])
+
+  const soldOnlyNetDelta = analysis.currentClaimable - unsoldClaimable
+  const hasSoldScenario = soldCardIds.length > 0
+
   const handleCatalogSelect = async (
     result: Parameters<typeof addPlannedPassFromCatalog>[0],
     rarityLabel: string,
@@ -425,10 +534,16 @@ export default function PlanPage() {
       <section className="hero-card">
         <p className="eyebrow">Purchase plan</p>
         <h1>Plan</h1>
-        <p>Save catalog passes you are considering. Analysis updates with your collection or plan.</p>
+        <p>
+          Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
+          Future; Just started stays manual. Toggle If sold to try buy/sell mixes.
+        </p>
         <div className="button-row">
           <Link className="button" to="/potential">
             Rank catalog
+          </Link>
+          <Link className="button" to="/sell">
+            If sold
           </Link>
           {plannedPasses.length > 0 ? (
             <Link className="button" to="/potential?addPlanToBaseline=1">
@@ -445,9 +560,86 @@ export default function PlanPage() {
         <StatCard
           label="Plan net gain"
           value={formatSignedRax(displayRaxValue(analysis.combinedNetDelta))}
-          hint={`${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`}
+          hint={
+            hasSoldScenario
+              ? `After treating ${soldCardIds.length} pass${soldCardIds.length === 1 ? '' : 'es'} as sold · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+              : `${formatSignedRax(displayRaxValue(analysis.combinedGuaranteedNetDelta))} guaranteed · ${analysis.activeProfiles.length} active of ${plannedPasses.length}`
+          }
         />
+        {hasSoldScenario ? (
+          <>
+            <StatCard
+              label="Collection if sold"
+              value={displayRaxValue(analysis.currentClaimable).toLocaleString()}
+              hint={`${formatSignedRax(displayRaxValue(soldOnlyNetDelta))} vs keeping · before planned buys`}
+            />
+            <StatCard
+              label="With plan if sold"
+              value={displayRaxValue(analysis.withPlanClaimable).toLocaleString()}
+              hint={`${formatSignedRax(displayRaxValue(analysis.withPlanClaimable - unsoldClaimable))} vs current collection`}
+            />
+          </>
+        ) : null}
       </section>
+
+      {sellableCards.length > 0 ? (
+        <CollapsiblePanel
+          className="nested-panel"
+          title="If sold"
+          description="Temporarily remove owned player passes from the Plan baseline (session only — does not sell or delete). Plan nets then assume those passes are gone."
+          badge={
+            soldCardIds.length > 0 ? `${soldCardIds.length} treated as sold` : undefined
+          }
+          defaultOpen={soldCardIds.length > 0}
+        >
+          <div className="sort-controls">
+            <label className="field inline-field recommendation-adjustment-owned-search">
+              <span>Filter collection</span>
+              <input
+                value={soldFilter}
+                placeholder="Name, sport, season, or rarity"
+                onChange={(event) => setSoldFilter(event.target.value)}
+              />
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={soldCardIds.length === 0}
+              onClick={clearSoldCards}
+            >
+              Clear sold
+            </button>
+          </div>
+          {filteredSellableCards.length > 0 ? (
+            <div className="recommendation-adjustment-owned-list button-row wrap-row">
+              {filteredSellableCards.map((card) => {
+                const selected = soldCardIdSet.has(card.id)
+                return (
+                  <button
+                    className={`button compact${selected ? ' is-selected' : ''}`}
+                    type="button"
+                    key={card.id}
+                    aria-pressed={selected}
+                    title={
+                      selected
+                        ? 'Stop treating as sold'
+                        : 'Treat as sold for Plan scoring'
+                    }
+                    onClick={() => toggleSoldCard(card.id)}
+                  >
+                    {card.name}
+                    {card.season ? ` · ${card.season}` : ''}
+                    {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                    {selected ? ' · sold' : ''}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="empty">No collection passes match that filter.</p>
+          )}
+        </CollapsiblePanel>
+      ) : null}
 
       {profilesLoading ? <p className="import-progress">{profilesStatus || 'Loading plan…'}</p> : null}
       {profilesStatus && !profilesLoading ? <p className="import-status">{profilesStatus}</p> : null}

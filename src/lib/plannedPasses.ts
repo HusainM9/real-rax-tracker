@@ -2,6 +2,7 @@ import type { CatalogImportProfile, CatalogSearchResult } from './catalogApi'
 import { sportFromCatalog } from './catalogImport'
 import { computeYearRollup } from './claimOptimizer'
 import { isUfcCatalogSport } from '../../lib/passKind'
+import { estimatePackProgress } from './packTracker'
 import {
   applyCatalogProfilesAtOwnRarities,
   estimateTotalRaxAtRarity,
@@ -13,7 +14,13 @@ import {
   type OwnedIconicUpgradeImpactResult,
   type PassRecommendationRow,
 } from './passRecommendation'
-import type { PlayerCard, PlannedPass, PlannedPassProgress, RaxTrackerData } from '../types/rax'
+import type {
+  PackTracker,
+  PlayerCard,
+  PlannedPass,
+  PlannedPassProgress,
+  RaxTrackerData,
+} from '../types/rax'
 
 export const PLANNED_PASS_PROGRESS_OPTIONS: ReadonlyArray<{
   value: PlannedPassProgress
@@ -27,28 +34,28 @@ export const PLANNED_PASS_PROGRESS_OPTIONS: ReadonlyArray<{
     value: 'nearly-finished',
     label: 'Nearly finished',
     group: 'in-progress',
-    description: 'Close to buying / finishing',
+    description: '≤7 days to Iconic on Packs',
     tone: 'mint',
   },
   {
     value: 'on-the-way',
     label: 'On the way',
     group: 'in-progress',
-    description: 'Actively working toward these',
+    description: '8–31 days to Iconic on Packs',
     tone: 'sky',
   },
   {
     value: 'just-started',
     label: 'Just started',
     group: 'in-progress',
-    description: 'Early research or first steps',
+    description: 'Manual only — early research',
     tone: 'amber',
   },
   {
     value: 'future',
     label: 'Future',
     group: 'future',
-    description: 'Parked for later',
+    description: '31+ days to Iconic on Packs, or parked',
     tone: 'slate',
   },
 ]
@@ -87,6 +94,64 @@ export function plannedPassProgressTone(
 export function plannedPassProgressSortIndex(progress: PlannedPassProgress): number {
   const index = PLANNED_PASS_PROGRESS_OPTIONS.findIndex((option) => option.value === progress)
   return index >= 0 ? index : PLANNED_PASS_PROGRESS_OPTIONS.length
+}
+
+/**
+ * Map Packs days-until-Iconic → Plan section tag.
+ * Returns null when there is no ETA (or already at target) so Just started stays manual-only.
+ * - ≤7 days → nearly-finished
+ * - 8–31 days → on-the-way
+ * - 32+ days → future
+ */
+export function planProgressFromPackDaysRemaining(
+  daysRemaining: number | null | undefined,
+): PlannedPassProgress | null {
+  if (daysRemaining == null || !Number.isFinite(daysRemaining)) return null
+  const days = Math.ceil(daysRemaining)
+  if (days <= 0) return null
+  if (days <= 7) return 'nearly-finished'
+  if (days <= 31) return 'on-the-way'
+  return 'future'
+}
+
+export function planProgressFromPackTracker(
+  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number },
+): PlannedPassProgress | null {
+  return planProgressFromPackDaysRemaining(estimatePackProgress(tracker).daysRemaining)
+}
+
+/** Apply Packs ETA tags onto planned passes. Does not write `just-started`. */
+export function applyPackEtaToPlannedPasses(
+  plannedPasses: PlannedPass[],
+  packTrackers: readonly PackTracker[],
+): { plannedPasses: PlannedPass[]; changed: boolean } {
+  if (plannedPasses.length === 0 || packTrackers.length === 0) {
+    return { plannedPasses, changed: false }
+  }
+
+  const trackerByPassId = new Map(
+    packTrackers.map((tracker) => [tracker.plannedPassId, tracker] as const),
+  )
+  let changed = false
+  const nextPasses = plannedPasses.map((pass) => {
+    const tracker = trackerByPassId.get(pass.id)
+    if (!tracker) return pass
+    const suggested = planProgressFromPackTracker(tracker)
+    if (!suggested || suggested === pass.progress) return pass
+    changed = true
+    return { ...pass, progress: suggested }
+  })
+
+  return { plannedPasses: changed ? nextPasses : plannedPasses, changed }
+}
+
+export function syncPlanProgressFromPackTrackers(data: RaxTrackerData): RaxTrackerData {
+  const { plannedPasses, changed } = applyPackEtaToPlannedPasses(
+    data.plannedPasses ?? [],
+    data.packTrackers ?? [],
+  )
+  if (!changed) return data
+  return { ...data, plannedPasses }
 }
 
 export type PlannedPassInput = Pick<
