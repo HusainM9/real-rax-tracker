@@ -47,5 +47,6 @@ describe('createEmptyData', () => {
     expect(createEmptyData().ignoredPassKeys).toEqual([])
     expect(createEmptyData().packAccountTemplates).toEqual([])
     expect(createEmptyData().planSoldCardIds).toEqual([])
+    expect(createEmptyData().sellExcludedCardIds).toEqual([])
   })
 })

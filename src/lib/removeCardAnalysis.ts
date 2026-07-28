@@ -1,5 +1,6 @@
 import { computeClaimDayResults, computeYearRollup } from './claimOptimizer'
 import { monthDayKeyFromClaimDay } from './claimDayKey'
+import { withoutSellExcludedCards } from './sellExcludedPasses'
 import type {
   ClaimCandidate,
   ClaimDayResult,
@@ -138,7 +139,8 @@ export function analyzeRemovedCard(
   data: RaxTrackerData,
   cardId: string,
 ): RemoveCardAnalysisResult | null {
-  return analyzeRemovedCardWithBase(data, cardId, buildRemoveCardAnalysisBase(data))
+  const effective = withoutSellExcludedCards(data)
+  return analyzeRemovedCardWithBase(effective, cardId, buildRemoveCardAnalysisBase(effective))
 }
 
 export function formatRemoveCardSummary(result: RemoveCardAnalysisResult, salePrice?: number): string {
@@ -306,7 +308,8 @@ function yieldToMain(): Promise<void> {
 }
 
 export function rankAllRemovedCards(data: RaxTrackerData): BulkSellRankResult {
-  const base = buildRemoveCardAnalysisBase(data)
+  const effective = withoutSellExcludedCards(data)
+  const base = buildRemoveCardAnalysisBase(effective)
   const rollupByCardId = new Map(base.baseRollup.cards.map((rollup) => [rollup.card.id, rollup]))
   const acc: RankAccumulator = {
     rows: [],
@@ -315,7 +318,7 @@ export function rankAllRemovedCards(data: RaxTrackerData): BulkSellRankResult {
     skippedPlayerPasses: [],
   }
 
-  rankCardBatch(data, base, rollupByCardId, acc, data.cards)
+  rankCardBatch(effective, base, rollupByCardId, acc, effective.cards)
   return finalizeSellRankings(acc)
 }
 
@@ -327,7 +330,8 @@ export async function rankAllRemovedCardsAsync(
     batchSize?: number
   },
 ): Promise<BulkSellRankResult> {
-  const base = buildRemoveCardAnalysisBase(data)
+  const effective = withoutSellExcludedCards(data)
+  const base = buildRemoveCardAnalysisBase(effective)
   const rollupByCardId = new Map(base.baseRollup.cards.map((rollup) => [rollup.card.id, rollup]))
   const acc: RankAccumulator = {
     rows: [],
@@ -336,7 +340,7 @@ export async function rankAllRemovedCardsAsync(
     skippedPlayerPasses: [],
   }
 
-  const cards = data.cards
+  const cards = effective.cards
   const batchSize = Math.max(options?.batchSize ?? 8, 1)
 
   for (let index = 0; index < cards.length; index += batchSize) {
@@ -345,7 +349,7 @@ export async function rankAllRemovedCardsAsync(
     }
 
     const batch = cards.slice(index, index + batchSize)
-    rankCardBatch(data, base, rollupByCardId, acc, batch)
+    rankCardBatch(effective, base, rollupByCardId, acc, batch)
     const current = Math.min(index + batch.length, cards.length)
     options?.onProgress?.({
       current,

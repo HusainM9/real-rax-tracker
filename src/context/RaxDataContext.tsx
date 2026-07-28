@@ -15,6 +15,7 @@ import {
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
 import { ignorePassOnImport, removeIgnoredPassKey } from '../lib/ignoredPasses'
+import { toggleSellExcludedCardId } from '../lib/sellExcludedPasses'
 import {
   createEmptyData,
   exportTrackerData,
@@ -117,6 +118,7 @@ type RaxDataContextValue = {
   setPlanSoldCardIds: (ids: string[]) => void
   togglePlanSoldCard: (cardId: string) => void
   clearPlanSoldCardIds: () => void
+  toggleSellExcludedCard: (cardId: string) => void
   upsertPackTracker: (plannedPassId: string) => string
   /** Start tracking every untracked planned player pass (same seeding as upsertPackTracker). */
   trackAllUntrackedPlayerPacks: () => { tracked: number }
@@ -617,6 +619,9 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             ? current
             : { ...current, planSoldCardIds: [] },
         )
+      },
+      toggleSellExcludedCard: (cardId) => {
+        setData((current) => toggleSellExcludedCardId(current, cardId))
       },
       upsertPackTracker: (plannedPassId) => {
         let trackerId = ''
