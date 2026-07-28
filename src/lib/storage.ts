@@ -1,5 +1,6 @@
 import type {
   CachedPlayerEarningsProfile,
+  PackAccountTemplate,
   PackTracker,
   PackTrackerAccount,
   PlayerCard,
@@ -16,7 +17,7 @@ import type {
 } from '../types/rax'
 import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
-import { DEFAULT_PACK_RATING_INCREMENT } from './packTracker'
+import { normalizeRatingPerPack } from './packTracker'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
 export const EXPORT_VERSION = 1
@@ -38,6 +39,7 @@ export function createEmptyData(): RaxTrackerData {
     savedSellRankings: null,
     plannedPasses: [],
     packTrackers: [],
+    packAccountTemplates: [],
     ignoredPassKeys: [],
   }
 }
@@ -273,6 +275,12 @@ function hydratePlannedPass(value: unknown): PlannedPass | null {
 function hydratePackTrackerAccount(value: unknown): PackTrackerAccount | null {
   if (!isRecord(value) || typeof value.id !== 'string') return null
   const rating = Number(value.rating)
+  const ownershipStatus =
+    value.ownershipStatus === 'owned' ||
+    value.ownershipStatus === 'missing' ||
+    value.ownershipStatus === 'unknown'
+      ? value.ownershipStatus
+      : undefined
   return {
     id: value.id,
     name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : 'Account',
@@ -288,6 +296,21 @@ function hydratePackTrackerAccount(value: unknown): PackTrackerAccount | null {
         : undefined,
     lastImportedAt:
       typeof value.lastImportedAt === 'string' ? value.lastImportedAt : undefined,
+    ownershipStatus,
+    ignoredMissing: value.ignoredMissing === true ? true : undefined,
+  }
+}
+
+function hydratePackAccountTemplate(value: unknown): PackAccountTemplate | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  return {
+    id: value.id,
+    name: typeof value.name === 'string' && value.name.trim() ? value.name.trim() : 'Account',
+    username:
+      typeof value.username === 'string' && value.username.trim()
+        ? value.username.replace(/^@/, '').trim()
+        : '',
+    opensPacks: value.opensPacks !== false,
   }
 }
 
@@ -304,9 +327,11 @@ function hydratePackTracker(value: unknown): PackTracker | null {
           .map(hydratePackTrackerAccount)
           .filter((account): account is PackTrackerAccount => account !== null)
       : [],
-    ratingPerPack: Number.isFinite(Number(value.ratingPerPack))
-      ? Math.max(1, Math.floor(Number(value.ratingPerPack)))
-      : DEFAULT_PACK_RATING_INCREMENT,
+    ratingPerPack: normalizeRatingPerPack(
+      value.ratingPerPack === undefined || value.ratingPerPack === null
+        ? undefined
+        : Number(value.ratingPerPack),
+    ),
     lastAutoIncrementDay:
       typeof value.lastAutoIncrementDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastAutoIncrementDay)
         ? value.lastAutoIncrementDay
@@ -407,6 +432,11 @@ export function normalizeData(value: unknown): RaxTrackerData {
       ? value.packTrackers
           .map(hydratePackTracker)
           .filter((tracker): tracker is PackTracker => tracker !== null)
+      : [],
+    packAccountTemplates: Array.isArray(value.packAccountTemplates)
+      ? value.packAccountTemplates
+          .map(hydratePackAccountTemplate)
+          .filter((template): template is PackAccountTemplate => template !== null)
       : [],
     ignoredPassKeys: hydrateIgnoredPassKeys(value.ignoredPassKeys),
   }

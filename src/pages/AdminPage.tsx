@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import AdminAccountTrackers from '../components/AdminAccountTrackers'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { useAdminAuth } from '../context/AdminAuthContext'
@@ -166,6 +167,7 @@ export default function AdminPage() {
   const [cloudProfileSummary, setCloudProfileSummary] = useState<
     TrackerProfileLookupResponse['profile']
   >(null)
+  const [accountTrackersRefreshKey, setAccountTrackersRefreshKey] = useState(0)
   const [ownershipSnapshots, setOwnershipSnapshots] = useState<OwnershipSnapshotSummary[]>([])
   const [ownershipSnapshotsLoading, setOwnershipSnapshotsLoading] = useState(false)
   const [ownershipSnapshotsError, setOwnershipSnapshotsError] = useState('')
@@ -435,6 +437,7 @@ export default function AdminPage() {
       setCloudProfileStatus(
         `Password reset for @${username}. Share the new password with the user privately.`,
       )
+      setAccountTrackersRefreshKey((current) => current + 1)
     } catch (error) {
       setCloudProfileStatus(error instanceof Error ? error.message : 'Could not reset password.')
     } finally {
@@ -469,6 +472,7 @@ export default function AdminPage() {
       }
       setCloudProfileSummary(null)
       setCloudProfileStatus(`Deleted account for @${username}. They can register again with a new password.`)
+      setAccountTrackersRefreshKey((current) => current + 1)
     } catch (error) {
       setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete account.')
     } finally {
@@ -515,6 +519,7 @@ export default function AdminPage() {
                 : ''
             }. Users can create fresh accounts now.`,
       )
+      setAccountTrackersRefreshKey((current) => current + 1)
     } catch (error) {
       setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete all accounts.')
     } finally {
@@ -1655,6 +1660,8 @@ export default function AdminPage() {
         </div>
         {cloudProfileStatus ? <p className="import-status">{cloudProfileStatus}</p> : null}
       </CollapsiblePanel>
+
+      <AdminAccountTrackers refreshKey={accountTrackersRefreshKey} />
 
       <CollapsiblePanel
         title="Ownership cache"

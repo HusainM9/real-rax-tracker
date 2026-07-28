@@ -147,6 +147,8 @@ export type PlannedPass = {
   addedAt: string
 }
 
+export type PackOwnershipStatus = 'owned' | 'missing' | 'unknown'
+
 /** One account contributing rating toward Iconic for a planned player pack. */
 export type PackTrackerAccount = {
   id: string
@@ -159,6 +161,19 @@ export type PackTrackerAccount = {
   /** Last rarity label seen from a Real import. */
   rarityLabel?: string
   lastImportedAt?: string
+  /** Whether Real ownership of this tracker's pass was confirmed on import. */
+  ownershipStatus?: PackOwnershipStatus
+  /** When true, hide the missing-ownership warning for this account+pass. */
+  ignoredMissing?: boolean
+}
+
+/** Reusable account definition applied across pack trackers. */
+export type PackAccountTemplate = {
+  id: string
+  name: string
+  /** Real @username used to match/import across passes. */
+  username: string
+  opensPacks: boolean
 }
 
 /**
@@ -169,7 +184,7 @@ export type PackTracker = {
   id: string
   plannedPassId: string
   accounts: PackTrackerAccount[]
-  /** @deprecated Kept for older saved data; estimates use the fixed minimum pack gain. */
+  /** Estimate divisor for packs needed / days remaining (default 10). */
   ratingPerPack?: number
   /** @deprecated Auto-increment removed — ratings come from Real import. */
   lastAutoIncrementDay?: string
@@ -199,6 +214,8 @@ export type RaxTrackerData = {
   savedSellRankings?: SavedSellRankings | null
   plannedPasses?: PlannedPass[]
   packTrackers?: PackTracker[]
+  /** Shared accounts reused when seeding / applying across pack trackers. */
+  packAccountTemplates?: PackAccountTemplate[]
   /** Per-tracker-user pass keys skipped on username import (`entityId|seasonYear|Sport`). */
   ignoredPassKeys?: string[]
 }
