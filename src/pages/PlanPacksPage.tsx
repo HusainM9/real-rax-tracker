@@ -12,7 +12,7 @@ import {
 } from '../lib/packTracker'
 import { fetchPackRatings } from '../lib/packRatingsImport'
 import { fetchPlayAverages } from '../lib/playAveragesImport'
-import { PLAYS_PER_PACK } from '../lib/playAveragesImport'
+import { MIN_RATING_PER_PACK, PLAYS_PER_PACK } from '../lib/playAveragesImport'
 import type { PackAccountTemplate, PackTracker, PackTrackerAccount, PlannedPass } from '../types/rax'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
@@ -193,7 +193,7 @@ function PackPassRow({
             <p className="import-hint pack-play-average-hint">
               Avg play rating {tracker.averagePlayRating.toFixed(2)} across {tracker.playCount}{' '}
               play{tracker.playCount === 1 ? '' : 's'}
-              {` · ≈ ${(tracker.averagePlayRating * PLAYS_PER_PACK).toFixed(1)}/pack (${PLAYS_PER_PACK} plays/pack)`}
+              {` · ≈ ${Math.max(MIN_RATING_PER_PACK, tracker.averagePlayRating * PLAYS_PER_PACK).toFixed(1)}/pack (${PLAYS_PER_PACK} plays/pack, min ${MIN_RATING_PER_PACK})`}
               {tracker.lastPlaysImportedAt
                 ? ` · Imported ${new Date(tracker.lastPlaysImportedAt).toLocaleString()}`
                 : ''}
@@ -201,7 +201,7 @@ function PackPassRow({
           ) : (
             <p className="import-hint pack-play-average-hint">
               Use Avg from plays to pull Real play ratings for this player (packs have{' '}
-              {PLAYS_PER_PACK} plays).
+              {PLAYS_PER_PACK} plays, rating/pack min {MIN_RATING_PER_PACK}).
             </p>
           )}
 

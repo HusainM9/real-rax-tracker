@@ -5,12 +5,18 @@
 /** Player packs contain this many play cards. */
 export const PLAYS_PER_PACK = 3
 
+/**
+ * Minimum rating gained per pack for estimates.
+ * Real packs effectively floor around this; never estimate below it.
+ */
+export const MIN_RATING_PER_PACK = 10
+
 export type PlayRatingAverage = {
   playCount: number
   ratingSum: number
   /** Mean Real Rating per play (`value`). */
   averagePlayRating: number
-  /** Expected rating gained per pack (= averagePlayRating × PLAYS_PER_PACK). */
+  /** Raw averagePlayRating × PLAYS_PER_PACK (before min floor). */
   averageRatingPerPack: number
 }
 
@@ -44,9 +50,14 @@ export function averagePlayRatingsFromPlays(
   }
 }
 
-/** Round estimated rating/pack for UI / estimate divisor (≥ 1). */
+/**
+ * Round estimated rating/pack for UI / estimate divisor.
+ * Floors at {@link MIN_RATING_PER_PACK} (packs cannot estimate below 10).
+ */
 export function ratingPerPackFromPlayAverage(averagePlayRating: number): number {
   const perPack = averagePlayRating * PLAYS_PER_PACK
-  if (!Number.isFinite(perPack) || perPack < 1) return 1
-  return Math.max(1, Math.round(perPack * 10) / 10)
+  if (!Number.isFinite(perPack) || perPack < MIN_RATING_PER_PACK) {
+    return MIN_RATING_PER_PACK
+  }
+  return Math.round(perPack * 10) / 10
 }

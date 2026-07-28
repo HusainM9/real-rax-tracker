@@ -42,7 +42,13 @@ describe('averagePlayRatingsFromPlays', () => {
 
 describe('ratingPerPackFromPlayAverage', () => {
   it('rounds average × 3 for estimate use', () => {
-    expect(ratingPerPackFromPlayAverage(2.979)).toBe(8.9)
+    expect(ratingPerPackFromPlayAverage(4)).toBe(12)
     expect(ratingPerPackFromPlayAverage(10 / 3)).toBe(10)
+  })
+
+  it('floors at 10 when average × 3 would be lower', () => {
+    expect(ratingPerPackFromPlayAverage(2.979)).toBe(10)
+    expect(ratingPerPackFromPlayAverage(1)).toBe(10)
+    expect(ratingPerPackFromPlayAverage(0)).toBe(10)
   })
 })

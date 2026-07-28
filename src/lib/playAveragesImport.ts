@@ -24,8 +24,7 @@ export type PlayAveragesImportResult = {
 
 export const PLAY_AVERAGES_ENDPOINT = '/api/import/play-averages'
 
-/** Re-export: player packs contain this many play cards. */
-export { PLAYS_PER_PACK } from '../../lib/playAverages'
+export { PLAYS_PER_PACK, MIN_RATING_PER_PACK } from '../../lib/playAverages'
 
 type PlayAveragesResponse = {
   ok?: boolean
