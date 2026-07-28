@@ -200,7 +200,7 @@ function PackPassRow({
             </p>
           ) : (
             <p className="import-hint pack-play-average-hint">
-              Use Avg from plays to pull Real play ratings for this player (packs have{' '}
+              Use Avg from plays to sample recent Real play ratings for this player (packs have{' '}
               {PLAYS_PER_PACK} plays, rating/pack min {MIN_RATING_PER_PACK}).
             </p>
           )}
@@ -822,8 +822,8 @@ export default function PlanPacksPage() {
       return
     }
 
-    // Small batches keep the UI updating and avoid edge-function timeouts on large lists.
-    const CHUNK_SIZE = 4
+    // One pass per request — avoids Vercel FUNCTION_INVOCATION_TIMEOUT on batched Real fetches.
+    const CHUNK_SIZE = 1
     setImportBusyKey('play-avg:all')
     setSyncStatus(`Averaging plays… 0/${targets.length}`)
 
@@ -833,14 +833,14 @@ export default function PlanPacksPage() {
     try {
       for (let offset = 0; offset < targets.length; offset += CHUNK_SIZE) {
         const chunk = targets.slice(offset, offset + CHUNK_SIZE)
-        const label = chunk.map(({ pass }) => pass.name).join(', ')
+        const current = chunk[0]!
         setSyncStatus(
-          `Averaging ${label}… ${Math.min(offset + chunk.length, targets.length)}/${targets.length}`,
+          `Averaging ${current.pass.name}… ${offset + 1}/${targets.length}`,
         )
 
         try {
           const controller = new AbortController()
-          const timeoutId = window.setTimeout(() => controller.abort(), 60_000)
+          const timeoutId = window.setTimeout(() => controller.abort(), 55_000)
           let batch: Awaited<ReturnType<typeof fetchPlayAverages>>
           try {
             batch = await fetchPlayAverages(

@@ -1,5 +1,5 @@
 import {
-  listAllPlayerRecentPlays,
+  listPlayerRecentPlays,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
@@ -13,7 +13,6 @@ import {
   parseEntityIdFromExternalKey,
   parseSeasonYearFromExternalKey,
 } from '../../lib/catalogPassIdentity'
-import { runWithConcurrency } from '../../lib/runWithConcurrency'
 import { requireAppSession } from '../admin/_helpers'
 
 type PlayAveragePassInput = {
@@ -40,12 +39,14 @@ export type PlayAverageResult = {
   ratingPerPack: number
 }
 
+/** Node + longer duration — edge was 504 FUNCTION_INVOCATION_TIMEOUT on play fetches. */
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
+  maxDuration: 60,
 }
 
-/** Slightly higher than default Real import concurrency — play list is one call per player usually. */
-const PLAY_AVERAGE_CONCURRENCY_CAP = 4
+/** One Real request per player is enough for pack estimates (up to this many recent plays). */
+const PLAY_SAMPLE_LIMIT = 1000
 
 function parseSportFromExternalKey(externalKey: string): string {
   const parts = externalKey.split('|')
@@ -120,57 +121,76 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'At least one pass with externalKey is required.' }, { status: 400 })
   }
 
-  const context: RealApiContext = { config: realConfig, signal: request.signal }
-  const results: PlayAverageResult[] = []
-  const errors: Array<{ externalKey: string; error: string }> = []
-  const concurrency = Math.min(
-    PLAY_AVERAGE_CONCURRENCY_CAP,
-    Math.max(1, realConfig.concurrency || 2),
-  )
+  // One player per invocation keeps under Vercel timeouts; client batches sequentially.
+  if (passes.length > 1) {
+    return Response.json(
+      {
+        error: 'Send one pass per play-average request (client should batch sequentially).',
+        code: 'too_many_passes',
+      },
+      { status: 400 },
+    )
+  }
 
-  await runWithConcurrency(passes, concurrency, async (pass) => {
-    try {
-      const plays = await listAllPlayerRecentPlays(
-        {
-          entityId: pass.entityId,
-          sport: pass.sportSlug,
-          season: pass.seasonYear,
-        },
-        context,
-        { pageSize: 1000 },
-      )
-      const average = averagePlayRatingsFromPlays(plays)
-      if (!average) {
-        errors.push({
-          externalKey: pass.externalKey,
-          error: 'No rated plays found for this player/season.',
-        })
-        return
-      }
-      results.push({
-        externalKey: pass.externalKey,
+  const pass = passes[0]!
+  const context: RealApiContext = { config: realConfig, signal: request.signal }
+
+  try {
+    // Single Real page — no beforeDay crawl (that was blowing past edge timeouts).
+    const plays = await listPlayerRecentPlays(
+      {
         entityId: pass.entityId,
         sport: pass.sportSlug,
-        seasonYear: pass.seasonYear,
-        playCount: average.playCount,
-        ratingSum: Number(average.ratingSum.toFixed(4)),
-        averagePlayRating: Number(average.averagePlayRating.toFixed(4)),
-        averageRatingPerPack: Number(average.averageRatingPerPack.toFixed(4)),
-        ratingPerPack: ratingPerPackFromPlayAverage(average.averagePlayRating),
-      })
-    } catch (error) {
-      errors.push({
-        externalKey: pass.externalKey,
-        error: error instanceof Error ? error.message : 'Play average import failed.',
+        season: pass.seasonYear,
+        limit: PLAY_SAMPLE_LIMIT,
+      },
+      context,
+    )
+    const average = averagePlayRatingsFromPlays(plays)
+    if (!average) {
+      return Response.json({
+        ok: true,
+        resultCount: 0,
+        results: [],
+        errors: [
+          {
+            externalKey: pass.externalKey,
+            error: 'No rated plays found for this player/season.',
+          },
+        ],
       })
     }
-  })
 
-  return Response.json({
-    ok: true,
-    resultCount: results.length,
-    results,
-    errors,
-  })
+    return Response.json({
+      ok: true,
+      resultCount: 1,
+      results: [
+        {
+          externalKey: pass.externalKey,
+          entityId: pass.entityId,
+          sport: pass.sportSlug,
+          seasonYear: pass.seasonYear,
+          playCount: average.playCount,
+          ratingSum: Number(average.ratingSum.toFixed(4)),
+          averagePlayRating: Number(average.averagePlayRating.toFixed(4)),
+          averageRatingPerPack: Number(average.averageRatingPerPack.toFixed(4)),
+          ratingPerPack: ratingPerPackFromPlayAverage(average.averagePlayRating),
+        },
+      ],
+      errors: [],
+    })
+  } catch (error) {
+    return Response.json({
+      ok: true,
+      resultCount: 0,
+      results: [],
+      errors: [
+        {
+          externalKey: pass.externalKey,
+          error: error instanceof Error ? error.message : 'Play average import failed.',
+        },
+      ],
+    })
+  }
 }
 
