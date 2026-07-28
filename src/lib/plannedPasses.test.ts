@@ -385,12 +385,23 @@ describe('plannedPasses', () => {
     }
 
     const passes = [
-      plannedPass({ id: 'plan-near', externalKey: '1|2025|NBA', name: 'Near' }),
-      plannedPass({ id: 'plan-far', externalKey: '2|2025|NBA', name: 'Far' }),
+      plannedPass({
+        id: 'plan-near',
+        externalKey: '1|2025|NBA',
+        name: 'Near',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
+      plannedPass({
+        id: 'plan-far',
+        externalKey: '2|2025|NBA',
+        name: 'Far',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
+      }),
       plannedPass({
         id: 'plan-idle',
         externalKey: '3|2025|NBA',
         name: 'Idle',
+        simulatedRarityLabel: RECOMMENDATION_SIMULATED_RARITY,
         progress: 'just-started',
       }),
     ]
