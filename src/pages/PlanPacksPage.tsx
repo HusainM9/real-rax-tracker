@@ -5,6 +5,7 @@ import { useRaxData } from '../context/RaxDataContext'
 import {
   DEFAULT_PACK_RATING_INCREMENT,
   estimatePackProgress,
+  formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
   ICONIC_RATING_TARGET,
   normalizePackUsername,
@@ -47,6 +48,7 @@ function PackPassRow({
   onIgnoreMissing,
   onImportAccount,
   onImportAll,
+  onMarkFinished,
 }: {
   pass: PlannedPass
   tracker: PackTracker | undefined
@@ -66,6 +68,7 @@ function PackPassRow({
   onIgnoreMissing: (accountId: string) => void
   onImportAccount: (account: PackTrackerAccount) => void
   onImportAll: () => void
+  onMarkFinished: () => void
 }) {
   const estimate = tracker
     ? estimatePackProgress(tracker)
@@ -111,14 +114,24 @@ function PackPassRow({
             Track packs
           </button>
         ) : (
-          <button
-            className="button compact"
-            type="button"
-            disabled={importBusy || importableCount === 0}
-            onClick={onImportAll}
-          >
-            {importBusyLabel || 'Import all'}
-          </button>
+          <>
+            <button
+              className="button compact"
+              type="button"
+              disabled={importBusy || importableCount === 0}
+              onClick={onImportAll}
+            >
+              {importBusyLabel || 'Import all'}
+            </button>
+            <button
+              className="button danger compact"
+              type="button"
+              disabled={importBusy}
+              onClick={onMarkFinished}
+            >
+              Finished
+            </button>
+          </>
         )
       }
     >
@@ -290,6 +303,7 @@ function PackPassRow({
 export default function PlanPacksPage() {
   const {
     data,
+    removePlannedPass,
     upsertPackTracker,
     trackAllUntrackedPlayerPacks,
     updatePackTracker,
@@ -304,6 +318,10 @@ export default function PlanPacksPage() {
   } = useRaxData()
 
   const [syncBusyUsername, setSyncBusyUsername] = useState('')
+  const [syncAllProgress, setSyncAllProgress] = useState<{
+    index: number
+    total: number
+  } | null>(null)
   const [syncStatus, setSyncStatus] = useState('')
   const [applyTemplatesStatus, setApplyTemplatesStatus] = useState('')
   const [trackAllStatus, setTrackAllStatus] = useState('')
@@ -314,6 +332,7 @@ export default function PlanPacksPage() {
   const packTrackers = data.packTrackers ?? []
   const packAccountTemplates = data.packAccountTemplates ?? []
   const anyImportBusy = syncBusyUsername !== '' || importBusyKey !== ''
+  const isSyncAllRunning = syncAllProgress !== null
 
   const playerPasses = useMemo(
     () => plannedPasses.filter((pass) => pass.passKind !== 'team'),
@@ -409,6 +428,17 @@ export default function PlanPacksPage() {
     )
   }
 
+  const markPassFinished = (pass: PlannedPass) => {
+    if (!window.confirm(formatMarkPackFinishedConfirmMessage(pass.name))) return
+    removePlannedPass(pass.id)
+    setImportStatusByPass((current) => {
+      if (!(pass.id in current)) return current
+      const next = { ...current }
+      delete next[pass.id]
+      return next
+    })
+  }
+
   const ratingsMapFromResult = (
     passes: Awaited<ReturnType<typeof fetchPackRatings>>['passes'],
   ) => {
@@ -421,6 +451,37 @@ export default function PlanPacksPage() {
       }
     }
     return ratingsByExternalKey
+  }
+
+  const runSyncUsername = async (
+    rawUsername: string,
+  ): Promise<
+    | { ok: true; username: string; updatedAccounts: number; missingPasses: number }
+    | { ok: false; username: string; error: string }
+  > => {
+    const username = rawUsername.replace(/^@/, '').trim()
+    if (!username) {
+      return { ok: false, username: rawUsername, error: 'Empty username.' }
+    }
+    try {
+      const result = await fetchPackRatings(username)
+      const ratingsByExternalKey = ratingsMapFromResult(result.passes)
+      const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+        ensureAccounts: true,
+      })
+      return {
+        ok: true,
+        username: result.username,
+        updatedAccounts: applied.updatedAccounts,
+        missingPasses: applied.missingPasses,
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        username,
+        error: error instanceof Error ? error.message : 'Could not sync pack ratings.',
+      }
+    }
   }
 
   const syncAllTracked = async (rawUsername: string) => {
@@ -437,20 +498,72 @@ export default function PlanPacksPage() {
     setSyncBusyUsername(username)
     setSyncStatus(`Fetching ratings for @${username}…`)
     try {
-      const result = await fetchPackRatings(username)
-      const ratingsByExternalKey = ratingsMapFromResult(result.passes)
-      const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
-        ensureAccounts: true,
-      })
+      const outcome = await runSyncUsername(username)
+      if (!outcome.ok) {
+        setSyncStatus(outcome.error)
+        return
+      }
       setSyncStatus(
-        applied.updatedAccounts > 0
-          ? `Synced ${applied.updatedAccounts} account row${applied.updatedAccounts === 1 ? '' : 's'} for @${result.username} across tracked passes.${applied.missingPasses ? ` ${applied.missingPasses} not owned.` : ''}`
-          : `@${result.username} does not own any of your currently tracked passes.`,
+        outcome.updatedAccounts > 0
+          ? `Synced ${outcome.updatedAccounts} account row${outcome.updatedAccounts === 1 ? '' : 's'} for @${outcome.username} across tracked passes.${outcome.missingPasses ? ` ${outcome.missingPasses} not owned.` : ''}`
+          : `@${outcome.username} does not own any of your currently tracked passes.`,
       )
-    } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : 'Could not sync pack ratings.')
     } finally {
       setSyncBusyUsername('')
+    }
+  }
+
+  const syncAllKnownUsernames = async () => {
+    if (knownUsernames.length === 0) {
+      setSyncStatus('Add a Real username on a shared account or pass row below, then sync from here.')
+      return
+    }
+    if (packTrackers.length === 0) {
+      setSyncStatus('Track at least one player pack before syncing.')
+      return
+    }
+
+    const total = knownUsernames.length
+    let syncedOk = 0
+    let totalUpdated = 0
+    let totalMissing = 0
+    const errors: string[] = []
+
+    try {
+      for (let i = 0; i < knownUsernames.length; i++) {
+        const username = knownUsernames[i]!
+        setSyncBusyUsername(username)
+        setSyncAllProgress({ index: i + 1, total })
+        setSyncStatus(`Syncing @${username}… ${i + 1}/${total}`)
+
+        const outcome = await runSyncUsername(username)
+        if (!outcome.ok) {
+          errors.push(`@${username}: ${outcome.error}`)
+          continue
+        }
+        syncedOk += 1
+        totalUpdated += outcome.updatedAccounts
+        totalMissing += outcome.missingPasses
+      }
+
+      const parts = [
+        `Synced ${syncedOk}/${total} account${total === 1 ? '' : 's'}.`,
+      ]
+      if (totalUpdated > 0) {
+        parts.push(
+          `Updated ${totalUpdated} account row${totalUpdated === 1 ? '' : 's'}.`,
+        )
+      }
+      if (totalMissing > 0) {
+        parts.push(`${totalMissing} not owned.`)
+      }
+      if (errors.length > 0) {
+        parts.push(errors.join(' '))
+      }
+      setSyncStatus(parts.join(' '))
+    } finally {
+      setSyncBusyUsername('')
+      setSyncAllProgress(null)
     }
   }
 
@@ -628,8 +741,8 @@ export default function PlanPacksPage() {
         <div className="pack-sync-copy">
           <h2>Sync all tracked</h2>
           <p className="table-sub">
-            One tap per Real account you’ve added below — pulls live ratings across every tracked
-            player.
+            Sync one Real account, or Sync all to walk each username one by one — pulls live ratings
+            across every tracked player.
           </p>
         </div>
         {knownUsernames.length === 0 ? (
@@ -638,6 +751,16 @@ export default function PlanPacksPage() {
           </p>
         ) : (
           <div className="button-row pack-sync-accounts">
+            <button
+              className="button"
+              type="button"
+              disabled={anyImportBusy}
+              onClick={() => void syncAllKnownUsernames()}
+            >
+              {isSyncAllRunning && syncAllProgress
+                ? `Syncing @${syncBusyUsername}… ${syncAllProgress.index}/${syncAllProgress.total}`
+                : 'Sync all'}
+            </button>
             {knownUsernames.map((username) => (
               <button
                 key={username.toLowerCase()}
@@ -876,6 +999,7 @@ export default function PlanPacksPage() {
                   if (!tracker) return
                   void importAllAccounts(pass, tracker)
                 }}
+                onMarkFinished={() => markPassFinished(pass)}
               />
             )
           })}

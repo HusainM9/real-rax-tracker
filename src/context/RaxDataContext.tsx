@@ -66,6 +66,7 @@ import {
   DEFAULT_PACK_RATING_INCREMENT,
   normalizePackUsername,
   normalizeRatingPerPack,
+  removeFinishedPlannedPass,
 } from '../lib/packTracker'
 
 type CardInput = Pick<
@@ -511,13 +512,18 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         return createdId
       },
       removePlannedPass: (id) => {
-        setData((current) => ({
-          ...current,
-          plannedPasses: (current.plannedPasses ?? []).filter((pass) => pass.id !== id),
-          packTrackers: (current.packTrackers ?? []).filter(
-            (tracker) => tracker.plannedPassId !== id,
-          ),
-        }))
+        setData((current) => {
+          const cleaned = removeFinishedPlannedPass(
+            current.plannedPasses ?? [],
+            current.packTrackers ?? [],
+            id,
+          )
+          return {
+            ...current,
+            plannedPasses: cleaned.plannedPasses,
+            packTrackers: cleaned.packTrackers,
+          }
+        })
       },
       updatePlannedPass: (id, patch) => {
         setData((current) => ({

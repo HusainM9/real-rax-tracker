@@ -5,10 +5,12 @@ import {
   applyPackTemplatesToAccounts,
   DEFAULT_PACK_RATING_INCREMENT,
   estimatePackProgress,
+  formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
   ICONIC_RATING_TARGET,
   normalizeRatingPerPack,
   projectedFinishDate,
+  removeFinishedPlannedPass,
   summarizeAccountAcrossPacks,
 } from './packTracker'
 
@@ -320,5 +322,76 @@ describe('summarizeAccountAcrossPacks', () => {
 
   it('returns empty when username is blank', () => {
     expect(summarizeAccountAcrossPacks('', [], [])).toEqual([])
+  })
+})
+
+describe('removeFinishedPlannedPass', () => {
+  const plannedPasses: PlannedPass[] = [
+    {
+      id: 'pp1',
+      externalKey: 'a',
+      name: 'Alpha',
+      sport: 'NBA',
+      season: '2026',
+      passKind: 'player',
+      simulatedRarityLabel: 'Legendary',
+      totalBaseRax: 0,
+      rowCount: 0,
+      notes: '',
+      source: 'manual',
+      progress: 'on-the-way',
+      addedAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 'pp2',
+      externalKey: 'b',
+      name: 'Beta',
+      sport: 'NFL',
+      season: '2025',
+      passKind: 'player',
+      simulatedRarityLabel: 'Legendary',
+      totalBaseRax: 0,
+      rowCount: 0,
+      notes: '',
+      source: 'manual',
+      progress: 'nearly-finished',
+      addedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ]
+
+  const packTrackers: PackTracker[] = [
+    {
+      id: 't1',
+      plannedPassId: 'pp1',
+      accounts: [{ id: 'a1', name: 'Main', rating: 1000, opensPacks: true }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    {
+      id: 't2',
+      plannedPassId: 'pp2',
+      accounts: [{ id: 'b1', name: 'Main', rating: 2000, opensPacks: true }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ]
+
+  it('removes the planned pass and its pack tracker by plannedPassId', () => {
+    const result = removeFinishedPlannedPass(plannedPasses, packTrackers, 'pp1')
+    expect(result.plannedPasses.map((pass) => pass.id)).toEqual(['pp2'])
+    expect(result.packTrackers.map((tracker) => tracker.id)).toEqual(['t2'])
+  })
+
+  it('leaves trackers alone when only the plan entry is missing', () => {
+    const result = removeFinishedPlannedPass(plannedPasses, packTrackers, 'missing')
+    expect(result.plannedPasses).toEqual(plannedPasses)
+    expect(result.packTrackers).toEqual(packTrackers)
+  })
+})
+
+describe('formatMarkPackFinishedConfirmMessage', () => {
+  it('includes the pass name', () => {
+    expect(formatMarkPackFinishedConfirmMessage('Gordon')).toContain('Gordon')
+    expect(formatMarkPackFinishedConfirmMessage('')).toContain('this pass')
   })
 })
