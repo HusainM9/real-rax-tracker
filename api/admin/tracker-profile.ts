@@ -1,4 +1,5 @@
 import {
+  adminDeleteAllTrackerProfiles,
   adminDeleteTrackerProfile,
   adminResetTrackerProfilePin,
   lookupTrackerProfileForAdmin,
@@ -30,6 +31,7 @@ export default async function handler(request: Request): Promise<Response> {
 
   const url = new URL(request.url)
   const usernameParam = url.searchParams.get('username') ?? ''
+  const purgeAll = url.searchParams.get('all') === '1'
 
   if (request.method === 'GET') {
     if (!usernameParam.trim()) {
@@ -89,6 +91,18 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   if (request.method === 'DELETE') {
+    if (purgeAll) {
+      const result = await adminDeleteAllTrackerProfiles()
+      if (!result.ok) {
+        return Response.json({ error: 'Could not delete accounts.' }, { status: 500 })
+      }
+      return Response.json({
+        ok: true,
+        deleted: result.deleted,
+        usernames: result.usernames,
+      })
+    }
+
     if (!usernameParam.trim()) {
       return Response.json({ error: 'Username is required.' }, { status: 400 })
     }

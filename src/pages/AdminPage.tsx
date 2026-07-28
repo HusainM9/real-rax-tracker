@@ -404,6 +404,56 @@ export default function AdminPage() {
     }
   }
 
+  const deleteAllAccounts = async () => {
+    if (
+      !window.confirm(
+        'Delete ALL accounts and legacy cloud-sync profiles? Everyone will need to create a new account. This cannot be undone.',
+      )
+    ) {
+      return
+    }
+    if (
+      !window.confirm(
+        'Final confirm: wipe every stored account profile now?',
+      )
+    ) {
+      return
+    }
+
+    setCloudProfileBusy(true)
+    setCloudProfileStatus('Deleting all accounts…')
+    try {
+      const response = await fetch('/api/admin/tracker-profile?all=1', {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const body = (await response.json()) as {
+        ok?: boolean
+        deleted?: number
+        usernames?: string[]
+        error?: string
+      }
+      if (!response.ok) {
+        throw new Error(body.error || `Delete all failed (${response.status}).`)
+      }
+      setCloudProfileSummary(null)
+      const deleted = Number(body.deleted) || 0
+      setCloudProfileStatus(
+        deleted === 0
+          ? 'No accounts found to delete.'
+          : `Deleted ${deleted} account${deleted === 1 ? '' : 's'}${
+              body.usernames?.length
+                ? ` (${body.usernames.map((name) => `@${name}`).join(', ')})`
+                : ''
+            }. Users can create fresh accounts now.`,
+      )
+    } catch (error) {
+      setCloudProfileStatus(error instanceof Error ? error.message : 'Could not delete all accounts.')
+    } finally {
+      setCloudProfileBusy(false)
+    }
+  }
+
   const postCatalogImport = async (body: Record<string, unknown>): Promise<CatalogImportResponse> => {
     const response = await fetch('/api/admin/catalog-import', {
       method: 'POST',
@@ -1234,7 +1284,9 @@ export default function AdminPage() {
         <p className="import-hint">
           Accounts are keyed by Real @username. Passwords are stored as hashes — admins cannot read
           the old password. Reset keeps their account data and sets a new password you share
-          privately. Delete removes the account copy so they can register fresh with a new password.
+          privately. Delete removes one account so they can register fresh. Use{' '}
+          <strong>Delete all accounts</strong> to wipe legacy cloud-sync profiles before the new
+          account rollout.
         </p>
         <div className="button-row">
           <label className="field inline-field rank-search-field">
@@ -1295,6 +1347,14 @@ export default function AdminPage() {
             onClick={() => void deleteCloudProfile()}
           >
             Delete account
+          </button>
+          <button
+            className="button danger"
+            type="button"
+            disabled={cloudProfileBusy}
+            onClick={() => void deleteAllAccounts()}
+          >
+            Delete all accounts
           </button>
         </div>
         {cloudProfileStatus ? <p className="import-status">{cloudProfileStatus}</p> : null}

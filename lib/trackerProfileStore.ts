@@ -653,6 +653,38 @@ export async function adminDeleteTrackerProfile(
   return { ok: true, notFound: false, storageConfigured: true }
 }
 
+/** Wipe every stored account / legacy cloud-sync profile. */
+export async function adminDeleteAllTrackerProfiles(): Promise<{
+  ok: boolean
+  storageConfigured: boolean
+  deleted: number
+  usernames: string[]
+}> {
+  if (!profileSyncConfigured()) {
+    return { ok: false, storageConfigured: false, deleted: 0, usernames: [] }
+  }
+
+  const members = await kv.smembers(TRACKER_PROFILE_USERNAMES_KEY)
+  const usernames = (members ?? [])
+    .map((value) => normalizeRealUsername(String(value)))
+    .filter(Boolean)
+    .sort()
+
+  for (const username of usernames) {
+    await kv.del(profileKey(username))
+  }
+  if (usernames.length > 0) {
+    await kv.del(TRACKER_PROFILE_USERNAMES_KEY)
+  }
+
+  return {
+    ok: true,
+    storageConfigured: true,
+    deleted: usernames.length,
+    usernames,
+  }
+}
+
 export async function changeTrackerProfilePin(input: {
   username: string
   currentPassphrase: string
