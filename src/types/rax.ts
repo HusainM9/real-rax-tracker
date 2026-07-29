@@ -23,6 +23,8 @@ export type PlayerCard = {
   externalKey?: string
   rarityLabel?: string
   passKind?: 'player' | 'team'
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
   simulatedRarityLabel?: string
   createdAt: string
 }
@@ -99,6 +101,8 @@ export type SavedSellRankRow = {
   sport: Sport
   season: string
   rarityLabel?: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   claimableNow: number
   lostClaimableRax: number
   freedClaimableRax: number
@@ -111,6 +115,8 @@ export type SavedSkippedSellRankPass = {
   sport: Sport
   season: string
   rarityLabel?: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   reason: 'no_earnings' | 'analysis_failed'
   detail: string
 }
@@ -144,6 +150,8 @@ export type PlannedPass = {
   source: 'catalog' | 'ranking' | 'manual'
   /** Purchase progress bucket on the Plan page. */
   progress: PlannedPassProgress
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
   addedAt: string
 }
 

@@ -335,6 +335,13 @@ export type RealBoostInfo = {
   progressQualifier?: string
 }
 
+/** Nested player/team entity on a Real pass (avatar key → media.realapp.com CDN). */
+export type RealPassEntity = {
+  id?: number | string
+  avatar?: string
+  [key: string]: unknown
+}
+
 export type RealPass = {
   /** Pass instance id — distinct per owned copy of the same entity/season. */
   id?: string | number
@@ -350,6 +357,8 @@ export type RealPass = {
   isRefunded?: boolean
   isActive?: boolean
   boostInfo?: RealBoostInfo | null
+  /** Nested entity — source of player face / team badge avatar keys. */
+  entity?: RealPassEntity | null
 }
 
 export type RealCollectingInfo = {
@@ -483,11 +492,21 @@ export type RealShopEarningsTotalItem = {
   id?: number | string
   value?: string | number
   entityType?: string
-  entity?: number | string
+  /** Entity id, or nested entity object (shop pages include `entity.avatar`). */
+  entity?: number | string | RealPassEntity | null
   type?: string
   sport?: string
   label?: string
   [key: string]: unknown
+}
+
+/** Player (or team) payload from `/players|teams/{id}/sport/{sport}` — includes CDN avatar. */
+export type RealSportEntity = RealPassEntity & {
+  firstName?: string
+  lastName?: string
+  displayName?: string
+  name?: string
+  sport?: string
 }
 
 export type RealShopEarningsTotalQuery = {
@@ -522,6 +541,32 @@ export async function getShopEarningsTotal(
   return {
     items: Array.isArray(data.items) ? (data.items as RealShopEarningsTotalItem[]) : [],
   }
+}
+
+export type RealSportEntityQuery = {
+  entityId: number
+  /** Real path slug (`ncaam`, `ncaaf`, `nba`, …). */
+  sport: string
+  entityType?: 'player' | 'team'
+}
+
+/**
+ * Fetch a single Real player/team entity (includes `avatar` even when `/userpasses` omits it
+ * for college players).
+ */
+export async function getRealSportEntity(
+  query: RealSportEntityQuery,
+  context: RealApiContext,
+): Promise<RealSportEntity | null> {
+  const entityType = query.entityType === 'team' ? 'teams' : 'players'
+  const path = `/${entityType}/${query.entityId}/sport/${encodeURIComponent(query.sport)}`
+  const data = await realGetJson<Record<string, unknown>>(path, context)
+  const nested =
+    query.entityType === 'team'
+      ? data.team ?? data.entity ?? data
+      : data.player ?? data.entity ?? data
+  if (!nested || typeof nested !== 'object') return null
+  return nested as RealSportEntity
 }
 
 /** One Real play event from `/players/.../plays/{recent|top}` (rating is string `value`). */

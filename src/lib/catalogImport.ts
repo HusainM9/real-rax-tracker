@@ -52,6 +52,7 @@ export function importCatalogProfileIntoData(
               externalKey: profile.externalKey,
               rarityLabel: profile.rarityLabel ?? card.rarityLabel,
               passKind,
+              avatar: profile.avatar ?? card.avatar,
             }
           : card,
       )
@@ -66,6 +67,7 @@ export function importCatalogProfileIntoData(
           externalKey: profile.externalKey,
           rarityLabel: profile.rarityLabel,
           passKind,
+          avatar: profile.avatar,
           createdAt: timestamp,
         },
       ]

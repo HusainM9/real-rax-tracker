@@ -102,6 +102,8 @@ export type PassRecommendationRow = {
   seasonYear: number
   rarityLabel?: string
   passKind: CatalogPassKind
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
   totalBaseRax: number
   iconic1TotalRax: number
   rowCount: number
@@ -521,6 +523,36 @@ export type RecommendationPassAdjustment = {
   sport: Sport
   season: string
   mode: RecommendationPassAdjustmentMode
+  passKind?: CatalogPassKind
+  /** Real CDN avatar key when known at add time (search / owned / ranking). */
+  avatar?: string
+}
+
+export function recommendationAdjustmentFromPass(
+  pass: {
+    externalKey: string
+    name: string
+    sport: string
+    season?: string
+    seasonLabel?: string
+    seasonYear?: number
+    passKind?: CatalogPassKind
+    avatar?: string
+  },
+  mode: RecommendationPassAdjustmentMode,
+): RecommendationPassAdjustment {
+  return {
+    externalKey: pass.externalKey,
+    name: pass.name,
+    sport: sportFromCatalog(pass.sport),
+    season:
+      pass.season?.trim() ||
+      pass.seasonLabel?.trim() ||
+      (pass.seasonYear != null ? String(pass.seasonYear) : ''),
+    mode,
+    passKind: pass.passKind === 'team' ? 'team' : 'player',
+    avatar: pass.avatar?.trim() || undefined,
+  }
 }
 
 export type RecommendationSeasonFilter = {
@@ -726,6 +758,7 @@ export function analyzeCatalogImportAtRarity(
     seasonYear: simulated.seasonYear,
     rarityLabel: rarity,
     passKind,
+    avatar: simulated.avatar,
     totalBaseRax: simulated.totalBaseRax,
     iconic1TotalRax: estimateTotalRaxAtRarity(simulated, rarity),
     rowCount: simulated.rows.length,
@@ -763,6 +796,7 @@ export function analyzeOwnedCardUpgradeAtRarity(
     seasonYear: simulated.seasonYear,
     rarityLabel: rarity,
     passKind,
+    avatar: card.avatar?.trim() || simulated.avatar,
     totalBaseRax: simulated.totalBaseRax,
     iconic1TotalRax: estimateTotalRaxAtRarity(simulated, rarity),
     rowCount: simulated.rows.length,
@@ -822,6 +856,7 @@ function buildPassRecommendationRow(
     seasonYear: profile.seasonYear,
     rarityLabel,
     passKind,
+    avatar: profile.avatar,
     totalBaseRax: profile.totalBaseRax,
     iconic1TotalRax: estimateTotalRaxAtRarity(profile, rarityLabel),
     rowCount: profile.rows.length,
@@ -968,12 +1003,27 @@ export type OwnedIconicUpgradeImpactRow = {
   name: string
   sport: Sport
   season: string
+  passKind?: CatalogPassKind
+  avatar?: string
   isolatedNetDelta: number
   marginalNetDelta: number
   /** Full claimable RAX from this pass alone after upgrade (guaranteed + Pro bonus). */
   passClaimableRax: number
   /** Guaranteed-only claimable RAX from this pass alone after upgrade. */
   passGuaranteedRax: number
+}
+
+function impactIdentityFromCandidate(candidate: {
+  card?: PlayerCard
+  profile?: CatalogImportProfile
+}): Pick<OwnedIconicUpgradeImpactRow, 'passKind' | 'avatar'> {
+  return {
+    passKind:
+      candidate.card?.passKind === 'team' || candidate.profile?.passKind === 'team'
+        ? 'team'
+        : 'player',
+    avatar: candidate.card?.avatar?.trim() || candidate.profile?.avatar?.trim() || undefined,
+  }
 }
 
 export type OwnedIconicUpgradeImpactResult = {
@@ -1134,6 +1184,7 @@ export function analyzeOwnedIconicUpgradeImpacts(
         name: candidate.name,
         sport: candidate.sport,
         season: candidate.season,
+        ...impactIdentityFromCandidate(candidate),
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
         marginalNetDelta: after - before,
         passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,
@@ -1299,6 +1350,7 @@ function analyzeCheckerImpactsWithRarityResolver(
         name: candidate.name,
         sport: candidate.sport,
         season: candidate.season,
+        ...impactIdentityFromCandidate(candidate),
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
         marginalNetDelta: after - before,
         passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,

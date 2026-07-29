@@ -24,6 +24,8 @@ export type ProfileTopCard = {
   name: string
   sport: Sport
   rarityLabel?: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   claimableRax: number
 }
 
@@ -179,6 +181,8 @@ export function buildProfileSnapshot(
       name: row.card.name,
       sport: row.card.sport,
       rarityLabel: row.card.rarityLabel,
+      passKind: row.card.passKind,
+      avatar: row.card.avatar,
       claimableRax: row.totalClaimableRax,
     }))
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
+import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import {
   CARD_SORT_OPTIONS,
@@ -38,8 +39,13 @@ function pageCount(count: number, pageSize: number): number {
 }
 
 export default function CardsPage() {
-  const { data, setCardRarity, removeCardFromCollection, ignorePassOnImport, unignorePassKey } =
-    useRaxData()
+  const {
+    data,
+    setCardRarity,
+    removeCardFromCollection,
+    ignorePassOnImport,
+    unignorePassKey,
+  } = useRaxData()
   const [removeStatus, setRemoveStatus] = useState('')
   const [sortKey, setSortKey] = useState<CardSortKey>('claimable')
   const [secondarySortKey, setSecondarySortKey] = useState<CardSortKey | 'none'>('none')
@@ -259,15 +265,20 @@ export default function CardsPage() {
                 paginatedCards.map((cardRollup) => (
                   <tr key={cardRollup.card.id}>
                     <td>
-                      <strong>{cardRollup.card.name}</strong>
-                      {isPlayerPassForSell(cardRollup.card) ? (
-                        <>
-                          <br />
-                          <Link className="table-sub" to={`/sell?card=${cardRollup.card.id}`}>
-                            If sold →
-                          </Link>
-                        </>
-                      ) : null}
+                      <PassIdentity
+                        name={cardRollup.card.name}
+                        passKind={cardRollup.card.passKind === 'team' ? 'team' : 'player'}
+                        sport={cardRollup.card.sport}
+                        avatar={cardRollup.card.avatar}
+                        size="md"
+                        meta={
+                          isPlayerPassForSell(cardRollup.card) ? (
+                            <Link className="table-sub" to={`/sell?card=${cardRollup.card.id}`}>
+                              If sold →
+                            </Link>
+                          ) : undefined
+                        }
+                      />
                     </td>
                     <td>{cardRollup.card.sport}</td>
                     <td>{cardRollup.card.season}</td>

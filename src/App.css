@@ -921,20 +921,19 @@ label.button input.sr-only {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.15rem;
-  max-width: min(100%, 16rem);
+  max-width: min(100%, 18rem);
   text-align: left;
   white-space: normal;
   line-height: 1.25;
   min-height: 2.5rem;
 }
 
-.owned-iconic-upgrade-analyzer .owned-collection-pass-name {
-  font-weight: 600;
+.owned-iconic-upgrade-analyzer .owned-collection-pass .pass-identity {
+  max-width: 100%;
 }
 
-.owned-iconic-upgrade-analyzer .owned-collection-pass-meta {
-  font-size: 0.78rem;
-  opacity: 0.78;
+.recommendation-adjustment-owned-list .pass-identity {
+  text-align: left;
 }
 
 .owned-iconic-upgrade-analyzer .owned-collection-selected-labels {
@@ -1246,7 +1245,7 @@ label.button input.sr-only {
   color: inherit;
   cursor: pointer;
   display: grid;
-  gap: 0.25rem;
+  gap: 0.45rem;
   min-height: 6.5rem;
   padding: 0.8rem 0.9rem;
   text-align: left;
@@ -1258,21 +1257,23 @@ label.button input.sr-only {
   border-color: rgba(228, 160, 36, 0.32);
 }
 
-.cached-profile-item strong {
+.cached-profile-item .pass-identity {
+  width: 100%;
+}
+
+.cached-profile-item .pass-identity-name {
   font-size: 1rem;
 }
 
-.cached-profile-item small {
-  color: var(--muted);
+.cached-profile-item .pass-identity-meta {
   font-size: 0.84rem;
-  line-height: 1.45;
 }
 
-.cached-profile-item span {
+.cached-profile-item > span:last-child {
   color: var(--accent-soft);
   font-size: 0.8rem;
   font-weight: 700;
-  margin-top: 0.25rem;
+  margin-top: 0.1rem;
 }
 
 .field {
@@ -2151,6 +2152,16 @@ button.plan-tag:hover {
   justify-content: space-between;
 }
 
+.plan-pass-card-header .pass-identity {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-pass-card-header .pass-identity-name {
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
 .plan-pass-card-header h3 {
   margin: 0;
 }
@@ -2329,6 +2340,17 @@ button.plan-tag:hover {
   font-size: 1.18rem;
   letter-spacing: -0.02em;
   line-height: 1.25;
+}
+
+.pack-tracker-row .collapsible-title .pass-identity-name {
+  font-size: inherit;
+  letter-spacing: inherit;
+}
+
+.pack-tracker-row .collapsible-title .pass-identity-meta {
+  font-size: 0.88rem;
+  font-weight: 400;
+  max-width: none;
 }
 
 .pack-tracker-row .collapsible-description {
@@ -2602,6 +2624,87 @@ button.plan-tag:hover {
   transition:
     border-color 0.15s ease,
     background 0.15s ease;
+}
+
+.pass-identity {
+  align-items: center;
+  display: flex;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.pass-identity-media {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.pass-identity--sm .pass-identity-media {
+  height: 2.75rem;
+  width: 2.75rem;
+}
+
+.pass-identity--md .pass-identity-media {
+  height: 3.5rem;
+  width: 3.5rem;
+}
+
+.pass-identity-media--badge {
+  /* Team logos stay uncropped; no frame behind them. */
+  padding: 0;
+}
+
+.pass-identity-img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.pass-identity-media:not(.pass-identity-media--badge) .pass-identity-img {
+  border-radius: 50%;
+}
+
+.pass-identity-media--badge .pass-identity-img {
+  object-fit: contain;
+}
+
+.pass-identity-fallback {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 50%;
+  color: var(--muted);
+  display: grid;
+  font-size: 0.78rem;
+  font-weight: 700;
+  height: 100%;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  place-items: center;
+  width: 100%;
+}
+
+.pass-identity--md .pass-identity-fallback {
+  font-size: 0.95rem;
+}
+
+.pass-identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.pass-identity-name {
+  display: block;
+  line-height: 1.25;
+}
+
+.pass-identity-meta,
+.pass-identity-text small {
+  color: var(--muted);
+  display: block;
+  line-height: 1.45;
 }
 
 .table-wrap {

@@ -95,6 +95,7 @@ function parsePass(input: unknown): CatalogPassInput | null {
       stringValue(item.seasonLabel ?? item.season_label) || seasonLabelFromYear(seasonYear, sport),
     name,
     rarityLabel: stringValue(item.rarityLabel ?? item.rarity_label) || undefined,
+    avatar: stringValue(item.avatar) || undefined,
     sourceUpdatedAt: stringValue(item.sourceUpdatedAt ?? item.source_updated_at) || undefined,
   }
 }

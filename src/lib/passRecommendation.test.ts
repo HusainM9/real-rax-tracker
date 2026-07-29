@@ -25,6 +25,7 @@ import {
   rankCatalogRecommendationsForDay,
   rankCatalogRecommendationsForMonth,
   RECOMMENDATION_SIMULATED_RARITY,
+  recommendationAdjustmentFromPass,
   recommendationCapsForAllSports,
   recommendationCapsForSport,
   recommendationCapsForSports,
@@ -656,6 +657,48 @@ describe('passRecommendation', () => {
     ).toBeNull()
   })
 
+  it('analyzeCatalogCandidate carries catalog avatar onto ranking rows', () => {
+    const profile = {
+      ...catalogProfile('face|2025|NBA', 'Face Pass', [
+        { claimDay: '2026-03-01', baseRaxEarned: 40 },
+      ]),
+      avatar: 'abc123facehash',
+    }
+    const row = analyzeCatalogCandidate(data, profile)
+    expect(row).not.toBeNull()
+    expect(row!.avatar).toBe('abc123facehash')
+  })
+
+  it('recommendationAdjustmentFromPass copies avatar and passKind', () => {
+    const adjustment = recommendationAdjustmentFromPass(
+      {
+        externalKey: 'face|2025|NBA',
+        name: 'Face Pass',
+        sport: 'NBA',
+        seasonLabel: '2025-26',
+        passKind: 'player',
+        avatar: 'adj-face',
+      },
+      'assume-iconic-1',
+    )
+    expect(adjustment.avatar).toBe('adj-face')
+    expect(adjustment.passKind).toBe('player')
+    expect(adjustment.mode).toBe('assume-iconic-1')
+  })
+
+  it('month and day ranking rows carry catalog avatar', () => {
+    const profile = {
+      ...catalogProfile('face|2025|NBA', 'Face Pass', [
+        { claimDay: '2026-03-01', baseRaxEarned: 40 },
+      ]),
+      avatar: 'month-day-face',
+    }
+    const month = rankCatalogRecommendationsForMonth(data, [profile], 2)
+    const day = rankCatalogRecommendationsForDay(data, [profile], '03-01')
+    expect(month.rows[0]?.avatar).toBe('month-day-face')
+    expect(day.rows[0]?.avatar).toBe('month-day-face')
+  })
+
   it('analyzeCatalogCandidate reports overlap RAX when the new pass loses claim days', () => {
     // Two guaranteed + one pro-bonus slot; a 4th weak pass is pure overlap.
     const stacked: RaxTrackerData = {
@@ -856,8 +899,8 @@ describe('passRecommendation', () => {
       version: 1,
       settings: { proBonusEnabled: false, savedUsername: '' },
       cards: [
-        card('c-low', 'Bench A', '100|2026|NBA', 'Legendary 1'),
-        card('c-high', 'Star B', '101|2026|NBA', 'Legendary 1'),
+        { ...card('c-low', 'Bench A', '100|2026|NBA', 'Legendary 1'), avatar: 'bench-face' },
+        { ...card('c-high', 'Star B', '101|2026|NBA', 'Legendary 1'), avatar: 'star-face' },
       ],
       performances: [
         { ...perf('p1', 'c-low', 20, '2026-03-01'), baseRaxEarned: 1 },
@@ -881,6 +924,9 @@ describe('passRecommendation', () => {
     const lowImpact = impacts.rows.find((row) => row.key === '100|2026|NBA')
     expect(highImpact?.marginalNetDelta).toBeGreaterThan(0)
     expect(highImpact?.passClaimableRax).toBeGreaterThan(0)
+    expect(highImpact?.avatar).toBe('star-face')
+    expect(highImpact?.passKind).toBe('player')
+    expect(lowImpact?.avatar).toBe('bench-face')
     expect(lowImpact?.marginalNetDelta).toBeLessThanOrEqual(lowImpact?.isolatedNetDelta ?? 0)
     // Per-pass contribution list: highest net RAX first.
     expect(impacts.rows.map((row) => row.key)).toEqual(

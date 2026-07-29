@@ -12,6 +12,7 @@ type CachedProfileInput = {
   passKind?: unknown
   name?: unknown
   rarityLabel?: unknown
+  avatar?: unknown
   externalKey?: unknown
   rows?: unknown
   updatedAt?: unknown
@@ -66,6 +67,7 @@ function parseProfile(input: CachedProfileInput): CatalogPassInput | null {
     seasonLabel: stringValue(input.season) || String(seasonYear),
     name,
     rarityLabel: stringValue(input.rarityLabel) || undefined,
+    avatar: stringValue(input.avatar) || undefined,
     sourceUpdatedAt: stringValue(input.updatedAt) || undefined,
   }
 }

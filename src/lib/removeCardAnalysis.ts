@@ -207,6 +207,8 @@ export type SkippedSellRankPass = {
   sport: PlayerCard['sport']
   season: string
   rarityLabel?: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   reason: 'no_earnings' | 'analysis_failed'
   detail: string
 }
@@ -273,6 +275,8 @@ function rankCardBatch(
         sport: card.sport,
         season: card.season,
         rarityLabel: card.rarityLabel,
+        passKind: card.passKind,
+        avatar: card.avatar,
         reason: 'no_earnings',
         detail: 'No RAX earnings rows — add earnings on Entry or re-import this pass.',
       })
@@ -287,6 +291,8 @@ function rankCardBatch(
         sport: card.sport,
         season: card.season,
         rarityLabel: card.rarityLabel,
+        passKind: card.passKind,
+        avatar: card.avatar,
         reason: 'analysis_failed',
         detail: 'Could not analyze this pass for sell ranking.',
       })

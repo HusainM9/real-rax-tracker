@@ -61,6 +61,8 @@ export type DisplacedCardSummary = {
   name: string
   sport: Sport
   season: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   daysDisplaced: number
   raxLost: number
 }
@@ -114,7 +116,10 @@ export function netWithProDelta(result: PotentialAnalysisResult): number {
 export type PotentialClaimLadderEntry = {
   cardId: string
   name: string
+  sport: Sport
   season: string
+  passKind?: 'player' | 'team'
+  avatar?: string
   isPotential: boolean
   raxEarned: number
   rankInSport: number
@@ -282,7 +287,10 @@ export function buildPotentialClaimDayBreakdowns(
         return {
           cardId: candidate.card.id,
           name: candidate.card.name,
+          sport,
           season: candidate.card.season,
+          passKind: candidate.card.passKind,
+          avatar: candidate.card.avatar,
           isPotential,
           raxEarned: candidate.performance.raxEarned,
           rankInSport: candidate.rankInSport,
@@ -332,6 +340,8 @@ export function summarizeDisplacedByCard(
       name: candidate.card.name,
       sport: candidate.card.sport,
       season: candidate.card.season,
+      passKind: candidate.card.passKind === 'team' ? 'team' : 'player',
+      avatar: candidate.card.avatar,
       daysDisplaced: 1,
       raxLost: candidate.performance.raxEarned,
     })

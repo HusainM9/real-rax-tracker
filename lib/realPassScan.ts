@@ -15,6 +15,8 @@ export type NormalizedRealPass = {
   rarityLabel?: string
   playerName?: string
   seasonLabel?: string
+  /** Real CDN avatar key from `entity.avatar` (face or team badge). */
+  avatar?: string
 }
 
 export type RealPassPayload = {
@@ -91,6 +93,15 @@ export function realPassPair(entityId: number, season: number, sportRaw: string)
   return `${entityId}:${season}:${sportRaw}`
 }
 
+/** Extract Real CDN avatar key from a nested `entity` object. */
+export function avatarFromRealEntity(entity: unknown): string | undefined {
+  if (!entity || typeof entity !== 'object') return undefined
+  const avatar = (entity as { avatar?: unknown }).avatar
+  if (typeof avatar !== 'string') return undefined
+  const trimmed = avatar.trim()
+  return trimmed || undefined
+}
+
 /** Returns null for passes we cannot key on (missing ids) or that Real has refunded. */
 export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
   if (raw.isRefunded === true) return null
@@ -104,6 +115,7 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
 
   const rarityLabel = normalizeRealRarityLabel(String(raw.boostInfo?.rarityLabel ?? ''))
   const playerName = String(raw.label ?? '').trim()
+  const avatar = avatarFromRealEntity(raw.entity)
 
   return {
     entityId,
@@ -114,6 +126,7 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
     rarityLabel: rarityLabel || undefined,
     playerName: playerName || undefined,
     seasonLabel: seasonLabelForPass(season, sportRaw, String(raw.seasonDisplay ?? '')),
+    avatar,
   }
 }
 
@@ -134,11 +147,16 @@ export function buildRealPassPayload(rawPasses: RealPass[]): RealPassPayload {
     const existing = byKey.get(dedupeKey)
     if (!existing) {
       byKey.set(dedupeKey, pass)
-    } else if (
-      pass.rarityLabel &&
-      rarityRank(pass.rarityLabel) > rarityRank(existing.rarityLabel ?? '')
-    ) {
-      byKey.set(dedupeKey, { ...existing, rarityLabel: pass.rarityLabel })
+    } else {
+      const next = { ...existing }
+      if (
+        pass.rarityLabel &&
+        rarityRank(pass.rarityLabel) > rarityRank(existing.rarityLabel ?? '')
+      ) {
+        next.rarityLabel = pass.rarityLabel
+      }
+      if (pass.avatar && !existing.avatar) next.avatar = pass.avatar
+      byKey.set(dedupeKey, next)
     }
 
     if (!pass.rarityLabel) continue

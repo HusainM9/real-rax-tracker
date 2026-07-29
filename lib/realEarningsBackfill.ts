@@ -104,6 +104,7 @@ function catalogPassInput(pass: EarningsBackfillPass): CatalogPassInput {
     seasonLabel: canonical.seasonLabel,
     name: pass.name,
     rarityLabel: pass.rarityLabel,
+    avatar: pass.avatar,
   }
 }
 

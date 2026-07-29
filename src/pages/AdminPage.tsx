@@ -17,12 +17,15 @@ import {
 } from '../../lib/accountPasswordRules'
 import { parseFetchJson } from '../lib/readResponseJson'
 import {
+  AVATAR_BACKFILL_TOP_N,
+  AVATAR_BACKFILL_UI_MAX_PAGES,
   DEFAULT_SHOP_CRAWL_UI_MAX_PAGES,
   SHOP_CRAWL_UI_MAX_PAGES_CAP,
   SHOP_CRAWL_WAIT_LOG_INTERVAL_MS,
   SHOP_CRAWL_WAIT_STATUS_INTERVAL_MS,
   advanceShopCrawlBeforeByChunks,
   advanceShopCrawlBeforeByPages,
+  avatarBackfillMaxBefore,
   clearShopCrawlResumeCursor,
   estimateShopCrawlChunkTimeoutMs,
   formatShopCrawlHttpFailure,
@@ -191,6 +194,7 @@ export default function AdminPage() {
     includeUfc: false,
     includePlayers: true,
     includeTeams: true,
+    avatarsOnly: false,
     maxPages: String(DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
     delayMs: '300',
   })
@@ -800,8 +804,42 @@ export default function AdminPage() {
     Boolean(currentShopCrawlConfigPreview) &&
     !savedCursorMatchesConfig
 
-  const runShopEarningsCrawl = async (mode: 'resume' | 'fresh' = 'fresh') => {
+  const runShopEarningsCrawl = async (
+    mode: 'resume' | 'fresh' = 'fresh',
+    runOptions?: {
+      avatarsOnly?: boolean
+      maxBefore?: number
+      maxPages?: number
+      /** Force all live sports + UFC + players + teams (one-button face backfill). */
+      backfillAllSports?: boolean
+    },
+  ) => {
     const seasons = parseShopCrawlSeasons()
+    const avatarsOnly = runOptions?.avatarsOnly ?? shopCrawl.avatarsOnly
+    const backfillAllSports = runOptions?.backfillAllSports === true
+    const sportsForCrawl = backfillAllSports
+      ? LIVE_SHOP_CRAWL_SPORTS.map((sport) => sport.value)
+      : buildShopCrawlSportsForRequest()
+    const includeUfc = backfillAllSports
+      ? true
+      : shopCrawl.includeUfc || sportsForCrawl.includes('ufc')
+    const entityTypes: ShopCrawlEntityType[] = backfillAllSports
+      ? ['player', 'team']
+      : buildShopCrawlEntityTypes()
+    const maxBefore =
+      typeof runOptions?.maxBefore === 'number' && Number.isFinite(runOptions.maxBefore)
+        ? Math.max(0, Math.floor(runOptions.maxBefore))
+        : null
+    const maxPagesCap = avatarsOnly ? AVATAR_BACKFILL_UI_MAX_PAGES : SHOP_CRAWL_UI_MAX_PAGES_CAP
+    const maxPages = Math.min(
+      maxPagesCap,
+      Math.max(
+        1,
+        Number(runOptions?.maxPages) ||
+          Number(shopCrawl.maxPages) ||
+          (avatarsOnly ? AVATAR_BACKFILL_UI_MAX_PAGES : DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
+      ),
+    )
 
     if (seasons.length === 0) {
       const msg = 'Enter at least one season year (e.g. 2025,2026). UFC shop is season 2023 only.'
@@ -810,14 +848,14 @@ export default function AdminPage() {
       shopCrawlLogIdRef.current = 1
       return
     }
-    if (shopCrawl.sports.length === 0 && !shopCrawl.includeUfc) {
+    if (sportsForCrawl.length === 0 && !includeUfc) {
       const msg = 'Select at least one sport, or enable UFC.'
       setShopCrawlStatus(msg)
       setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
       shopCrawlLogIdRef.current = 1
       return
     }
-    if (liveSportsSelected && !hasEntityTypeSelection) {
+    if (sportsForCrawl.length > 0 && entityTypes.length === 0) {
       const msg = 'Select players and/or teams for live sports (UFC does not use these toggles).'
       setShopCrawlStatus(msg)
       setShopCrawlLog([{ id: 1, type: 'client_error', message: msg }])
@@ -825,20 +863,30 @@ export default function AdminPage() {
       return
     }
 
+    if (backfillAllSports) {
+      setShopCrawl((current) => ({
+        ...current,
+        sports: LIVE_SHOP_CRAWL_SPORTS.map((sport) => sport.value),
+        includeUfc: true,
+        includePlayers: true,
+        includeTeams: true,
+        avatarsOnly: true,
+        maxPages: String(AVATAR_BACKFILL_UI_MAX_PAGES),
+      }))
+    } else if (runOptions?.avatarsOnly != null) {
+      setShopCrawl((current) => ({ ...current, avatarsOnly: runOptions.avatarsOnly === true }))
+    }
+
     const controller = new AbortController()
     setShopCrawlAbort(controller)
     setShopCrawlBusy(true)
 
-    const entityTypes = buildShopCrawlEntityTypes()
-    const sportsForCrawl = buildShopCrawlSportsForRequest()
     const resumeConfig = buildShopCrawlResumeConfig(seasons, sportsForCrawl, entityTypes)
-    const maxPages = Math.min(
-      SHOP_CRAWL_UI_MAX_PAGES_CAP,
-      Math.max(1, Number(shopCrawl.maxPages) || DEFAULT_SHOP_CRAWL_UI_MAX_PAGES),
-    )
     const delayMs = Number(shopCrawl.delayMs)
     const resolvedDelayMs = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 300
-    const chunkTimeoutMs = estimateShopCrawlChunkTimeoutMs(maxPages, resolvedDelayMs)
+    const chunkTimeoutMs = estimateShopCrawlChunkTimeoutMs(maxPages, resolvedDelayMs, {
+      avatarsOnly,
+    })
 
     let jobIndex = 0
     let before = 0
@@ -866,8 +914,11 @@ export default function AdminPage() {
       setShopCrawlCursorBefore('0')
     }
 
+    const topNLabel =
+      maxBefore != null ? `, top≈${maxBefore + 20} per sport/season/type` : ''
+    const modeLabel = avatarsOnly ? 'avatars-only' : 'full earnings'
     const startMsg = resumed
-      ? `Resuming crawl from ${formatShopCrawlResumeCursor({
+      ? `Resuming ${modeLabel} crawl from ${formatShopCrawlResumeCursor({
           jobIndex,
           before,
           sport: shopCrawlResumeRef.current?.sport,
@@ -875,22 +926,22 @@ export default function AdminPage() {
           entityType: shopCrawlResumeRef.current?.entityType,
           jobsTotal: shopCrawlResumeRef.current?.jobsTotal,
         })}: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
-          shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
+          includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
         }], entityTypes=[${entityTypes.join(',')}]${
-          shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
-        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
-      : `Starting crawl: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
-          shopCrawl.includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
+          includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
+        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}${topNLabel}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+      : `Starting ${modeLabel} crawl: seasons=[${seasons.join(',')}], sports=[${sportsForCrawl.join(',')}${
+          includeUfc && !sportsForCrawl.includes('ufc') ? ',ufc' : ''
         }], entityTypes=[${entityTypes.join(',')}]${
-          shopCrawl.includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
-        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
+          includeUfc ? ' (UFC uses team path; shop season 2023 All-time)' : ''
+        }, maxPages/chunk=${maxPages}, delayMs=${resolvedDelayMs}${topNLabel}, chunkTimeout≈${Math.round(chunkTimeoutMs / 1000)}s`
 
     shopCrawlLogIdRef.current = 1
     setShopCrawlLog([{ id: 1, type: 'client_start', message: startMsg }])
     setShopCrawlStatus(
       resumed
-        ? `Resuming shop earningstotal crawl from jobIndex=${jobIndex}, before=${before}…`
-        : 'Starting shop earningstotal crawl…',
+        ? `Resuming ${modeLabel} crawl from jobIndex=${jobIndex}, before=${before}…`
+        : `Starting ${modeLabel} crawl…`,
     )
     // Yield so React paints the first log line before the first network request.
     await new Promise<void>((resolve) => {
@@ -919,7 +970,9 @@ export default function AdminPage() {
           `Requesting chunk ${chunks} (jobIndex=${jobIndex}, before=${before})…`,
         )
         setShopCrawlStatus(
-          `Chunk ${chunks}: shop + dailies (job ${jobIndex + 1}, before=${before})… ${totalUpserted} passes / ${totalEarningsFetched} earnings / ${totalDailyRows} daily rows so far.`,
+          avatarsOnly
+            ? `Chunk ${chunks}: avatars (job ${jobIndex + 1}, before=${before})… ${totalUpserted} passes so far.`
+            : `Chunk ${chunks}: shop + dailies (job ${jobIndex + 1}, before=${before})… ${totalUpserted} passes / ${totalEarningsFetched} earnings / ${totalDailyRows} daily rows so far.`,
         )
 
         const linked = linkAbortTimeout(chunkTimeoutMs, controller.signal)
@@ -927,7 +980,7 @@ export default function AdminPage() {
         let lastWaitLogAt = 0
         const waitTimer = window.setInterval(() => {
           const elapsed = Date.now() - waitStarted
-          const waitMsg = shopCrawlWaitingMessage(chunks, elapsed)
+          const waitMsg = shopCrawlWaitingMessage(chunks, elapsed, { avatarsOnly })
           setShopCrawlStatus(waitMsg)
           if (elapsed - lastWaitLogAt >= SHOP_CRAWL_WAIT_LOG_INTERVAL_MS) {
             lastWaitLogAt = elapsed
@@ -945,12 +998,14 @@ export default function AdminPage() {
             body: JSON.stringify({
               seasons,
               sports: sportsForCrawl,
-              includeUfc: shopCrawl.includeUfc || sportsForCrawl.includes('ufc'),
+              includeUfc,
               entityTypes,
               jobIndex,
               before,
               maxPages,
               delayMs: resolvedDelayMs,
+              avatarsOnly,
+              ...(maxBefore != null ? { maxBefore } : {}),
             }),
           })
         } catch (error) {
@@ -1118,7 +1173,9 @@ export default function AdminPage() {
               <h3>Shop earningstotal crawl</h3>
               <p className="subsection-note">
                 Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
-                Continue resumes without redoing finished pages.
+                Continue resumes without redoing finished pages. Use{' '}
+                <strong>Backfill faces · top {AVATAR_BACKFILL_TOP_N}</strong> for a fast avatars-only
+                pass (college players, teams, UFC) — enter seasons first.
               </p>
             </div>
           </div>
@@ -1211,6 +1268,20 @@ export default function AdminPage() {
               />
               Teams
             </label>
+            <label className="inline-toggle" title="Skip daily earnings — only upsert shop metadata and faces/badges. Fast backfill for college players (Real omits their avatar on /userpasses).">
+              <input
+                type="checkbox"
+                checked={shopCrawl.avatarsOnly}
+                disabled={shopCrawlBusy}
+                onChange={(event) =>
+                  setShopCrawl((current) => ({
+                    ...current,
+                    avatarsOnly: event.target.checked,
+                  }))
+                }
+              />
+              Avatars only
+            </label>
             <button
               className="button primary"
               type="button"
@@ -1226,6 +1297,22 @@ export default function AdminPage() {
               onClick={() => void runShopEarningsCrawl('fresh')}
             >
               Start over
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              disabled={shopCrawlBusy || parseShopCrawlSeasons().length === 0}
+              title={`Avatars-only shop crawl: all live sports + UFC, players + teams, top ${AVATAR_BACKFILL_TOP_N} per sport/season. Enter seasons above first.`}
+              onClick={() =>
+                void runShopEarningsCrawl('fresh', {
+                  avatarsOnly: true,
+                  backfillAllSports: true,
+                  maxBefore: avatarBackfillMaxBefore(AVATAR_BACKFILL_TOP_N),
+                  maxPages: AVATAR_BACKFILL_UI_MAX_PAGES,
+                })
+              }
+            >
+              {shopCrawlBusy ? 'Crawling…' : `Backfill faces · top ${AVATAR_BACKFILL_TOP_N}`}
             </button>
             <button
               className="button"

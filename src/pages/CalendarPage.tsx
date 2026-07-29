@@ -15,19 +15,25 @@ import { displayRaxValue } from '../lib/displayRax'
 import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
 import { normalizeBestDayParam } from '../lib/passRecommendation'
 import { useRaxData } from '../context/RaxDataContext'
+import { PassIdentity } from '../components/PassIdentity'
 import type { ClaimCandidate, ClaimDayResult } from '../types/rax'
 
 function CandidateRow({ candidate }: { candidate: ClaimCandidate }) {
   return (
     <div className={`claim-row ${candidate.status}`}>
-      <span>
-        <strong>{candidate.card.name}</strong>
-        <small>
-          {candidate.card.sport} · {candidate.card.season || 'No season'} · rank #{candidate.rankInSport}
-          {' · '}
-          {formatClaimDay(candidate.performance.claimDay)}
-        </small>
-      </span>
+      <PassIdentity
+        name={candidate.card.name}
+        passKind={candidate.card.passKind === 'team' ? 'team' : 'player'}
+        sport={candidate.card.sport}
+        avatar={candidate.card.avatar}
+        meta={
+          <>
+            {candidate.card.sport} · {candidate.card.season || 'No season'} · rank #{candidate.rankInSport}
+            {' · '}
+            {formatClaimDay(candidate.performance.claimDay)}
+          </>
+        }
+      />
       <b>{formatRax(candidate.performance.raxEarned)} RAX</b>
     </div>
   )

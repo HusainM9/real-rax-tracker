@@ -97,6 +97,25 @@ describe('analyzePotentialCard', () => {
     ).toBe(result?.displacedRax)
   })
 
+  it('carries avatar and passKind onto displaced-by-card summaries', () => {
+    const faced: RaxTrackerData = {
+      ...data,
+      cards: [
+        { ...card('c1', 'Owned A'), avatar: 'face-a', passKind: 'player' },
+        { ...card('c2', 'Owned B'), avatar: 'face-b', passKind: 'player' },
+        { ...card('c3', 'Owned C'), avatar: 'face-c', passKind: 'player' },
+      ],
+    }
+    const result = analyzePotentialCard(
+      faced,
+      { name: 'Prospect', sport: 'NBA', season: '2025-26' },
+      [{ claimDay: '2026-03-01', raxEarned: 28, note: '' }],
+    )
+    expect(result?.displacedByCard.some((row) => row.avatar && row.passKind === 'player')).toBe(
+      true,
+    )
+  })
+
   it('breaks net claimable change down by calendar month', () => {
     const spreadData: RaxTrackerData = {
       ...data,

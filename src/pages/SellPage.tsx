@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import { sortCards, type RarityFilterValue, type SortDirection } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
@@ -388,14 +389,14 @@ export default function SellPage() {
                                 type="button"
                                 onClick={() => selectCard(pass.cardId)}
                               >
-                                {pass.name || 'Unnamed pass'}
+                                <PassIdentity
+                                  name={pass.name || 'Unnamed pass'}
+                                  passKind={pass.passKind === 'team' ? 'team' : 'player'}
+                                  sport={pass.sport}
+                                  avatar={pass.avatar}
+                                  meta={pass.rarityLabel}
+                                />
                               </button>
-                              {pass.rarityLabel ? (
-                                <>
-                                  <br />
-                                  <small className="table-sub">{pass.rarityLabel}</small>
-                                </>
-                              ) : null}
                             </td>
                             <td>{pass.sport}</td>
                             <td>{pass.season || '—'}</td>
@@ -528,12 +529,19 @@ export default function SellPage() {
                               type="button"
                               onClick={() => selectCard(row.cardId)}
                             >
-                              {row.name || 'Unnamed pass'}
+                              <PassIdentity
+                                name={row.name || 'Unnamed pass'}
+                                passKind={row.passKind === 'team' ? 'team' : 'player'}
+                                sport={row.sport}
+                                avatar={row.avatar}
+                                meta={
+                                  <>
+                                    {row.season || 'No season'}
+                                    {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                                  </>
+                                }
+                              />
                             </button>
-                            <small className="table-sub">
-                              {row.season || 'No season'}
-                              {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                            </small>
                           </td>
                           <td>{row.sport}</td>
                           <td>{formatRax(displayRaxValue(row.claimableNow))}</td>
@@ -634,12 +642,19 @@ export default function SellPage() {
                         type="button"
                         onClick={() => selectCard(card.id)}
                       >
-                        {card.name || 'Unnamed pass'}
+                        <PassIdentity
+                          name={card.name || 'Unnamed pass'}
+                          passKind={card.passKind === 'team' ? 'team' : 'player'}
+                          sport={card.sport}
+                          avatar={card.avatar}
+                          meta={
+                            <>
+                              {card.season || 'No season'}
+                              {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                            </>
+                          }
+                        />
                       </button>
-                      <small className="table-sub">
-                        {card.season || 'No season'}
-                        {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                      </small>
                     </td>
                     <td>{card.sport}</td>
                     <td>
@@ -690,12 +705,19 @@ export default function SellPage() {
                   className={`card-picker-item${selectedCardId === row.card.id ? ' selected' : ''}`}
                   onClick={() => selectCard(row.card.id)}
                 >
-                  <strong>{row.card.name || 'Unnamed pass'}</strong>
-                  <small>
-                    {row.card.sport} · {row.card.season || 'No season'}
-                    {row.card.rarityLabel ? ` · ${row.card.rarityLabel}` : ''} ·{' '}
-                    {formatRax(displayRaxValue(row.totalClaimableRax))} claimable
-                  </small>
+                  <PassIdentity
+                    name={row.card.name || 'Unnamed pass'}
+                    passKind={row.card.passKind === 'team' ? 'team' : 'player'}
+                    sport={row.card.sport}
+                    avatar={row.card.avatar}
+                    meta={
+                      <>
+                        {row.card.sport} · {row.card.season || 'No season'}
+                        {row.card.rarityLabel ? ` · ${row.card.rarityLabel}` : ''} ·{' '}
+                        {formatRax(displayRaxValue(row.totalClaimableRax))} claimable
+                      </>
+                    }
+                  />
                 </button>
               ))}
             </div>
@@ -892,7 +914,16 @@ export default function SellPage() {
                       key={`${gain.claimDay}-${gain.candidate.card.id}-${gain.candidate.performance.raxEarned}`}
                     >
                       <td>{gain.claimDay}</td>
-                      <td>{gain.candidate.card.name}</td>
+                      <td>
+                        <PassIdentity
+                          name={gain.candidate.card.name}
+                          passKind={
+                            gain.candidate.card.passKind === 'team' ? 'team' : 'player'
+                          }
+                          sport={gain.candidate.card.sport}
+                          avatar={gain.candidate.card.avatar}
+                        />
+                      </td>
                       <td>{gain.candidate.card.sport}</td>
                       <td>{formatRax(displayRaxValue(gain.candidate.performance.raxEarned))}</td>
                       <td>{gain.newStatus === 'pro-bonus' ? 'Pro bonus' : 'Guaranteed'}</td>

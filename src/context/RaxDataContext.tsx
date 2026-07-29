@@ -37,13 +37,14 @@ import {
 } from '../lib/usernameImport'
 import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { createId } from '../lib/id'
+import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from '../lib/realMedia'
 import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
 import {
   importCatalogProfileIntoData,
   type CatalogProfileImportResult,
 } from '../lib/catalogImport'
-import type { CatalogImportProfile } from '../lib/catalogApi'
+import { fetchCatalogAvatars, type CatalogImportProfile } from '../lib/catalogApi'
 import { applyCardRarityChange } from '../lib/cardRarity'
 import type {
   AppSettings,
@@ -72,7 +73,14 @@ import {
 
 type CardInput = Pick<
   PlayerCard,
-  'name' | 'sport' | 'season' | 'notes' | 'rarityLabel' | 'passKind' | 'simulatedRarityLabel'
+  | 'name'
+  | 'sport'
+  | 'season'
+  | 'notes'
+  | 'rarityLabel'
+  | 'passKind'
+  | 'simulatedRarityLabel'
+  | 'avatar'
 >
 type PerformanceInput = Pick<
   RaxPerformance,
@@ -183,6 +191,10 @@ type RaxDataContextValue = {
     options?: ImportFromUsernameOptions,
   ) => Promise<UsernameImportResult>
   importCatalogProfile: (profile: CatalogImportProfile) => CatalogProfileImportResult
+  /** Backfill missing card/planned-pass avatars from catalog rows (by externalKey). */
+  enrichAvatarsFromCatalog: (
+    items: Array<{ externalKey: string; avatar?: string | null }>,
+  ) => void
   resetAll: () => void
 }
 
@@ -270,6 +282,43 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(handle)
   }, [data, storageReady, accountDevBypass])
 
+  const missingAvatarKeysFingerprint = useMemo(() => {
+    const keys = new Set<string>()
+    for (const card of data.cards) {
+      const key = card.externalKey?.trim()
+      if (key && !card.avatar?.trim()) keys.add(key)
+    }
+    for (const pass of data.plannedPasses ?? []) {
+      const key = pass.externalKey?.trim()
+      if (key && !pass.avatar?.trim()) keys.add(key)
+    }
+    return [...keys].sort().join('\0')
+  }, [data.cards, data.plannedPasses])
+
+  useEffect(() => {
+    if (!storageReady || !missingAvatarKeysFingerprint) return
+    const keys = missingAvatarKeysFingerprint.split('\0')
+    const controller = new AbortController()
+    void fetchCatalogAvatars(keys, controller.signal)
+      .then(({ avatars }) => {
+        if (controller.signal.aborted || avatars.length === 0) return
+        const map = avatarByExternalKey(avatars)
+        if (map.size === 0) return
+        setData((current) => {
+          const cards = enrichCardsWithCatalogAvatars(current.cards, map)
+          const plannedPasses = enrichCardsWithCatalogAvatars(current.plannedPasses ?? [], map)
+          if (cards === current.cards && plannedPasses === (current.plannedPasses ?? [])) {
+            return current
+          }
+          return { ...current, cards, plannedPasses }
+        })
+      })
+      .catch(() => {
+        /* catalog optional */
+      })
+    return () => controller.abort()
+  }, [missingAvatarKeysFingerprint, storageReady])
+
   const value = useMemo<RaxDataContextValue>(
     () => ({
       data,
@@ -295,6 +344,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               notes: input.notes.trim(),
               rarityLabel: input.rarityLabel?.trim() || undefined,
               passKind: input.passKind,
+              avatar: input.avatar?.trim() || undefined,
               simulatedRarityLabel: input.simulatedRarityLabel,
               createdAt: nowIso(),
             },
@@ -514,6 +564,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 notes: input.notes?.trim() ?? '',
                 source: input.source ?? 'catalog',
                 progress: input.progress ?? 'just-started',
+                avatar: input.avatar?.trim() || undefined,
                 addedAt: nowIso(),
               },
             ],
@@ -1113,6 +1164,18 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             rowsUpdated: 0,
           }
         )
+      },
+      enrichAvatarsFromCatalog: (items) => {
+        setData((current) => {
+          const map = avatarByExternalKey(items)
+          if (map.size === 0) return current
+          const cards = enrichCardsWithCatalogAvatars(current.cards, map)
+          const plannedPasses = enrichCardsWithCatalogAvatars(current.plannedPasses ?? [], map)
+          if (cards === current.cards && plannedPasses === (current.plannedPasses ?? [])) {
+            return current
+          }
+          return { ...current, cards, plannedPasses }
+        })
       },
       resetAll: () => setData(createEmptyData()),
     }),

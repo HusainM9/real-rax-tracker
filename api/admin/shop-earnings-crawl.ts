@@ -7,6 +7,7 @@ import {
   type RealApiContext,
 } from '../../lib/realApi'
 import {
+  MAX_AVATAR_SHOP_CRAWL_MAX_PAGES,
   MAX_SHOP_CRAWL_MAX_PAGES,
   buildShopCrawlJobs,
   crawlShopEarningsTotalChunk,
@@ -42,6 +43,7 @@ type RequestBody = {
   delayMs?: unknown
   earningsConcurrency?: unknown
   budgetMs?: unknown
+  avatarsOnly?: unknown
 }
 
 function parseSeasons(input: unknown): number[] {
@@ -190,8 +192,11 @@ async function handleShopEarningsCrawl(request: Request): Promise<Response> {
   const defaultDelayMs = resolveShopCrawlDelayMs()
   const defaultEarningsConcurrency = resolveShopCrawlEarningsConcurrency()
   const defaultBudgetMs = resolveShopCrawlBudgetMs()
+  const avatarsOnly =
+    body.avatarsOnly === true || body.avatarsOnly === 'true' || body.avatarsOnly === 1
+  const pageCap = avatarsOnly ? MAX_AVATAR_SHOP_CRAWL_MAX_PAGES : MAX_SHOP_CRAWL_MAX_PAGES
   const maxPages = Math.min(
-    MAX_SHOP_CRAWL_MAX_PAGES,
+    pageCap,
     Math.max(1, Math.floor(numberOrUndefined(body.maxPages) ?? defaultMaxPages)),
   )
   const delayMs = Math.max(0, Math.floor(numberOrUndefined(body.delayMs) ?? defaultDelayMs))
@@ -219,6 +224,7 @@ async function handleShopEarningsCrawl(request: Request): Promise<Response> {
     delayMs,
     earningsConcurrency,
     budgetMs,
+    avatarsOnly,
   }
 
   // Reject empty job lists before hitting Real (clear error for Admin activity log).

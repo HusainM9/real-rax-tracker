@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import type { CatalogImportProfile } from '../lib/catalogApi'
-import { fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
+import { fetchCatalogAvatars, fetchCatalogImportProfilesBulk } from '../lib/catalogApi'
 import { type RarityFilterValue, type SortDirection } from '../lib/cardSort'
 import { computeYearRollup } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
@@ -130,14 +131,21 @@ function PlanPassCard({
   return (
     <article className={`plan-pass-card panel plan-pass-card--${plannedPassProgressTone(progress)}`}>
       <div className="plan-pass-card-header">
-        <div>
-          <h3>{pass.name}</h3>
-          <p className="plan-pass-meta">
-            {pass.passKind === 'team' ? 'Team' : 'Player'} · {pass.sport} · {pass.season} ·{' '}
-            {pass.simulatedRarityLabel}
-            {ownedBelowIconic ? ' · upgrade' : ''}
-          </p>
-        </div>
+        <PassIdentity
+          name={pass.name}
+          passKind={pass.passKind}
+          sport={pass.sport}
+          avatar={pass.avatar}
+          avatarFallbacks={[entry.profile?.avatar]}
+          size="md"
+          meta={
+            <>
+              {pass.passKind === 'team' ? 'Team' : 'Player'} · {pass.sport} · {pass.season} ·{' '}
+              {pass.simulatedRarityLabel}
+              {ownedBelowIconic ? ' · upgrade' : ''}
+            </>
+          }
+        />
         <button className="button danger compact" type="button" onClick={onRemove}>
           Remove
         </button>
@@ -193,6 +201,7 @@ export default function PlanPage() {
     updatePlannedPass,
     togglePlanSoldCard,
     clearPlanSoldCardIds,
+    enrichAvatarsFromCatalog,
   } = useRaxData()
   const [profilesByKey, setProfilesByKey] = useState<Map<string, CatalogImportProfile>>(new Map())
   const [profilesLoading, setProfilesLoading] = useState(false)
@@ -405,8 +414,14 @@ export default function PlanPage() {
     setProfilesLoading(true)
     setProfilesStatus('Loading catalog earnings for planned passes…')
 
-    fetchCatalogImportProfilesBulk(keys, controller.signal)
-      .then(({ profiles, storageConfigured }) => {
+    Promise.all([
+      fetchCatalogImportProfilesBulk(keys, controller.signal),
+      fetchCatalogAvatars(keys, controller.signal).catch(() => ({
+        avatars: [] as Array<{ externalKey: string; avatar: string }>,
+        storageConfigured: true,
+      })),
+    ])
+      .then(([{ profiles, storageConfigured }, { avatars }]) => {
         if (cancelled) return
         if (!storageConfigured) {
           setProfilesStatus('Shared catalog is not configured yet.')
@@ -417,14 +432,13 @@ export default function PlanPage() {
           const next = new Map(profiles.map((profile) => [profile.externalKey, profile]))
           if (
             current.size === next.size &&
-            [...next.keys()].every(
-              (key) => current.get(key) === next.get(key),
-            )
+            [...next.keys()].every((key) => current.get(key) === next.get(key))
           ) {
             return current
           }
           return next
         })
+        enrichAvatarsFromCatalog(avatars.length > 0 ? avatars : profiles)
         setProfilesStatus('')
       })
       .catch((error) => {
@@ -439,7 +453,7 @@ export default function PlanPage() {
       cancelled = true
       controller.abort()
     }
-  }, [plannedExternalKeysFingerprint])
+  }, [enrichAvatarsFromCatalog, plannedExternalKeysFingerprint])
 
   const scoredAnalysis = useMemo(
     () =>
@@ -886,10 +900,18 @@ export default function PlanPage() {
                     }
                     onClick={() => togglePlanSoldCard(card.id)}
                   >
-                    {card.name}
-                    {card.season ? ` · ${card.season}` : ''}
-                    {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                    {selected ? ' · sold' : ''}
+                    <PassIdentity
+                      name={card.name}
+                      passKind={card.passKind === 'team' ? 'team' : 'player'}
+                      sport={card.sport}
+                      avatar={card.avatar}
+                      meta={
+                        <>
+                          {[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                          {selected ? ' · sold' : ''}
+                        </>
+                      }
+                    />
                   </button>
                 )
               })}
@@ -1172,12 +1194,18 @@ export default function PlanPage() {
                           <tr key={row.cardId}>
                             <td>{planSellRankOffset + index + 1}</td>
                             <td>
-                              {row.name || 'Unnamed pass'}
-                              <br />
-                              <small className="table-sub">
-                                {row.season || 'No season'}
-                                {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                              </small>
+                              <PassIdentity
+                                name={row.name || 'Unnamed pass'}
+                                passKind={row.passKind === 'team' ? 'team' : 'player'}
+                                sport={row.sport}
+                                avatar={row.avatar}
+                                meta={
+                                  <>
+                                    {row.season || 'No season'}
+                                    {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                                  </>
+                                }
+                              />
                             </td>
                             <td>
                               <span className="badge">{planFinishedSourceLabel(row.source)}</span>
@@ -1303,10 +1331,18 @@ export default function PlanPage() {
                     }
                     onClick={() => addOwnedCardToPlan(card)}
                   >
-                    {card.name}
-                    {card.season ? ` · ${card.season}` : ''}
-                    {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                    {alreadyAdded ? ' · on plan' : ''}
+                    <PassIdentity
+                      name={card.name}
+                      passKind={card.passKind === 'team' ? 'team' : 'player'}
+                      sport={card.sport}
+                      avatar={card.avatar}
+                      meta={
+                        <>
+                          {[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                          {alreadyAdded ? ' · on plan' : ''}
+                        </>
+                      }
+                    />
                   </button>
                 )
               })}
@@ -1346,11 +1382,17 @@ export default function PlanPage() {
                         <tr key={row.key}>
                           <td>{index + 1}</td>
                           <td>
-                            {row.name}
-                            <br />
-                            <small className="table-sub">
-                              {row.sport} · {row.season}
-                            </small>
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season}
+                                </>
+                              }
+                            />
                           </td>
                           <td>
                             <strong className={signedRaxClass(row.marginalNetDelta)}>

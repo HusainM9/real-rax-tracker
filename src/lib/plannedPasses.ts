@@ -185,6 +185,7 @@ export type PlannedPassInput = Pick<
   | 'notes'
   | 'source'
   | 'progress'
+  | 'avatar'
 >
 
 export type PlannedPassCardAnalysis = {
@@ -226,6 +227,7 @@ export function plannedPassFromCatalogResult(
     notes: '',
     source,
     progress: DEFAULT_PLANNED_PASS_PROGRESS,
+    avatar: result.avatar,
   }
 }
 
@@ -245,6 +247,7 @@ export function plannedPassFromRecommendationRow(
     notes: '',
     source,
     progress: DEFAULT_PLANNED_PASS_PROGRESS,
+    avatar: row.avatar,
   }
 }
 
@@ -271,6 +274,7 @@ export function plannedPassFromOwnedCard(
     notes: '',
     source: 'manual',
     progress: DEFAULT_PLANNED_PASS_PROGRESS,
+    avatar: card.avatar,
   }
 }
 
@@ -417,6 +421,8 @@ export function analyzePlanCollection(
           name: profile.name,
           sport: sportFromCatalog(profile.sport),
           season: profile.seasonLabel.trim() || String(profile.seasonYear),
+          passKind: profile.passKind === 'team' ? ('team' as const) : ('player' as const),
+          avatar: profile.avatar,
           isolatedNetDelta: marginal,
           marginalNetDelta: marginal,
           passClaimableRax: 0,

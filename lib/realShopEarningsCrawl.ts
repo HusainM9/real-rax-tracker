@@ -8,7 +8,7 @@ import {
   type RealShopEarningsTotalQuery,
 } from './realApi'
 import { resolveBaseRaxTotal } from './realEarningsShared'
-import { canonicalRealSport, realRequestSportSlugs } from './realPassScan'
+import { canonicalRealSport, avatarFromRealEntity, realRequestSportSlugs } from './realPassScan'
 import { runWithConcurrency } from './runWithConcurrency'
 import {
   canonicalCatalogPassMetadata,
@@ -37,6 +37,12 @@ export const DEFAULT_SHOP_CRAWL_MAX_PAGES = 1
 
 /** Cap so a single serverless invocation cannot run unbounded. */
 export const MAX_SHOP_CRAWL_MAX_PAGES = 5
+
+/**
+ * Avatars-only chunks skip earnings fetches (1 Real call/page), so a higher page
+ * cap is safe and matches the Admin UI default of 15.
+ */
+export const MAX_AVATAR_SHOP_CRAWL_MAX_PAGES = 15
 
 /**
  * Delay between Real calls (pages + per-entity earnings). Override with REAL_SHOP_CRAWL_DELAY_MS.
@@ -109,6 +115,12 @@ export type ShopCrawlChunkInput = {
   earningsConcurrency?: number
   /** Soft wall-clock budget for this chunk (ms). */
   budgetMs?: number
+  /**
+   * When true, only upsert pass metadata (including `entity.avatar`) from shop pages —
+   * skip per-entity earnings fetches. Use to backfill college player faces quickly
+   * (Real `/userpasses` omits avatar for ncaam/ncaaf players).
+   */
+  avatarsOnly?: boolean
 }
 
 export type ShopCrawlLogEventType =
@@ -373,6 +385,7 @@ export function mapShopEarningsItemToCatalogPass(
     normalizeSportForSeasonWindow(sport) === 'UFC'
       ? 'player'
       : passKindFromItem(item, job.entityType)
+  const avatar = avatarFromRealEntity(item.entity)
 
   return {
     externalKey: canonical.externalKey,
@@ -382,6 +395,7 @@ export function mapShopEarningsItemToCatalogPass(
     seasonYear: canonical.seasonYear,
     seasonLabel: canonical.seasonLabel,
     name,
+    avatar,
     totalBaseRax,
     hasEarnings: totalBaseRax > 0,
   }
@@ -465,8 +479,9 @@ export async function crawlShopEarningsTotalChunk(
   deps: ShopCrawlDeps,
 ): Promise<ShopCrawlChunkResult> {
   const jobs = buildShopCrawlJobs(input)
+  const pageCap = input.avatarsOnly ? MAX_AVATAR_SHOP_CRAWL_MAX_PAGES : MAX_SHOP_CRAWL_MAX_PAGES
   const maxPages = Math.min(
-    MAX_SHOP_CRAWL_MAX_PAGES,
+    pageCap,
     Math.max(1, Math.floor(input.maxPages ?? DEFAULT_SHOP_CRAWL_MAX_PAGES)),
   )
   const maxBefore =
@@ -546,9 +561,12 @@ export async function crawlShopEarningsTotalChunk(
   const seasonsLabel = [...new Set(jobs.map((job) => job.season))].join(',') || '(none)'
   const entityTypesLabel =
     [...new Set(jobs.map((job) => job.entityType))].join(',') || '(none)'
+  const avatarsOnly = input.avatarsOnly === true
   log.push({
     type: 'chunk_start',
-    message: `Chunk start: ${jobs.length} job(s), sports=[${sportsLabel}], seasons=[${seasonsLabel}], entityTypes=[${entityTypesLabel}], maxPages=${maxPages}, resume jobIndex=${jobIndex} before=${before}, delayMs=${delayMs}, earningsConcurrency=${earningsConcurrency}, budgetMs=${budgetMs}`,
+    message: `Chunk start: ${jobs.length} job(s), sports=[${sportsLabel}], seasons=[${seasonsLabel}], entityTypes=[${entityTypesLabel}], maxPages=${maxPages}, resume jobIndex=${jobIndex} before=${before}, delayMs=${delayMs}, earningsConcurrency=${earningsConcurrency}, budgetMs=${budgetMs}${
+      avatarsOnly ? ', avatarsOnly=true (skip earnings)' : ''
+    }`,
     jobsTotal: jobs.length,
     maxPages,
     jobIndex,
@@ -696,6 +714,40 @@ export async function crawlShopEarningsTotalChunk(
       })
       jobIndex += 1
       before = 0
+      continue
+    }
+
+    if (avatarsOnly) {
+      const pagePasses: CatalogPassInput[] = []
+      for (const item of page.items) {
+        const basePass = mapShopEarningsItemToCatalogPass(item, job)
+        if (!basePass) continue
+        pagePasses.push({ ...basePass, sourceUpdatedAt })
+      }
+      const flushed = await flushPage(pagePasses, [], [])
+      log.push({
+        type: 'page_summary',
+        message: `Page avatars ${job.realSport}/${job.season}/${job.entityType} before=${pageBefore}: ${pagePasses.length} pass(es) with shop metadata/avatars, upserted ${flushed.passes}`,
+        sport: job.realSport,
+        season: job.season,
+        entityType: job.entityType,
+        before: pageBefore,
+        itemCount: page.items.length,
+        ok: pagePasses.length,
+        failed: 0,
+        upserted: flushed.passes,
+        dailyRowsUpserted: 0,
+      })
+      if (page.items.length < SHOP_EARNINGS_PAGE_SIZE) {
+        jobIndex += 1
+        before = 0
+        continue
+      }
+      before += SHOP_EARNINGS_PAGE_SIZE
+      if (maxBefore != null && before > maxBefore) {
+        jobIndex += 1
+        before = 0
+      }
       continue
     }
 

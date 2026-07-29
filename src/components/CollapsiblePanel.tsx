@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 
 type CollapsiblePanelProps = {
   id?: string
-  title: string
+  title: ReactNode
   description?: string
   badge?: string
   defaultOpen?: boolean

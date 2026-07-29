@@ -6,6 +6,21 @@ export const DEFAULT_SHOP_CRAWL_UI_MAX_PAGES = 1
 /** Hard cap for the Admin max-pages input (keeps chunk HTTP under typical platform limits). */
 export const SHOP_CRAWL_UI_MAX_PAGES_CAP = 5
 
+/**
+ * One-button face/badge backfill: top N shop leaderboard rows per sport/season/entityType.
+ * Shop pages are 20 wide, so maxBefore = topN - pageSize covers offsets 0…580 → 600 rows.
+ */
+export const AVATAR_BACKFILL_TOP_N = 600
+
+/** Pages per chunk for avatars-only backfill (1 Real call/page — no earnings). */
+export const AVATAR_BACKFILL_UI_MAX_PAGES = 15
+
+/** Last shop `before` offset included for {@link AVATAR_BACKFILL_TOP_N}. */
+export function avatarBackfillMaxBefore(topN: number = AVATAR_BACKFILL_TOP_N): number {
+  const n = Math.max(SHOP_EARNINGS_PAGE_SIZE, Math.floor(topN) || AVATAR_BACKFILL_TOP_N)
+  return n - SHOP_EARNINGS_PAGE_SIZE
+}
+
 /** Minimum client wait before treating a silent chunk as failed. */
 export const DEFAULT_SHOP_CRAWL_CHUNK_TIMEOUT_MS = 55_000
 
@@ -236,23 +251,32 @@ export function clearShopCrawlResumeCursor(
 /**
  * Client abort budget for one chunk POST. Scales with pages × delay so intentional
  * multi-page chunks are not always killed at 55s, but never waits forever.
+ * Pass `avatarsOnly: true` when each page is a single shop call (no earnings fan-out).
  */
 export function estimateShopCrawlChunkTimeoutMs(
   maxPages: number,
   delayMs: number,
-  options?: { floorMs?: number; ceilingMs?: number },
+  options?: { floorMs?: number; ceilingMs?: number; avatarsOnly?: boolean },
 ): number {
   const floorMs = options?.floorMs ?? DEFAULT_SHOP_CRAWL_CHUNK_TIMEOUT_MS
   const ceilingMs = options?.ceilingMs ?? SHOP_CRAWL_CHUNK_TIMEOUT_CEILING_MS
   const pages = Math.max(1, Math.floor(maxPages) || 1)
   const delay = Math.max(0, Math.floor(delayMs) || 0)
-  const estimated = pages * SHOP_CRAWL_CALLS_PER_PAGE * delay + 20_000
+  const callsPerPage = options?.avatarsOnly ? 1 : SHOP_CRAWL_CALLS_PER_PAGE
+  const estimated = pages * callsPerPage * delay + 20_000
   return Math.min(ceilingMs, Math.max(floorMs, estimated))
 }
 
-export function shopCrawlWaitingMessage(chunk: number, elapsedMs: number): string {
+export function shopCrawlWaitingMessage(
+  chunk: number,
+  elapsedMs: number,
+  options?: { avatarsOnly?: boolean },
+): string {
   const elapsedSec = Math.max(0, Math.round(elapsedMs / 1000))
-  return `Still on chunk ${chunk}… (${elapsedSec}s elapsed; shop + earnings can take ~30–60s per page)`
+  const detail = options?.avatarsOnly
+    ? 'avatars-only shop pages are usually a few seconds each'
+    : 'shop + earnings can take ~30–60s per page'
+  return `Still on chunk ${chunk}… (${elapsedSec}s elapsed; ${detail})`
 }
 
 export function shopCrawlChunkTimeoutMessage(

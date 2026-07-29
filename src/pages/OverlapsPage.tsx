@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
@@ -214,14 +215,19 @@ export default function OverlapsPage() {
               <div className="list">
                 {sportOverlapCards.map((card) => (
                   <div className="list-row" key={card.card.id}>
-                    <span>
-                      <strong>{card.card.name}</strong>
-                      <small>
-                        {selectedSport === 'All' ? `${card.card.sport} · ` : ''}
-                        {card.card.season || 'No season'} · {card.overlapCount} overlap day
-                        {card.overlapCount === 1 ? '' : 's'}
-                      </small>
-                    </span>
+                    <PassIdentity
+                      name={card.card.name}
+                      passKind={card.card.passKind === 'team' ? 'team' : 'player'}
+                      sport={card.card.sport}
+                      avatar={card.card.avatar}
+                      meta={
+                        <>
+                          {selectedSport === 'All' ? `${card.card.sport} · ` : ''}
+                          {card.card.season || 'No season'} · {card.overlapCount} overlap day
+                          {card.overlapCount === 1 ? '' : 's'}
+                        </>
+                      }
+                    />
                     <b>{formatRax(displayRaxValue(card.overlapRax))} RAX</b>
                   </div>
                 ))}

@@ -111,6 +111,7 @@ describe('plannedPasses', () => {
       notes: '',
       source: 'manual',
       progress: 'just-started',
+      avatar: undefined,
     })
     expect(plannedPassFromOwnedCard(card('c2', 'No key', undefined, 'Rare 1'))).toBeNull()
   })

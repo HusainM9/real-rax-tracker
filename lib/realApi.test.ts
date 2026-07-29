@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  getRealSportEntity,
   getShopEarningsTotal,
   realApiRetryDelayMs,
   realGetJson,
@@ -172,5 +173,54 @@ describe('getShopEarningsTotal', () => {
     )
     expect(page.items).toHaveLength(1)
     expect(page.items[0]).toMatchObject({ id: 1, value: '12' })
+  })
+})
+
+describe('getRealSportEntity', () => {
+  it('reads nested player.avatar from /players/{id}/sport/{sport}', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('https://web.realapp.com/players/4600663/sport/ncaam')
+      return Response.json({
+        player: {
+          id: 4600663,
+          sport: 'ncaam',
+          avatar: '248a479ac84b6273e2267b52c9f7198e',
+          firstName: 'Zach',
+          lastName: 'Edey',
+        },
+      })
+    }) as unknown as typeof fetch
+
+    const entity = await getRealSportEntity(
+      { entityId: 4600663, sport: 'ncaam', entityType: 'player' },
+      { config: testConfig() },
+    )
+    expect(entity).toMatchObject({
+      id: 4600663,
+      avatar: '248a479ac84b6273e2267b52c9f7198e',
+    })
+  })
+
+  it('reads nested team.avatar from /teams/{id}/sport/{sport}', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('https://web.realapp.com/teams/150/sport/ncaam')
+      return Response.json({
+        team: {
+          id: 150,
+          sport: 'ncaam',
+          avatar: '323de7b14ad3c35925dc0c3af730d27a',
+          name: 'Duke',
+        },
+      })
+    }) as unknown as typeof fetch
+
+    const entity = await getRealSportEntity(
+      { entityId: 150, sport: 'ncaam', entityType: 'team' },
+      { config: testConfig() },
+    )
+    expect(entity).toMatchObject({
+      id: 150,
+      avatar: '323de7b14ad3c35925dc0c3af730d27a',
+    })
   })
 })
