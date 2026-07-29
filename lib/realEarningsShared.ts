@@ -34,6 +34,8 @@ export type EarningsBackfillPass = {
   seasonLabel: string
   name: string
   rarityLabel?: string
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
 }
 
 export type EarningsBackfillDailyRow = {

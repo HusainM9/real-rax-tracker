@@ -10,6 +10,8 @@ create table if not exists public.meowbot_passes (
   season_label text not null,
   name text not null,
   rarity_label text,
+  /** Real CDN avatar key (`entity.avatar`) for player faces / team badges. */
+  avatar text,
   has_earnings boolean not null default true,
   total_base_rax numeric not null default 0 check (total_base_rax >= 0),
   source_updated_at timestamptz,
@@ -39,6 +41,8 @@ create index if not exists meowbot_passes_has_earnings_idx
 --   add column if not exists has_earnings boolean not null default true;
 -- alter table public.meowbot_passes
 --   add column if not exists total_base_rax numeric not null default 0 check (total_base_rax >= 0);
+-- alter table public.meowbot_passes
+--   add column if not exists avatar text;
 -- update public.meowbot_passes p
 -- set total_base_rax = coalesce((
 --   select sum(d.base_rax_earned)

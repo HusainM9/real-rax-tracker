@@ -7,6 +7,7 @@ import {
   SHOP_CRAWL_UI_MAX_PAGES_CAP,
   advanceShopCrawlBeforeByChunks,
   advanceShopCrawlBeforeByPages,
+  avatarBackfillMaxBefore,
   clearShopCrawlResumeCursor,
   estimateShopCrawlChunkTimeoutMs,
   formatShopCrawlHttpFailure,
@@ -29,6 +30,18 @@ describe('shop crawl client helpers', () => {
     expect(DEFAULT_SHOP_CRAWL_UI_MAX_PAGES).toBe(1)
     expect(SHOP_CRAWL_UI_MAX_PAGES_CAP).toBe(5)
     expect(SHOP_CRAWL_CALLS_PER_PAGE).toBe(21)
+  })
+
+  it('computes maxBefore for a top-N avatars backfill', () => {
+    expect(avatarBackfillMaxBefore(600)).toBe(580)
+    expect(avatarBackfillMaxBefore(20)).toBe(0)
+  })
+
+  it('uses one Real call per page when estimating avatars-only timeouts', () => {
+    // 15 × 1 × 300 + 20_000 = 24_500 → floor to 55_000
+    expect(estimateShopCrawlChunkTimeoutMs(15, 300, { avatarsOnly: true })).toBe(
+      DEFAULT_SHOP_CRAWL_CHUNK_TIMEOUT_MS,
+    )
   })
 
   it('keeps a 55s floor for the default one-page chunk', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChecklistMultiSelect } from '../components/ChecklistMultiSelect'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { PassIdentity } from '../components/PassIdentity'
 import {
   browseOtdPasses,
   fetchCatalogImportProfile,
@@ -448,11 +449,19 @@ export default function OtdPage() {
                     return (
                       <tr key={pass.externalKey} className={isOpen ? 'is-expanded' : undefined}>
                         <td>
-                          <strong>{pass.name}</strong>
-                          <small className="table-sub">
-                            {pass.passKind === 'team' ? 'Team pass' : 'Player pass'}
-                            {pass.rarityLabel ? ` · ${pass.rarityLabel}` : ''}
-                          </small>
+                          <PassIdentity
+                            name={pass.name}
+                            passKind={pass.passKind === 'team' ? 'team' : 'player'}
+                            sport={pass.sport}
+                            avatar={pass.avatar}
+                            size="md"
+                            meta={
+                              <>
+                                {pass.passKind === 'team' ? 'Team pass' : 'Player pass'}
+                                {pass.rarityLabel ? ` · ${pass.rarityLabel}` : ''}
+                              </>
+                            }
+                          />
                         </td>
                         <td>{pass.sport}</td>
                         <td>{pass.seasonLabel || String(pass.seasonYear)}</td>

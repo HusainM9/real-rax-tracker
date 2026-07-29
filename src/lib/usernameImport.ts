@@ -29,6 +29,8 @@ import {
 } from './realEarningsImport'
 import { ignoredPassKeySet } from './ignoredPasses'
 import { resolveImportPassKind } from './passKind'
+import { fetchCatalogAvatars } from './catalogApi'
+import { avatarByExternalKey } from './realMedia'
 import { passMetadataKey } from './seasonLabel'
 import type {
   PlayerCard,
@@ -170,7 +172,7 @@ export function getFailedPlayerPasses(result: UsernameImportResult): FailedPlaye
 
 type CardDraft = Pick<
   PlayerCard,
-  'name' | 'sport' | 'season' | 'notes' | 'externalKey' | 'rarityLabel' | 'passKind'
+  'name' | 'sport' | 'season' | 'notes' | 'externalKey' | 'rarityLabel' | 'passKind' | 'avatar'
 >
 
 type PerformanceDraft = Pick<
@@ -484,6 +486,7 @@ function upsertCards(
           notes: draft.notes || existing.notes,
           rarityLabel: draft.rarityLabel ?? existing.rarityLabel,
           passKind: draft.passKind ?? existing.passKind,
+          avatar: draft.avatar ?? existing.avatar,
           simulatedRarityLabel: undefined,
         }
         cardsUpdated += 1
@@ -499,6 +502,7 @@ function upsertCards(
         externalKey: draft.externalKey,
         rarityLabel: draft.rarityLabel,
         passKind: draft.passKind,
+        avatar: draft.avatar,
         createdAt: nowIso(),
       })
       cardIdByExternalKey.set(draft.externalKey, id)
@@ -707,6 +711,24 @@ export async function importFromUsername(
     }
   }
 
+  // Real's /userpasses omits entity.avatar for college (ncaam/ncaaf) players; resolve via
+  // catalog + Real `/players/{id}/sport/{slug}` (same path Cards uses).
+  const catalogAvatarKeys = selectedPasses
+    .filter((pass) => !pass.avatar?.trim())
+    .map((pass) => describePass(pass).externalKey)
+  let catalogAvatars = new Map<string, string>()
+  if (catalogAvatarKeys.length > 0) {
+    try {
+      const { avatars } = await fetchCatalogAvatars(catalogAvatarKeys, options?.signal)
+      catalogAvatars = avatarByExternalKey(avatars)
+    } catch {
+      // Catalog optional — import still proceeds without faces.
+    }
+  }
+
+  const resolvePassAvatarKey = (pass: MeowbotPlayerPass, externalKey: string) =>
+    pass.avatar?.trim() || catalogAvatars.get(externalKey)
+
   const cardDrafts: CardDraft[] = selectedPasses.map((pass) => {
     const described = describePass(pass)
     const rarityNote = pass.rarityLabel ? ` · ${pass.rarityLabel}` : ''
@@ -718,6 +740,7 @@ export async function importFromUsername(
       notes: `Imported from @${username.replace(/^@/, '')}${rarityNote}`,
       rarityLabel: pass.rarityLabel,
       passKind: pass.passKind,
+      avatar: resolvePassAvatarKey(pass, described.externalKey),
     }
   })
 
@@ -800,6 +823,7 @@ export async function importFromUsername(
         seasonLabel: described.seasonLabel,
         name: described.name,
         rarityLabel: pass.rarityLabel,
+        avatar: resolvePassAvatarKey(pass, described.externalKey),
       }
     })
 
@@ -1092,6 +1116,7 @@ export async function importFromAdminOwnership(
       notes: `Recovered from admin snapshot for @${username.replace(/^@/, '').trim()}`,
       rarityLabel: pass.rarityLabel,
       passKind: pass.passKind,
+      avatar: pass.avatar,
     }
   })
   const { data: nextData, cardsCreated, cardsUpdated, cardIdByExternalKey } = upsertCards(current, cardDrafts)

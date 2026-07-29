@@ -1,11 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
+import { PassIdentity } from './PassIdentity'
 import { formatClaimDay, formatRax } from '../lib/format'
-import { searchCatalog, type CatalogPassKind, type CatalogSearchResult } from '../lib/catalogApi'
+import {
+  enrichCatalogProfilesWithAvatars,
+  searchCatalog,
+  type CatalogPassKind,
+  type CatalogSearchResult,
+} from '../lib/catalogApi'
 import { isPlayerLikeCatalogPass } from '../lib/passKind'
 
 function catalogPassKindLabel(profile: Pick<CatalogSearchResult, 'passKind' | 'sport'>): string {
   if (isPlayerLikeCatalogPass(profile)) return 'Player'
   return profile.passKind === 'team' ? 'Team' : 'Player'
+}
+
+function catalogPassKind(profile: Pick<CatalogSearchResult, 'passKind' | 'sport'>): 'player' | 'team' {
+  return isPlayerLikeCatalogPass(profile) ? 'player' : profile.passKind === 'team' ? 'team' : 'player'
+}
+
+function catalogResultMeta(profile: CatalogSearchResult, extra?: string): string {
+  const parts = [
+    catalogPassKindLabel(profile),
+    profile.sport,
+    String(profile.seasonLabel || profile.seasonYear),
+  ]
+  if (profile.rarityLabel) parts.push(profile.rarityLabel)
+  parts.push(`${profile.rowCount} row${profile.rowCount === 1 ? '' : 's'}`)
+  if (profile.totalBaseRax > 0) parts.push(`${formatRax(profile.totalBaseRax)} base RAX`)
+  else if (profile.hasEarnings === false) parts.push('no earnings yet')
+  if (profile.latestClaimDay) parts.push(`latest ${formatClaimDay(profile.latestClaimDay)}`)
+  if (extra) parts.push(extra)
+  return parts.join(' · ')
 }
 
 export type CatalogCollectionAddOptions = {
@@ -91,19 +116,24 @@ export function CatalogSearchPanel({
     const timeout = window.setTimeout(() => {
       setSearching(true)
       searchCatalog(trimmed, controller.signal)
-        .then((result) => {
+        .then(async (result) => {
           if (!result.storageConfigured) {
             setStatus('Shared catalog search is not configured yet.')
             setResults([])
             return
           }
-          setResults(result.results)
+          const enriched = await enrichCatalogProfilesWithAvatars(
+            result.results,
+            controller.signal,
+          )
+          if (controller.signal.aborted) return
+          setResults(enriched)
           const filtered =
             passKind === 'all'
-              ? result.results
+              ? enriched
               : passKind === 'player'
-                ? result.results.filter((item) => isPlayerLikeCatalogPass(item))
-                : result.results.filter((item) => item.passKind === passKind)
+                ? enriched.filter((item) => isPlayerLikeCatalogPass(item))
+                : enriched.filter((item) => item.passKind === passKind)
           setStatus(filtered.length === 0 ? 'No passes match that search in the shared catalog.' : '')
         })
         .catch((error) => {
@@ -203,24 +233,16 @@ export function CatalogSearchPanel({
             if (collectionAddEnabled && collectionAdd) {
               return (
                 <div className="list-row catalog-search-result-row catalog-add-result-row" key={profile.externalKey}>
-                  <span>
-                    <strong>{profile.name}</strong>
-                    <small>
-                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
-                      {profile.seasonLabel || profile.seasonYear}
-                      {profile.rarityLabel ? ` · catalog ${profile.rarityLabel}` : ''} ·{' '}
-                      {profile.rowCount} row{profile.rowCount === 1 ? '' : 's'}
-                      {profile.totalBaseRax > 0
-                        ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
-                        : profile.hasEarnings === false
-                          ? ' · no earnings yet'
-                          : ''}
-                      {profile.latestClaimDay
-                        ? ` · latest ${formatClaimDay(profile.latestClaimDay)}`
-                        : ''}
-                      {onPlan ? ` · ${planAdd?.onPlanLabel ?? 'On plan'}` : ''}
-                    </small>
-                  </span>
+                  <PassIdentity
+                    name={profile.name}
+                    passKind={catalogPassKind(profile)}
+                    sport={profile.sport}
+                    avatar={profile.avatar}
+                    meta={catalogResultMeta(
+                      profile,
+                      onPlan ? planAdd?.onPlanLabel ?? 'On plan' : undefined,
+                    )}
+                  />
                   <span className="button-row compact-actions catalog-add-result-actions">
                     <label className="field inline-field catalog-add-rarity-field">
                       <span className="sr-only">Rarity for {profile.name}</span>
@@ -269,23 +291,13 @@ export function CatalogSearchPanel({
             if (bundleEnabled) {
               return (
                 <div className="list-row catalog-search-result-row" key={profile.externalKey}>
-                  <span>
-                    <strong>{profile.name}</strong>
-                    <small>
-                      {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
-                      {profile.seasonLabel || profile.seasonYear}
-                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
-                      row{profile.rowCount === 1 ? '' : 's'}
-                      {profile.totalBaseRax > 0
-                        ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
-                        : profile.hasEarnings === false
-                          ? ' · no earnings'
-                          : ''}
-                      {profile.latestClaimDay
-                        ? ` · latest ${formatClaimDay(profile.latestClaimDay)}`
-                        : ''}
-                    </small>
-                  </span>
+                  <PassIdentity
+                    name={profile.name}
+                    passKind={catalogPassKind(profile)}
+                    sport={profile.sport}
+                    avatar={profile.avatar}
+                    meta={catalogResultMeta(profile)}
+                  />
                   <span className="button-row compact-actions">
                     <button
                       className="button compact"
@@ -326,19 +338,13 @@ export function CatalogSearchPanel({
                 disabled={disabled || Boolean(loadingKey)}
                 onClick={() => void onSelect(profile, profile.rarityLabel ?? '')}
               >
-                <strong>{profile.name}</strong>
-                <small>
-                  {catalogPassKindLabel(profile)} · {profile.sport} ·{' '}
-                  {profile.seasonLabel || profile.seasonYear}
-                  {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rowCount}{' '}
-                  row{profile.rowCount === 1 ? '' : 's'}
-                  {profile.totalBaseRax > 0
-                    ? ` · ${formatRax(profile.totalBaseRax)} base RAX`
-                    : profile.hasEarnings === false
-                      ? ' · no earnings'
-                      : ''}
-                  {profile.latestClaimDay ? ` · latest ${formatClaimDay(profile.latestClaimDay)}` : ''}
-                </small>
+                <PassIdentity
+                  name={profile.name}
+                  passKind={catalogPassKind(profile)}
+                  sport={profile.sport}
+                  avatar={profile.avatar}
+                  meta={catalogResultMeta(profile)}
+                />
                 <span>{loadingKey === profile.externalKey ? loadingLabel : actionLabel}</span>
               </button>
             )

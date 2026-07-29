@@ -11,7 +11,13 @@ import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
-import { fetchCatalogImportProfile, type CatalogImportProfile, type CatalogSearchResult } from '../lib/catalogApi'
+import { PassIdentity } from '../components/PassIdentity'
+import {
+  enrichCatalogProfilesWithAvatars,
+  fetchCatalogImportProfile,
+  type CatalogImportProfile,
+  type CatalogSearchResult,
+} from '../lib/catalogApi'
 import { sportFromCatalog } from '../lib/catalogImport'
 import { catalogProfileToFilteredJson } from '../lib/catalogProfileJson'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
@@ -224,9 +230,13 @@ export default function EntryPage() {
         return
       }
 
-      const resolvedRarity = rarityLabel.trim() || profile.rarityLabel
+      const [enrichedProfile] = await enrichCatalogProfilesWithAvatars([
+        { ...profile, avatar: profile.avatar || result.avatar },
+      ])
+      const loaded = enrichedProfile ?? profile
+      const resolvedRarity = rarityLabel.trim() || loaded.rarityLabel
       const profileWithRarity: CatalogImportProfile = {
-        ...profile,
+        ...loaded,
         rarityLabel: resolvedRarity,
       }
 
@@ -1066,11 +1076,18 @@ export default function EntryPage() {
                       setCardEntry((current) => ({ ...current, existingCardId: card.id }))
                     }
                   >
-                    <strong>{card.name || 'Unnamed pass'}</strong>
-                    <small>
-                      {card.sport} · {card.season || 'No season'}
-                      {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                    </small>
+                    <PassIdentity
+                      name={card.name || 'Unnamed pass'}
+                      passKind={card.passKind === 'team' ? 'team' : 'player'}
+                      sport={card.sport}
+                      avatar={card.avatar}
+                      meta={
+                        <>
+                          {card.sport} · {card.season || 'No season'}
+                          {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                        </>
+                      }
+                    />
                   </button>
                 ))}
               </div>
@@ -1198,15 +1215,23 @@ export default function EntryPage() {
           <div className="list saved-earnings-profile-list">
             {data.savedCardProfiles.map((profile) => (
               <div className="list-row saved-earnings-profile-row" key={profile.id}>
-                <span className="saved-earnings-profile-main">
-                  <strong>{profile.name}</strong>
-                  <small>
-                    {profile.sport} · {profile.season || 'No season'}
-                    {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
-                    row{profile.rows.length === 1 ? '' : 's'}
-                    {profile.externalKey ? ' · linked' : ''}
-                  </small>
-                </span>
+                <PassIdentity
+                  className="saved-earnings-profile-main"
+                  name={profile.name}
+                  passKind={profile.passKind === 'team' ? 'team' : 'player'}
+                  sport={profile.sport}
+                  avatar={
+                    data.cards.find((card) => card.externalKey === profile.externalKey)?.avatar
+                  }
+                  meta={
+                    <>
+                      {profile.sport} · {profile.season || 'No season'}
+                      {profile.rarityLabel ? ` · ${profile.rarityLabel}` : ''} · {profile.rows.length}{' '}
+                      row{profile.rows.length === 1 ? '' : 's'}
+                      {profile.externalKey ? ' · linked' : ''}
+                    </>
+                  }
+                />
                 <span className="button-row compact-actions saved-earnings-profile-actions">
                   <button
                     className="button primary compact"

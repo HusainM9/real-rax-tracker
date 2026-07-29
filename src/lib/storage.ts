@@ -99,6 +99,8 @@ function hydrateCard(value: unknown): PlayerCard | null {
     externalKey: typeof value.externalKey === 'string' ? value.externalKey : undefined,
     rarityLabel,
     passKind: explicitPassKind ?? (looksLikeTeamPassName(name) ? 'team' : undefined),
+    avatar:
+      typeof value.avatar === 'string' && value.avatar.trim() ? value.avatar.trim() : undefined,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
   }
 }
@@ -229,6 +231,9 @@ function hydrateSavedSellRankRow(value: unknown): SavedSellRankRow | null {
       typeof value.sport === 'string' ? (value.sport as SavedSellRankRow['sport']) : 'Other',
     season: typeof value.season === 'string' ? value.season : '',
     rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    passKind: value.passKind === 'team' ? 'team' : value.passKind === 'player' ? 'player' : undefined,
+    avatar:
+      typeof value.avatar === 'string' && value.avatar.trim() ? value.avatar.trim() : undefined,
     claimableNow: Number(value.claimableNow) || 0,
     lostClaimableRax: Number(value.lostClaimableRax) || 0,
     freedClaimableRax: Number(value.freedClaimableRax) || 0,
@@ -248,6 +253,9 @@ function hydrateSkippedSellRankPass(value: unknown): SavedSkippedSellRankPass | 
         : 'Other',
     season: typeof value.season === 'string' ? value.season : '',
     rarityLabel: typeof value.rarityLabel === 'string' ? value.rarityLabel : undefined,
+    passKind: value.passKind === 'team' ? 'team' : value.passKind === 'player' ? 'player' : undefined,
+    avatar:
+      typeof value.avatar === 'string' && value.avatar.trim() ? value.avatar.trim() : undefined,
     reason,
     detail: typeof value.detail === 'string' ? value.detail : '',
   }
@@ -286,6 +294,8 @@ function hydratePlannedPass(value: unknown): PlannedPass | null {
     notes: typeof value.notes === 'string' ? value.notes : '',
     source,
     progress,
+    avatar:
+      typeof value.avatar === 'string' && value.avatar.trim() ? value.avatar.trim() : undefined,
     addedAt: typeof value.addedAt === 'string' ? value.addedAt : new Date().toISOString(),
   }
 }

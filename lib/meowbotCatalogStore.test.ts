@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildCatalogPassUpsertBatches,
   catalogDailyEarningsReplaceKeys,
+  partitionByObjectKeySignature,
   reconcileDailyRowsToPassTotal,
   type CatalogDailyEarningInput,
   type CatalogPassInput,
@@ -84,5 +86,78 @@ describe('reconcileDailyRowsToPassTotal', () => {
     const result = reconcileDailyRowsToPassTotal(440, [])
     expect(result.totalBaseRax).toBe(440)
     expect(result.rows).toEqual([])
+  })
+})
+
+describe('partitionByObjectKeySignature', () => {
+  it('groups rows that omit optional keys separately from rows that include them', () => {
+    const batches = partitionByObjectKeySignature([
+      { a: 1, b: 2 },
+      { a: 3, b: 4, avatar: 'x' },
+      { a: 5, b: 6 },
+      { a: 7, b: 8, avatar: 'y' },
+    ])
+    expect(batches).toHaveLength(2)
+    expect(batches.map((batch) => batch.length).sort()).toEqual([2, 2])
+    for (const batch of batches) {
+      const signatures = new Set(batch.map((row) => Object.keys(row).sort().join(',')))
+      expect(signatures.size).toBe(1)
+    }
+  })
+})
+
+describe('buildCatalogPassUpsertBatches', () => {
+  const basePass: CatalogPassInput = {
+    externalKey: '1|2026|WNBA',
+    entityId: 1,
+    passKind: 'player',
+    sport: 'WNBA',
+    seasonYear: 2026,
+    seasonLabel: '2026',
+    name: 'Player One',
+  }
+
+  it('splits mixed avatar present/absent rows so PostgREST never sees mismatched keys', () => {
+    const batches = buildCatalogPassUpsertBatches([
+      { ...basePass, avatar: 'face-key-1' },
+      {
+        ...basePass,
+        externalKey: '2|2026|WNBA',
+        entityId: 2,
+        name: 'Player Two',
+        // avatar intentionally omitted — merge must not wipe existing faces
+      },
+      {
+        ...basePass,
+        externalKey: '3|2026|WNBA',
+        entityId: 3,
+        name: 'Player Three',
+        avatar: 'face-key-3',
+      },
+    ])
+
+    expect(batches).toHaveLength(2)
+    const withAvatar = batches.find((batch) => batch.every((row) => 'avatar' in row))
+    const withoutAvatar = batches.find((batch) => batch.every((row) => !('avatar' in row)))
+    expect(withAvatar).toHaveLength(2)
+    expect(withoutAvatar).toHaveLength(1)
+    for (const batch of batches) {
+      const signatures = new Set(batch.map((row) => Object.keys(row).sort().join(',')))
+      expect(signatures.size).toBe(1)
+      expect(batch.every((row) => !('rarity_label' in row))).toBe(true)
+    }
+  })
+
+  it('keeps rarity_label and avatar omit semantics in separate homogeneous batches', () => {
+    const batches = buildCatalogPassUpsertBatches([
+      { ...basePass, rarityLabel: 'Gold', avatar: 'a1' },
+      { ...basePass, externalKey: '2|2026|WNBA', entityId: 2, name: 'B' },
+      { ...basePass, externalKey: '3|2026|WNBA', entityId: 3, name: 'C', rarityLabel: 'Silver' },
+    ])
+    expect(batches).toHaveLength(3)
+    for (const batch of batches) {
+      const signatures = new Set(batch.map((row) => Object.keys(row).sort().join(',')))
+      expect(signatures.size).toBe(1)
+    }
   })
 })

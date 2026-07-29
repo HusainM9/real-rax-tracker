@@ -17,6 +17,8 @@ export type CatalogPassInput = {
   seasonLabel: string
   name: string
   rarityLabel?: string
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
   hasEarnings?: boolean
   totalBaseRax?: number
   sourceUpdatedAt?: string
@@ -58,6 +60,7 @@ type SupabasePassRow = {
   season_label: string
   name: string
   rarity_label?: string | null
+  avatar?: string | null
   has_earnings: boolean
   total_base_rax: number | string
   source_updated_at?: string | null
@@ -289,13 +292,14 @@ export function catalogDailyEarningsReplaceKeys(
   return [...keys]
 }
 
-function toPassRow(
-  input: CatalogPassInput,
-): Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & { rarity_label?: string | null } {
+type CatalogPassUpsertRow = Omit<SupabasePassRow, 'cached_at' | 'rarity_label' | 'avatar'> & {
+  rarity_label?: string | null
+  avatar?: string | null
+}
+
+function toPassRow(input: CatalogPassInput): CatalogPassUpsertRow {
   const pass = normalizeCatalogPassInput(input)
-  const row: Omit<SupabasePassRow, 'cached_at' | 'rarity_label'> & {
-    rarity_label?: string | null
-  } = {
+  const row: CatalogPassUpsertRow = {
     external_key: pass.externalKey,
     entity_id: pass.entityId,
     pass_kind: pass.passKind,
@@ -311,7 +315,32 @@ function toPassRow(
   if (pass.rarityLabel !== undefined) {
     row.rarity_label = pass.rarityLabel.trim() ? pass.rarityLabel.trim() : null
   }
+  // Same for avatar — earnings-only updates must not wipe faces/badges already stored.
+  if (pass.avatar !== undefined) {
+    row.avatar = pass.avatar.trim() ? pass.avatar.trim() : null
+  }
   return row
+}
+
+/**
+ * PostgREST rejects JSON arrays where objects have different key sets (PGRST102).
+ * Partition so each upsert body is key-homogeneous while still omitting optional
+ * columns (avatar / rarity_label) when unset — preserving merge-omit semantics.
+ */
+export function partitionByObjectKeySignature<T extends object>(rows: T[]): T[][] {
+  const groups = new Map<string, T[]>()
+  for (const row of rows) {
+    const signature = Object.keys(row).sort().join(',')
+    const existing = groups.get(signature)
+    if (existing) existing.push(row)
+    else groups.set(signature, [row])
+  }
+  return [...groups.values()]
+}
+
+/** Map passes to upsert rows and split into PostgREST-safe homogeneous batches. */
+export function buildCatalogPassUpsertBatches(passes: CatalogPassInput[]): CatalogPassUpsertRow[][] {
+  return partitionByObjectKeySignature(passes.map(toPassRow))
 }
 
 function toDailyRow(input: CatalogDailyEarningInput): Omit<SupabaseDailyRow, 'cached_at'> {
@@ -345,6 +374,7 @@ function fromPassRow(row: SupabasePassRow): CatalogSearchResult {
     seasonLabel: canonical.seasonLabel,
     name: row.name,
     rarityLabel: row.rarity_label ?? undefined,
+    avatar: row.avatar?.trim() || undefined,
     hasEarnings: row.has_earnings ?? true,
     totalBaseRax: Number(row.total_base_rax) || 0,
     cachedAt: row.cached_at,
@@ -490,7 +520,7 @@ export async function searchCatalogPasses(options: {
   const search = `*${query.replace(/\*/g, ' ')}*`
   const params = new URLSearchParams({
     select:
-      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
+      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
     or: `(name.ilike.${search},sport.ilike.${search},season_label.ilike.${search})`,
     order: 'name.asc',
     limit: String(limit),
@@ -634,7 +664,7 @@ export async function listCatalogPassSummaries(options: {
 
     const params = new URLSearchParams({
       select:
-        'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
+        'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
       sport: `eq.${sport}`,
       pass_kind: `eq.${passKind}`,
       has_earnings: `eq.${hasEarnings}`,
@@ -815,7 +845,7 @@ async function browseCatalogPassesByDateRange(options: {
   }
 
   const passSelect =
-    'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at'
+    'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at'
   const params = new URLSearchParams({
     select: `external_key,claim_day,base_rax_earned,meowbot_passes!inner(${passSelect})`,
     and: `(claim_day.gte.${options.startDate},claim_day.lte.${options.endDate})`,
@@ -930,8 +960,8 @@ export async function browseCatalogPasses(options: {
     !monthDay && otdMonth ? expandOtdMonthClaimDays(otdMonth, seasonYears) : null
   const useDailyJoin = Boolean(monthDay || (monthClaimDays && monthClaimDays.length > 0))
   const select = useDailyJoin
-    ? 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings!inner(claim_day)'
-    : 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)'
+    ? 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings!inner(claim_day)'
+    : 'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)'
 
   const params = new URLSearchParams({
     select,
@@ -979,7 +1009,7 @@ async function fetchCatalogImportProfilesChunk(
 
   const passParams = new URLSearchParams({
     select:
-      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at',
+      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at',
     external_key: quotedIn(keys),
   })
   const [passRows, dailyRows] = await Promise.all([
@@ -1017,6 +1047,94 @@ export async function fetchCatalogImportProfilesBulk(
   }
 
   return { profiles, storageConfigured: true }
+}
+
+export type CatalogPassAvatarRow = {
+  externalKey: string
+  entityId: number
+  passKind: CatalogPassKind
+  sport: string
+  seasonYear: number
+  seasonLabel: string
+  name: string
+  avatar?: string
+}
+
+function fromPassRowAvatar(row: SupabasePassRow): CatalogPassAvatarRow {
+  const base = fromPassRow(row)
+  return {
+    externalKey: base.externalKey,
+    entityId: base.entityId,
+    passKind: base.passKind,
+    sport: base.sport,
+    seasonYear: base.seasonYear,
+    seasonLabel: base.seasonLabel,
+    name: base.name,
+    avatar: base.avatar,
+  }
+}
+
+/** Lightweight pass metadata + avatar lookup (no daily earnings). */
+export async function fetchCatalogPassAvatars(
+  externalKeys: string[],
+): Promise<{ passes: CatalogPassAvatarRow[]; storageConfigured: boolean }> {
+  if (!meowbotCatalogConfigured()) {
+    return { passes: [], storageConfigured: false }
+  }
+
+  const keys = [...new Set(externalKeys.map((key) => key.trim()).filter(Boolean))]
+  if (keys.length === 0) {
+    return { passes: [], storageConfigured: true }
+  }
+
+  const passes: CatalogPassAvatarRow[] = []
+  for (const batch of forExternalKeyFilterBatches(keys)) {
+    const params = new URLSearchParams({
+      select:
+        'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at',
+      external_key: quotedIn(batch),
+    })
+    const rows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
+    const byKey = new Map(rows.map((row) => [row.external_key, row]))
+    for (const key of batch) {
+      const row = byKey.get(key)
+      if (row) passes.push(fromPassRowAvatar(row))
+    }
+  }
+
+  return { passes, storageConfigured: true }
+}
+
+/**
+ * Find any stored avatar for the same entity+sport (other seasons), e.g. after an
+ * avatars-only crawl filled one season but the owned card is a different year.
+ */
+export async function findCatalogAvatarForEntitySport(input: {
+  entityId: number
+  sport: string
+  excludeExternalKey?: string
+}): Promise<string | undefined> {
+  if (!meowbotCatalogConfigured()) return undefined
+  const sport = normalizeSportForSeasonWindow(input.sport)
+  if (!input.entityId || !sport) return undefined
+
+  const params = new URLSearchParams({
+    select: 'avatar,external_key',
+    entity_id: `eq.${input.entityId}`,
+    sport: `eq.${sport}`,
+    avatar: 'not.is.null',
+    limit: '5',
+  })
+  const rows = await supabaseFetch<Array<{ avatar?: string | null; external_key: string }>>(
+    'meowbot_passes',
+    { params },
+  )
+  for (const row of rows) {
+    if (input.excludeExternalKey && row.external_key === input.excludeExternalKey) continue
+    const avatar = row.avatar?.trim()
+    if (avatar) return avatar
+  }
+  return undefined
 }
 
 export type CatalogSeasonYearOption = {
@@ -1087,7 +1205,7 @@ export async function getCatalogImportProfile(
 
   const passParams = new URLSearchParams({
     select:
-      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,has_earnings,total_base_rax,source_updated_at,cached_at',
+      'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at',
     external_key: `eq.${externalKey}`,
     limit: '1',
   })
@@ -1114,12 +1232,15 @@ async function deleteDailyEarningsByExternalKeys(keys: string[]): Promise<void> 
 
 async function upsertCatalogPassBatch(passes: CatalogPassInput[]): Promise<number> {
   if (passes.length === 0) return 0
-  await supabaseFetch<void>('meowbot_passes', {
-    method: 'POST',
-    params: new URLSearchParams({ on_conflict: 'external_key' }),
-    headers: supabaseHeaders('resolution=merge-duplicates,return=minimal'),
-    body: JSON.stringify(passes.map(toPassRow)),
-  })
+  // Split by key signature so PostgREST does not reject mixed avatar/rarity omit rows (PGRST102).
+  for (const rows of buildCatalogPassUpsertBatches(passes)) {
+    await supabaseFetch<void>('meowbot_passes', {
+      method: 'POST',
+      params: new URLSearchParams({ on_conflict: 'external_key' }),
+      headers: supabaseHeaders('resolution=merge-duplicates,return=minimal'),
+      body: JSON.stringify(rows),
+    })
+  }
   return passes.length
 }
 

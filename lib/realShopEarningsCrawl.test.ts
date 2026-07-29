@@ -3,6 +3,7 @@ import { RealApiError, type RealPassEarnings, type RealShopEarningsTotalPage } f
 import {
   DEFAULT_SHOP_CRAWL_MAX_PAGES,
   LIVE_SHOP_CRAWL_SPORT_SLUGS,
+  MAX_AVATAR_SHOP_CRAWL_MAX_PAGES,
   MAX_SHOP_CRAWL_MAX_PAGES,
   SHOP_EARNINGS_PAGE_SIZE,
   buildShopCrawlJobs,
@@ -19,6 +20,7 @@ describe('shop crawl defaults', () => {
   it('defaults to one page per chunk so the first HTTP response returns sooner', () => {
     expect(DEFAULT_SHOP_CRAWL_MAX_PAGES).toBe(1)
     expect(MAX_SHOP_CRAWL_MAX_PAGES).toBe(5)
+    expect(MAX_AVATAR_SHOP_CRAWL_MAX_PAGES).toBe(15)
     expect(resolveShopCrawlMaxPages({})).toBe(1)
   })
 
@@ -88,10 +90,10 @@ describe('mapShopEarningsItemToCatalogPass', () => {
     expect(pass?.rarityLabel).toBeUndefined()
   })
 
-  it('reads entity id from nested entity.id', () => {
+  it('reads entity avatar from nested shop entity', () => {
     const pass = mapShopEarningsItemToCatalogPass(
       {
-        entity: { id: 99 },
+        entity: { id: 99, avatar: 'e898d322da' },
         value: '10',
         label: 'Nested',
         sport: 'ncaam',
@@ -99,6 +101,7 @@ describe('mapShopEarningsItemToCatalogPass', () => {
       job,
     )
     expect(pass?.entityId).toBe(99)
+    expect(pass?.avatar).toBe('e898d322da')
   })
 
   it('sets has_earnings false when value is zero', () => {

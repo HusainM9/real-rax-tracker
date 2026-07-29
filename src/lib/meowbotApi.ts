@@ -28,6 +28,8 @@ export type MeowbotPlayerPass = {
   rarityLabel?: string
   playerName?: string
   seasonLabel?: string
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
 }
 
 export type MeowbotPlayerRow = {

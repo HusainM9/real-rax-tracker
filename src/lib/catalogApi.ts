@@ -1,6 +1,7 @@
 import { dedupeCatalogPassSummaries } from '../../lib/catalogPassIdentity'
 import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
 import { catalogCandidatePassKindsForSport } from '../../lib/passKind'
+import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from './realMedia'
 import { readResponseJson } from './readResponseJson'
 
 export { catalogCandidatePassKindsForSport }
@@ -16,6 +17,8 @@ export type CatalogSearchResult = {
   seasonLabel: string
   name: string
   rarityLabel?: string
+  /** Real CDN avatar key for player faces / team badges. */
+  avatar?: string
   hasEarnings?: boolean
   cachedAt: string
   sourceUpdatedAt?: string
@@ -252,6 +255,111 @@ export async function fetchCatalogImportProfilesBulk(
   }
 
   return { profiles, storageConfigured }
+}
+
+export type CatalogAvatarResolveItem = {
+  externalKey: string
+  avatar: string
+}
+
+async function fetchCatalogAvatarsBatch(
+  batchKeys: string[],
+  signal?: AbortSignal,
+): Promise<{
+  avatars: CatalogAvatarResolveItem[]
+  storageConfigured: boolean
+}> {
+  const response = await fetch('/api/catalog/avatars', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externalKeys: batchKeys }),
+    signal,
+  })
+  const data = await readResponseJson<{
+    avatars?: CatalogAvatarResolveItem[]
+    storageConfigured?: boolean
+    error?: string
+  }>(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || `Catalog avatar resolve failed (${response.status}).`)
+  }
+
+  return {
+    avatars: Array.isArray(data.avatars) ? data.avatars : [],
+    storageConfigured: data.storageConfigured !== false,
+  }
+}
+
+/**
+ * Resolve CDN avatar keys for passes (catalog + Real player entity fill for college).
+ * Prefer this over full import-profile bulk when only faces/badges are needed.
+ */
+export async function fetchCatalogAvatars(
+  externalKeys: string[],
+  signal?: AbortSignal,
+  options?: {
+    onBatch?: (loaded: number, total: number) => void
+  },
+): Promise<{
+  avatars: CatalogAvatarResolveItem[]
+  storageConfigured: boolean
+}> {
+  const keys = [...new Set(externalKeys.map((key) => key.trim()).filter(Boolean))]
+  if (keys.length === 0) {
+    return { avatars: [], storageConfigured: true }
+  }
+
+  const batches = chunkArray(keys, BULK_PROFILE_KEYS_MAX_REQUEST)
+  const avatars: CatalogAvatarResolveItem[] = []
+  let storageConfigured = true
+  let keysLoaded = 0
+
+  for (let waveStart = 0; waveStart < batches.length; waveStart += CATALOG_BULK_FETCH_CONCURRENCY) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
+    const wave = batches.slice(waveStart, waveStart + CATALOG_BULK_FETCH_CONCURRENCY)
+    const results = await Promise.all(
+      wave.map((batchKeys) => fetchCatalogAvatarsBatch(batchKeys, signal)),
+    )
+
+    for (const result of results) {
+      if (result.storageConfigured === false) {
+        storageConfigured = false
+      }
+      avatars.push(...result.avatars)
+    }
+
+    keysLoaded += wave.reduce((sum, batch) => sum + batch.length, 0)
+    options?.onBatch?.(Math.min(keysLoaded, keys.length), keys.length)
+  }
+
+  return { avatars, storageConfigured }
+}
+
+/**
+ * Fill missing `avatar` on catalog profiles/search rows (sibling seasons + Real entity fill).
+ * Same resolve path Cards/Plan use via `fetchCatalogAvatars`. Non-abort errors are ignored.
+ */
+export async function enrichCatalogProfilesWithAvatars<
+  T extends { externalKey: string; avatar?: string },
+>(profiles: T[], signal?: AbortSignal): Promise<T[]> {
+  const missingKeys = profiles
+    .filter((profile) => !profile.avatar?.trim())
+    .map((profile) => profile.externalKey.trim())
+    .filter(Boolean)
+  if (missingKeys.length === 0) return profiles
+
+  try {
+    const { avatars } = await fetchCatalogAvatars(missingKeys, signal)
+    if (avatars.length === 0) return profiles
+    return enrichCardsWithCatalogAvatars(profiles, avatarByExternalKey(avatars))
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    return profiles
+  }
 }
 
 export async function fetchCatalogSeasonYears(

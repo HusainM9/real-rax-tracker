@@ -63,7 +63,17 @@ describe('normalizeRealPass', () => {
       rarityLabel: 'Iconic 1',
       playerName: 'Anthony Gordon',
       seasonLabel: '2025-26',
+      avatar: undefined,
     })
+  })
+
+  it('reads entity.avatar from the nested Real entity', () => {
+    const pass = normalizeRealPass(
+      realPass({
+        entity: { id: 551, avatar: 'c5f7b44ab4ea35fa57df203aa18eed54' },
+      }),
+    )
+    expect(pass?.avatar).toBe('c5f7b44ab4ea35fa57df203aa18eed54')
   })
 
   it('keeps team entityType instead of guessing from the label', () => {

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { PassIdentity } from '../components/PassIdentity'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
 import { displayRaxValue } from '../lib/displayRax'
@@ -197,13 +198,18 @@ export default function ProfilePage() {
           <div className="list">
             {snapshot.topCards.map((card, index) => (
               <div className="list-row profile-top-row" key={card.id} style={{ ['--i' as string]: index }}>
-                <span>
-                  <strong>{card.name}</strong>
-                  <small>
-                    {card.sport}
-                    {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                  </small>
-                </span>
+                <PassIdentity
+                  name={card.name}
+                  passKind={card.passKind === 'team' ? 'team' : 'player'}
+                  sport={card.sport}
+                  avatar={card.avatar}
+                  meta={
+                    <>
+                      {card.sport}
+                      {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                    </>
+                  }
+                />
                 <b>{formatRax(displayRaxValue(card.claimableRax))} RAX</b>
               </div>
             ))}

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { Link, useSearchParams } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { PassIdentity } from '../components/PassIdentity'
 import { SeasonMultiSelect } from '../components/SeasonMultiSelect'
 import { displayRaxValue } from '../lib/displayRax'
 import {
+  enrichCatalogProfilesWithAvatars,
   fetchCatalogImportProfile,
   fetchCatalogImportProfilesBulk,
   fetchCatalogPassSummaries,
@@ -57,6 +59,7 @@ import {
   type PassRecommendationBundle,
   type RecommendationPassAdjustment,
   type RecommendationPassAdjustmentMode,
+  recommendationAdjustmentFromPass,
   sportSeasonFilterKey,
   type PassRecommendationProgress,
   type PassRecommendationRow,
@@ -224,25 +227,30 @@ function PotentialCandidateRow({ entry }: { entry: PotentialClaimLadderEntry }) 
     <div
       className={`claim-row ${entry.statusAfter}${entry.isPotential ? ' is-potential' : ''}`}
     >
-      <span>
-        <strong>{entry.name}</strong>
-        <small>
-          rank #{entry.rankInSport}
-          {entry.season ? ` · ${entry.season}` : ''}
-          {entry.isPotential ? ' · potential pass' : ''}
-          {entry.statusBefore && entry.statusBefore !== entry.statusAfter
-            ? ` · was ${claimStatusLabel(entry.statusBefore).toLowerCase()}`
-            : null}
-          {entry.raxDelta !== 0 ? (
-            <>
-              {' · '}
-              <span className={entry.raxDelta > 0 ? 'sale-positive' : 'sale-negative'}>
-                {formatSignedRax(displayRaxValue(entry.raxDelta))} net
-              </span>
-            </>
-          ) : null}
-        </small>
-      </span>
+      <PassIdentity
+        name={entry.name}
+        passKind={entry.passKind === 'team' ? 'team' : 'player'}
+        sport={entry.sport}
+        avatar={entry.avatar}
+        meta={
+          <>
+            rank #{entry.rankInSport}
+            {entry.season ? ` · ${entry.season}` : ''}
+            {entry.isPotential ? ' · potential pass' : ''}
+            {entry.statusBefore && entry.statusBefore !== entry.statusAfter
+              ? ` · was ${claimStatusLabel(entry.statusBefore).toLowerCase()}`
+              : null}
+            {entry.raxDelta !== 0 ? (
+              <>
+                {' · '}
+                <span className={entry.raxDelta > 0 ? 'sale-positive' : 'sale-negative'}>
+                  {formatSignedRax(displayRaxValue(entry.raxDelta))} net
+                </span>
+              </>
+            ) : null}
+          </>
+        }
+      />
       <b>{formatRax(displayRaxValue(entry.raxEarned))} RAX</b>
     </div>
   )
@@ -592,13 +600,13 @@ function PotentialAnalysisResults({
                     <tr key={row.cardId}>
                       <td>{index + 1}</td>
                       <td>
-                        {row.name}
-                        {row.season ? (
-                          <>
-                            <br />
-                            <small className="table-sub">{row.season}</small>
-                          </>
-                        ) : null}
+                        <PassIdentity
+                          name={row.name}
+                          passKind={row.passKind}
+                          sport={row.sport}
+                          avatar={row.avatar}
+                          meta={row.season || undefined}
+                        />
                       </td>
                       <td>{row.sport}</td>
                       <td>{row.daysDisplaced}</td>
@@ -723,13 +731,19 @@ function PotentialAnalysisResults({
                     to={`/calendar?monthDay=${day.claimDay}`}
                     key={`${day.claimDay}-${candidate.performance.id}`}
                   >
-                    <span>
-                      <strong>{candidate.card.name}</strong>
-                      <small>
-                        {formatClaimDay(day.claimDay)} · was{' '}
-                        {previousStatus === 'pro-bonus' ? 'Pro bonus' : 'guaranteed'} · now overlap
-                      </small>
-                    </span>
+                    <PassIdentity
+                      name={candidate.card.name}
+                      passKind={candidate.card.passKind === 'team' ? 'team' : 'player'}
+                      sport={candidate.card.sport}
+                      avatar={candidate.card.avatar}
+                      meta={
+                        <>
+                          {formatClaimDay(day.claimDay)} · was{' '}
+                          {previousStatus === 'pro-bonus' ? 'Pro bonus' : 'guaranteed'} · now
+                          overlap
+                        </>
+                      }
+                    />
                     <b>{formatRax(candidate.performance.raxEarned)} RAX lost</b>
                   </Link>
                 ))}
@@ -836,6 +850,8 @@ export default function PotentialPage() {
   const [checkOnePassOpen, setCheckOnePassOpen] = useState(false)
   /** Catalog externalKey for the pass loaded into Check one pass (needed for baseline add). */
   const [checkOneExternalKey, setCheckOneExternalKey] = useState<string | null>(null)
+  const [checkOneAvatar, setCheckOneAvatar] = useState<string | undefined>(undefined)
+  const [checkOnePassKind, setCheckOnePassKind] = useState<'player' | 'team'>('player')
   const [monthBoostOpen, setMonthBoostOpen] = useState(false)
   const [monthBoostSport, setMonthBoostSport] = useState<RankSportChoice>('FC')
   const [monthBoostExcludedSports, setMonthBoostExcludedSports] = useState<Sport[]>([])
@@ -999,10 +1015,12 @@ export default function PotentialPage() {
 
     const controller = new AbortController()
     void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
-      .then(({ profiles }) => {
+      .then(async ({ profiles }) => {
+        const enriched = await enrichCatalogProfilesWithAvatars(profiles, controller.signal)
+        if (controller.signal.aborted) return
         setAdjustmentProfilesByKey((current) => {
           const next = new Map(current)
-          for (const profile of profiles) {
+          for (const profile of enriched) {
             next.set(profile.externalKey, profile)
           }
           for (const key of next.keys()) {
@@ -1098,14 +1116,25 @@ export default function PotentialPage() {
 
   const checkOneBaselinePass = useMemo(() => {
     if (!checkOneExternalKey || !form.name.trim()) return null
+    const ownedAvatar = data.cards.find((card) => card.externalKey === checkOneExternalKey)?.avatar
     return {
       externalKey: checkOneExternalKey,
       name: form.name.trim(),
       sport: form.sport,
       seasonLabel: form.season,
       seasonYear: Number.parseInt(form.season, 10) || 0,
+      passKind: checkOnePassKind,
+      avatar: checkOneAvatar || ownedAvatar,
     }
-  }, [checkOneExternalKey, form.name, form.season, form.sport])
+  }, [
+    checkOneAvatar,
+    checkOneExternalKey,
+    checkOnePassKind,
+    data.cards,
+    form.name,
+    form.season,
+    form.sport,
+  ])
 
   const checkOneAlreadyInBaseline = Boolean(
     checkOneBaselinePass &&
@@ -1247,9 +1276,13 @@ export default function PotentialPage() {
         setStatus('That pass was not found in the shared catalog. Try searching again.')
         return
       }
-      setCheckOneExternalKey(profile.externalKey)
+      const [enrichedProfile] = await enrichCatalogProfilesWithAvatars([profile])
+      const loaded = enrichedProfile ?? profile
+      setCheckOneExternalKey(loaded.externalKey)
+      setCheckOneAvatar(loaded.avatar?.trim() || result.avatar?.trim() || undefined)
+      setCheckOnePassKind(loaded.passKind === 'team' ? 'team' : 'player')
       applyCatalogProfileToForm(
-        profile,
+        loaded,
         {
           setEditingId,
           setPotentialRows,
@@ -1364,7 +1397,8 @@ export default function PotentialPage() {
           setSportOpportunityStatus('Shared catalog is not configured yet.')
           return
         }
-        baselineProfileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
+        const enriched = await enrichCatalogProfilesWithAvatars(profiles, controller.signal)
+        baselineProfileMap = new Map(enriched.map((profile) => [profile.externalKey, profile]))
       }
 
       const baselineData = applyRecommendationBaseline(data, baselineProfileMap, rankAdjustments)
@@ -1438,11 +1472,12 @@ export default function PotentialPage() {
           setSportOpportunityStatus('Shared catalog is not configured yet.')
           return
         }
+        const enrichedProfiles = await enrichCatalogProfilesWithAvatars(profiles, controller.signal)
 
         setSportOpportunityStatus(`Analyzing ${sport}… (${sportIndex + 1}/${SPORTS.length})`)
         const { ranked, bundle } = await rankAndRecommendAsync(
           baselineData,
-          profiles,
+          enrichedProfiles,
           SPORT_OPPORTUNITY_BUNDLE_SIZE,
           {
             sport,
@@ -1686,16 +1721,7 @@ export default function PotentialPage() {
       setAdjustmentSearchStatus('That pass is already in the adjustment list.')
       return
     }
-    setRankAdjustments((current) => [
-      ...current,
-      {
-        externalKey: result.externalKey,
-        name: result.name,
-        sport: sportFromCatalog(result.sport),
-        season: result.seasonLabel.trim() || String(result.seasonYear),
-        mode,
-      },
-    ])
+    setRankAdjustments((current) => [...current, recommendationAdjustmentFromPass(result, mode)])
     setAdjustmentSearchStatus(`Added ${result.name} — ${mode === 'assume-iconic-1' ? `assume ${RECOMMENDATION_SIMULATED_RARITY}` : 'exclude from ranking'}.`)
     setAdjustmentSearchQuery('')
     setAdjustmentSearchResults([])
@@ -1807,13 +1833,10 @@ export default function PotentialPage() {
     }
     setRankAdjustments((current) => [
       ...current,
-      {
-        externalKey: card.externalKey!,
-        name: card.name,
-        sport: card.sport,
-        season: card.season,
-        mode: 'assume-iconic-1',
-      },
+      recommendationAdjustmentFromPass(
+        { ...card, externalKey: card.externalKey! },
+        'assume-iconic-1',
+      ),
     ])
     setAdjustmentSearchStatus(
       `Added ${card.name} — assume ${RECOMMENDATION_SIMULATED_RARITY}.`,
@@ -1846,13 +1869,12 @@ export default function PotentialPage() {
         ) {
           continue
         }
-        next.push({
-          externalKey: card.externalKey,
-          name: card.name,
-          sport: card.sport,
-          season: card.season,
-          mode: 'assume-iconic-1',
-        })
+        next.push(
+          recommendationAdjustmentFromPass(
+            { ...card, externalKey: card.externalKey! },
+            'assume-iconic-1',
+          ),
+        )
         added += 1
       }
       return next
@@ -1891,13 +1913,12 @@ export default function PotentialPage() {
         ) {
           continue
         }
-        next.push({
-          externalKey: card.externalKey,
-          name: card.name,
-          sport: card.sport,
-          season: card.season,
-          mode: 'assume-iconic-1',
-        })
+        next.push(
+          recommendationAdjustmentFromPass(
+            { ...card, externalKey: card.externalKey! },
+            'assume-iconic-1',
+          ),
+        )
       }
       return next
     })
@@ -1951,13 +1972,7 @@ export default function PotentialPage() {
     }
     setRankAdjustments((current) => [
       ...current,
-      {
-        externalKey: pass.externalKey,
-        name: pass.name,
-        sport: pass.sport,
-        season: pass.season,
-        mode: 'assume-iconic-1',
-      },
+      recommendationAdjustmentFromPass(pass, 'assume-iconic-1'),
     ])
     setAdjustmentSearchStatus(
       `Added ${pass.name} from plan — assume ${RECOMMENDATION_SIMULATED_RARITY}.`,
@@ -1992,13 +2007,7 @@ export default function PotentialPage() {
         ) {
           continue
         }
-        next.push({
-          externalKey: pass.externalKey,
-          name: pass.name,
-          sport: pass.sport,
-          season: pass.season,
-          mode: 'assume-iconic-1',
-        })
+        next.push(recommendationAdjustmentFromPass(pass, 'assume-iconic-1'))
       }
       return next
     })
@@ -2041,16 +2050,18 @@ export default function PotentialPage() {
     const timeout = window.setTimeout(() => {
       setAdjustmentSearchBusy(true)
       searchCatalog(trimmed, controller.signal)
-        .then((result) => {
+        .then(async (result) => {
           if (!result.storageConfigured) {
             setAdjustmentSearchStatus('Shared catalog search is not configured yet.')
             setAdjustmentSearchResults([])
             return
           }
           const playerResults = result.results.filter((item) => isPlayerLikeCatalogPass(item))
-          setAdjustmentSearchResults(playerResults)
+          const enriched = await enrichCatalogProfilesWithAvatars(playerResults, controller.signal)
+          if (controller.signal.aborted) return
+          setAdjustmentSearchResults(enriched)
           setAdjustmentSearchStatus(
-            playerResults.length === 0 ? 'No player passes match that search.' : '',
+            enriched.length === 0 ? 'No player passes match that search.' : '',
           )
         })
         .catch((error) => {
@@ -2082,7 +2093,7 @@ export default function PotentialPage() {
     const timeout = window.setTimeout(() => {
       setIconic20CatalogSearchBusy(true)
       searchCatalog(trimmed, controller.signal)
-        .then((result) => {
+        .then(async (result) => {
           if (!result.storageConfigured) {
             setIconic20CatalogSearchStatus('Shared catalog search is not configured yet.')
             setIconic20CatalogSearchResults([])
@@ -2094,9 +2105,11 @@ export default function PotentialPage() {
               item.rowCount > 0 &&
               !ownedCollectionExternalKeys.has(item.externalKey),
           )
-          setIconic20CatalogSearchResults(playerResults)
+          const enriched = await enrichCatalogProfilesWithAvatars(playerResults, controller.signal)
+          if (controller.signal.aborted) return
+          setIconic20CatalogSearchResults(enriched)
           setIconic20CatalogSearchStatus(
-            playerResults.length === 0
+            enriched.length === 0
               ? 'No new player passes match that search (already-owned passes use the collection list).'
               : '',
           )
@@ -2129,11 +2142,13 @@ export default function PotentialPage() {
     const controller = new AbortController()
     setIconic20ProfilesLoading(true)
     void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
-      .then(({ profiles, storageConfigured }) => {
+      .then(async ({ profiles, storageConfigured }) => {
         if (!storageConfigured) return
+        const enriched = await enrichCatalogProfilesWithAvatars(profiles, controller.signal)
+        if (controller.signal.aborted) return
         setIconic20ProfilesByKey((current) => {
           const next = new Map(current)
-          for (const profile of profiles) {
+          for (const profile of enriched) {
             if (profile.rows.length > 0) next.set(profile.externalKey, profile)
           }
           return next
@@ -2155,11 +2170,13 @@ export default function PotentialPage() {
     const controller = new AbortController()
     setPotentialBundleProfilesLoading(true)
     void fetchCatalogImportProfilesBulk(missingKeys, controller.signal)
-      .then(({ profiles, storageConfigured }) => {
+      .then(async ({ profiles, storageConfigured }) => {
         if (!storageConfigured) return
+        const enriched = await enrichCatalogProfilesWithAvatars(profiles, controller.signal)
+        if (controller.signal.aborted) return
         setPotentialBundleProfilesByKey((current) => {
           const next = new Map(current)
-          for (const profile of profiles) {
+          for (const profile of enriched) {
             if (profile.rows.length > 0) next.set(profile.externalKey, profile)
           }
           return next
@@ -2369,13 +2386,7 @@ export default function PotentialPage() {
 
     const nextAdjustments: RecommendationPassAdjustment[] = [
       ...rankAdjustments,
-      ...additions.map((row) => ({
-        externalKey: row.externalKey,
-        name: row.name,
-        sport: row.sport,
-        season: row.season,
-        mode: 'assume-iconic-1' as const,
-      })),
+      ...additions.map((row) => recommendationAdjustmentFromPass(row, 'assume-iconic-1')),
     ]
 
     const combinedNet = additions.reduce((sum, row) => sum + row.netClaimableDelta, 0)
@@ -2596,15 +2607,17 @@ export default function PotentialPage() {
       const reportBulkProgress = (loaded: number, total: number) => {
         setRankStatus(`Fetching earnings ${loaded}/${total} passes…`)
       }
-      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
-        allProfileKeys,
-        controller.signal,
-        { onBatch: reportBulkProgress },
-      )
+      const { profiles: rawProfiles, storageConfigured: bulkConfigured } =
+        await fetchCatalogImportProfilesBulk(allProfileKeys, controller.signal, {
+          onBatch: reportBulkProgress,
+        })
       if (!bulkConfigured) {
         setRankStatus('Shared catalog is not configured yet.')
         return
       }
+
+      setRankStatus('Resolving faces and badges…')
+      const profiles = await enrichCatalogProfilesWithAvatars(rawProfiles, controller.signal)
 
       const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
 
@@ -2770,15 +2783,17 @@ export default function PotentialPage() {
       const reportBulkProgress = (loaded: number, total: number) => {
         setMonthBoostStatus(`Fetching earnings ${loaded}/${total} passes…`)
       }
-      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
-        allProfileKeys,
-        controller.signal,
-        { onBatch: reportBulkProgress },
-      )
+      const { profiles: rawProfiles, storageConfigured: bulkConfigured } =
+        await fetchCatalogImportProfilesBulk(allProfileKeys, controller.signal, {
+          onBatch: reportBulkProgress,
+        })
       if (!bulkConfigured) {
         setMonthBoostStatus('Shared catalog is not configured yet.')
         return
       }
+
+      setMonthBoostStatus('Resolving faces and badges…')
+      const profiles = await enrichCatalogProfilesWithAvatars(rawProfiles, controller.signal)
 
       const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
       const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
@@ -2949,15 +2964,17 @@ export default function PotentialPage() {
       const reportBulkProgress = (loaded: number, total: number) => {
         setDayBoostStatus(`Fetching earnings ${loaded}/${total} passes…`)
       }
-      const { profiles, storageConfigured: bulkConfigured } = await fetchCatalogImportProfilesBulk(
-        allProfileKeys,
-        controller.signal,
-        { onBatch: reportBulkProgress },
-      )
+      const { profiles: rawProfiles, storageConfigured: bulkConfigured } =
+        await fetchCatalogImportProfilesBulk(allProfileKeys, controller.signal, {
+          onBatch: reportBulkProgress,
+        })
       if (!bulkConfigured) {
         setDayBoostStatus('Shared catalog is not configured yet.')
         return
       }
+
+      setDayBoostStatus('Resolving faces and badges…')
+      const profiles = await enrichCatalogProfilesWithAvatars(rawProfiles, controller.signal)
 
       const profileMap = new Map(profiles.map((profile) => [profile.externalKey, profile]))
       const baselineData = applyRecommendationBaseline(data, profileMap, rankAdjustments)
@@ -3146,13 +3163,7 @@ export default function PotentialPage() {
           ) {
             continue
           }
-          next.push({
-            externalKey: pass.externalKey,
-            name: pass.name,
-            sport: pass.sport,
-            season: pass.season,
-            mode: 'assume-iconic-1',
-          })
+          next.push(recommendationAdjustmentFromPass(pass, 'assume-iconic-1'))
         }
         return next
       })
@@ -3373,13 +3384,20 @@ export default function PotentialPage() {
                     <ul className="list compact-list">
                       {potentialBundleAnalysis.rows.map((row) => (
                         <li key={row.key}>
-                          <strong>{row.name}</strong>
-                          <small>
-                            {' '}
-                            · {row.sport} · {row.season} · isolated{' '}
-                            {formatSignedRax(displayRaxValue(row.isolatedNetDelta))} · marginal{' '}
-                            {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
-                          </small>
+                          <PassIdentity
+                            name={row.name}
+                            passKind={row.passKind}
+                            sport={row.sport}
+                            avatar={row.avatar}
+                            meta={
+                              <>
+                                {row.sport} · {row.season} · isolated{' '}
+                                {formatSignedRax(displayRaxValue(row.isolatedNetDelta))} ·
+                                marginal{' '}
+                                {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
+                              </>
+                            }
+                          />
                         </li>
                       ))}
                     </ul>
@@ -3607,10 +3625,18 @@ export default function PotentialPage() {
                         }
                         onClick={() => addOwnedCardToBaseline(card)}
                       >
-                        {card.name}
-                        {card.season ? ` · ${card.season}` : ''}
-                        {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
-                        {alreadyAdded ? ' · baseline' : ''}
+                        <PassIdentity
+                          name={card.name}
+                          passKind={card.passKind === 'team' ? 'team' : 'player'}
+                          sport={card.sport}
+                          avatar={card.avatar}
+                          meta={
+                            <>
+                              {[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                              {alreadyAdded ? ' · baseline' : ''}
+                            </>
+                          }
+                        />
                       </button>
                     )
                   })}
@@ -3678,10 +3704,18 @@ export default function PotentialPage() {
                       }
                       onClick={() => addPlannedPassToBaseline(pass)}
                     >
-                      {pass.name}
-                      {pass.season ? ` · ${pass.season}` : ''}
-                      {pass.sport ? ` · ${pass.sport}` : ''}
-                      {alreadyAdded ? ' · baseline' : ''}
+                      <PassIdentity
+                        name={pass.name}
+                        passKind={pass.passKind}
+                        sport={pass.sport}
+                        avatar={pass.avatar}
+                        meta={
+                          <>
+                            {[pass.season, pass.sport].filter(Boolean).join(' · ')}
+                            {alreadyAdded ? ' · baseline' : ''}
+                          </>
+                        }
+                      />
                     </button>
                   )
                 })}
@@ -3708,14 +3742,19 @@ export default function PotentialPage() {
             <div className="list recommendation-adjustment-search-results">
               {adjustmentSearchResults.slice(0, 8).map((result) => (
                 <div className="list-row" key={result.externalKey}>
-                  <span>
-                    <strong>{result.name}</strong>
-                    <small>
-                      {sportFromCatalog(result.sport)} ·{' '}
-                      {result.seasonLabel.trim() || result.seasonYear} ·{' '}
-                      {result.rowCount} row{result.rowCount === 1 ? '' : 's'}
-                    </small>
-                  </span>
+                  <PassIdentity
+                    name={result.name}
+                    passKind={result.passKind === 'team' ? 'team' : 'player'}
+                    sport={result.sport}
+                    avatar={result.avatar}
+                    meta={
+                      <>
+                        {sportFromCatalog(result.sport)} ·{' '}
+                        {result.seasonLabel.trim() || result.seasonYear} · {result.rowCount} row
+                        {result.rowCount === 1 ? '' : 's'}
+                      </>
+                    }
+                  />
                   <span className="button-row compact-actions">
                     <button
                       className="button compact"
@@ -3749,12 +3788,22 @@ export default function PotentialPage() {
             <div className="list recommendation-adjustment-list">
               {rankAdjustments.map((adjustment) => (
                 <div className="list-row" key={adjustment.externalKey}>
-                  <span>
-                    <strong>{adjustment.name}</strong>
-                    <small>
-                      {adjustment.sport} · {adjustment.season}
-                    </small>
-                  </span>
+                  <PassIdentity
+                    name={adjustment.name}
+                    passKind={adjustment.passKind}
+                    sport={adjustment.sport}
+                    avatar={
+                      adjustment.avatar ||
+                      adjustmentProfilesByKey.get(adjustment.externalKey)?.avatar ||
+                      data.cards.find((card) => card.externalKey === adjustment.externalKey)
+                        ?.avatar
+                    }
+                    meta={
+                      <>
+                        {adjustment.sport} · {adjustment.season}
+                      </>
+                    }
+                  />
                   <span className="button-row compact-actions">
                     <select
                       className="adjustment-mode-select"
@@ -4243,16 +4292,19 @@ export default function PotentialPage() {
                       type="button"
                       onClick={() => loadRecommendationRow(row)}
                     >
-                      <span>
-                        <strong>
-                          {index + 1}. {row.name}
-                        </strong>
-                        <small>
-                          {row.sport} · {row.season}
-                          {row.rarityLabel ? ` · ${row.rarityLabel}` : ''} ·{' '}
-                          {formatSignedRax(displayRaxValue(row.netClaimableDelta))} net
-                        </small>
-                      </span>
+                      <PassIdentity
+                        name={`${index + 1}. ${row.name}`}
+                        passKind={row.passKind}
+                        sport={row.sport}
+                        avatar={row.avatar}
+                        meta={
+                          <>
+                            {row.sport} · {row.season}
+                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''} ·{' '}
+                            {formatSignedRax(displayRaxValue(row.netClaimableDelta))} net
+                          </>
+                        }
+                      />
                       <b>{formatRax(displayRaxValue(row.newClaimableRax))} claimable</b>
                     </button>
                     <button
@@ -4410,13 +4462,19 @@ export default function PotentialPage() {
                           type="button"
                           onClick={() => loadRecommendationRow(row)}
                         >
-                          {row.name}
+                          <PassIdentity
+                            name={row.name}
+                            passKind={row.passKind}
+                            sport={row.sport}
+                            avatar={row.avatar}
+                            meta={
+                              <>
+                                {row.sport} · {row.season}
+                                {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                              </>
+                            }
+                          />
                         </button>
-                        <br />
-                        <small className="table-sub">
-                          {row.sport} · {row.season}
-                          {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                        </small>
                       </td>
                       <td>
                         <strong
@@ -4601,10 +4659,15 @@ export default function PotentialPage() {
                         toggleQuickAddAnalysisSelection(card.externalKey)
                       }}
                     >
-                      <span className="owned-collection-pass-name">{card.name}</span>
-                      <span className="owned-collection-pass-meta">
-                        {[card.sport, card.season, card.rarityLabel].filter(Boolean).join(' · ')}
-                      </span>
+                      <PassIdentity
+                        name={card.name}
+                        passKind={card.passKind === 'team' ? 'team' : 'player'}
+                        sport={card.sport}
+                        avatar={card.avatar}
+                        meta={[card.sport, card.season, card.rarityLabel]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      />
                     </button>
                   )
                 })}
@@ -4651,12 +4714,20 @@ export default function PotentialPage() {
                       <ul className="list compact-list">
                         {quickAddAnalysis.rows.map((row) => (
                           <li key={row.key}>
-                            <strong>{row.name}</strong>
-                            <small>
-                              {row.sport} · {row.season} ·{' '}
-                              {formatRax(displayRaxValue(row.passClaimableRax))} claimable · adds{' '}
-                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
-                            </small>
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season} ·{' '}
+                                  {formatRax(displayRaxValue(row.passClaimableRax))} claimable ·
+                                  adds {formatSignedRax(displayRaxValue(row.marginalNetDelta))}{' '}
+                                  net
+                                </>
+                              }
+                            />
                           </li>
                         ))}
                       </ul>
@@ -4860,13 +4931,19 @@ export default function PotentialPage() {
                             type="button"
                             onClick={() => loadRecommendationRow(row)}
                           >
-                            {row.name}
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season}
+                                  {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                                </>
+                              }
+                            />
                           </button>
-                          <br />
-                          <small className="table-sub">
-                            {row.sport} · {row.season}
-                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                          </small>
                         </td>
                         <td>
                           <strong
@@ -5140,13 +5217,19 @@ export default function PotentialPage() {
                             type="button"
                             onClick={() => loadRecommendationRow(row)}
                           >
-                            {row.name}
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season}
+                                  {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
+                                </>
+                              }
+                            />
                           </button>
-                          <br />
-                          <small className="table-sub">
-                            {row.sport} · {row.season}
-                            {row.rarityLabel ? ` · ${row.rarityLabel}` : ''}
-                          </small>
                         </td>
                         <td>
                           <strong
@@ -5277,9 +5360,13 @@ export default function PotentialPage() {
                           title={selected ? 'Remove from bundle' : 'Add upgrade to bundle'}
                           onClick={() => toggleIconic20Selection(selectionKey)}
                         >
-                          {card.name}
-                          {card.season ? ` · ${card.season}` : ''}
-                          {card.rarityLabel ? ` · ${card.rarityLabel}` : ''}
+                          <PassIdentity
+                            name={card.name}
+                            passKind={card.passKind === 'team' ? 'team' : 'player'}
+                            sport={card.sport}
+                            avatar={card.avatar}
+                            meta={[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                          />
                         </button>
                       )
                     })}
@@ -5338,11 +5425,19 @@ export default function PotentialPage() {
                     }
                     onClick={() => toggleIconic20Selection(selectionKey)}
                   >
-                    {result.name}
-                    {' · '}
-                    {sportFromCatalog(result.sport)} ·{' '}
-                    {result.seasonLabel.trim() || result.seasonYear}
-                    {selected && !profileReady ? ' · loading…' : ''}
+                    <PassIdentity
+                      name={result.name}
+                      passKind={result.passKind === 'team' ? 'team' : 'player'}
+                      sport={result.sport}
+                      avatar={result.avatar}
+                      meta={
+                        <>
+                          {sportFromCatalog(result.sport)} ·{' '}
+                          {result.seasonLabel.trim() || result.seasonYear}
+                          {selected && !profileReady ? ' · loading…' : ''}
+                        </>
+                      }
+                    />
                   </button>
                 )
               })}
@@ -5400,11 +5495,18 @@ export default function PotentialPage() {
                         const source = row.key.startsWith('catalog:') ? 'new' : 'upgrade'
                         return (
                           <li key={row.key}>
-                            <strong>{row.name}</strong>
-                            <small>
-                              {row.sport} · {row.season} · {source} · adds{' '}
-                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
-                            </small>
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season} · {source} · adds{' '}
+                                  {formatSignedRax(displayRaxValue(row.marginalNetDelta))} net
+                                </>
+                              }
+                            />
                           </li>
                         )
                       })}

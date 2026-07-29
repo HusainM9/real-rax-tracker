@@ -25,6 +25,8 @@ export function toSavedSellRankRow(row: BulkSellRankRow): SavedSellRankRow {
     sport: row.analysis.card.sport,
     season: row.analysis.card.season,
     rarityLabel: row.analysis.card.rarityLabel,
+    passKind: row.analysis.card.passKind,
+    avatar: row.analysis.card.avatar,
     claimableNow: row.claimableNow,
     lostClaimableRax: row.analysis.lostClaimableRax,
     freedClaimableRax: row.analysis.freedClaimableRax,

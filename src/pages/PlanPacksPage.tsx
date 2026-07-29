@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import {
   DEFAULT_PACK_RATING_INCREMENT,
@@ -108,8 +109,15 @@ function PackPassRow({
   return (
     <CollapsiblePanel
       className={`pack-tracker-row${isDone ? ' pack-tracker-row-done' : ''}${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
-      title={pass.name}
-      description={summary}
+      title={
+        <PassIdentity
+          name={pass.name}
+          passKind={pass.passKind}
+          sport={pass.sport}
+          avatar={pass.avatar}
+          meta={summary}
+        />
+      }
       defaultOpen={false}
       open={open}
       onOpenChange={setOpen}
