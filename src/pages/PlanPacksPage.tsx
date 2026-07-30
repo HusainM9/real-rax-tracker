@@ -9,6 +9,7 @@ import {
   formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
   ICONIC_RATING_TARGET,
+  normalizeDailySwaps,
   normalizePackUsername,
 } from '../lib/packTracker'
 import { fetchPackRatings } from '../lib/packRatingsImport'
@@ -33,6 +34,8 @@ function formatDays(days: number | null): string {
   return `${days} days`
 }
 
+type PackPassSortMode = 'soonest' | 'most-upgraded' | 'least-upgraded' | 'name' | 'plan'
+
 function accountUsername(account: PackTrackerAccount): string {
   return normalizePackUsername(account.username)
 }
@@ -45,6 +48,7 @@ function PackPassRow({
   importStatus,
   onEnsureTracker,
   onUpdateRatingPerPack,
+  onUpdateDailySwaps,
   onAddAccount,
   onUpdateAccount,
   onRemoveAccount,
@@ -61,6 +65,7 @@ function PackPassRow({
   importStatus: string
   onEnsureTracker: () => void
   onUpdateRatingPerPack: (value: number) => void
+  onUpdateDailySwaps: (value: number | undefined) => void
   onAddAccount: () => void
   onUpdateAccount: (
     accountId: string,
@@ -87,6 +92,8 @@ function PackPassRow({
     ? tracker.accounts.filter((account) => Boolean(accountUsername(account))).length
     : 0
   const [open, setOpen] = useState(false)
+  const hasDailySwaps = Boolean(tracker && normalizeDailySwaps(tracker.dailySwaps) > 0)
+  const [showDailySwaps, setShowDailySwaps] = useState(hasDailySwaps)
   const hasIncompleteOwnership = Boolean(
     tracker?.accounts.some(
       (account) => account.ownershipStatus === 'missing' && !account.ignoredMissing,
@@ -104,7 +111,10 @@ function PackPassRow({
           ? 'DONE'
           : `${formatDays(estimate.daysRemaining)} left`,
         `${accountCount} account${accountCount === 1 ? '' : 's'}`,
-      ].join(' · ')
+        estimate.dailySwaps > 0 ? `+${estimate.dailySwaps} swap${estimate.dailySwaps === 1 ? '' : 's'}/day` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
 
   return (
     <CollapsiblePanel
@@ -181,7 +191,10 @@ function PackPassRow({
               <span>Days remaining</span>
               <strong>{formatDays(estimate.daysRemaining)}</strong>
               <small>
-                {estimate.openingAccounts} open · est. {estimate.dailyGain}/day
+                {estimate.openingAccounts} open
+                {estimate.dailySwaps > 0 ? ` + ${estimate.dailySwaps} swap` : ''}
+                {' · '}
+                est. {estimate.dailyGain}/day
               </small>
             </div>
             <label className="pack-stat pack-stat-input">
@@ -195,6 +208,52 @@ function PackPassRow({
                 aria-label={`Rating per pack for ${pass.name}`}
               />
             </label>
+          </div>
+
+          <div className="pack-daily-swaps">
+            {showDailySwaps || hasDailySwaps ? (
+              <div className="pack-daily-swaps-row">
+                <label className="pack-stat pack-stat-input">
+                  <span>Daily swaps</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={tracker.dailySwaps ?? 0}
+                    onChange={(event) => {
+                      const next = Number(event.target.value)
+                      onUpdateDailySwaps(Number.isFinite(next) && next > 0 ? next : undefined)
+                    }}
+                    aria-label={`Daily swaps for ${pass.name}`}
+                  />
+                </label>
+                <p className="table-sub pack-daily-swaps-hint">
+                  Extra packs of this player per day from swapping unrelated player packs. Adds{' '}
+                  {estimate.dailySwaps * estimate.ratingPerPack}/day to the estimate.
+                </p>
+                <button
+                  className="button danger compact"
+                  type="button"
+                  onClick={() => {
+                    onUpdateDailySwaps(undefined)
+                    setShowDailySwaps(false)
+                  }}
+                >
+                  Remove swaps
+                </button>
+              </div>
+            ) : (
+              <button
+                className="button compact"
+                type="button"
+                onClick={() => {
+                  setShowDailySwaps(true)
+                  onUpdateDailySwaps(1)
+                }}
+              >
+                Add daily swaps
+              </button>
+            )}
           </div>
 
           {tracker.playCount != null && tracker.playCount === 0 ? (
@@ -335,8 +394,8 @@ function PackPassRow({
             <p className="import-hint plan-pass-status owned">DONE — reached Iconic rating target.</p>
           ) : estimate.daysRemaining === null ? (
             <p className="import-hint plan-pass-status warning">
-              No effective pack openers for estimates — enable “Opens packs” on an owned account, or
-              Ignore missing ownership.
+              No effective pack openers for estimates — enable “Opens packs” on an owned account, add
+              daily swaps, or Ignore missing ownership.
             </p>
           ) : null}
         </div>
@@ -372,6 +431,7 @@ export default function PlanPacksPage() {
   const [trackAllStatus, setTrackAllStatus] = useState('')
   const [importBusyKey, setImportBusyKey] = useState('')
   const [importStatusByPass, setImportStatusByPass] = useState<Record<string, string>>({})
+  const [passSortMode, setPassSortMode] = useState<PackPassSortMode>('soonest')
 
   const plannedPasses = data.plannedPasses ?? []
   const packTrackers = data.packTrackers ?? []
@@ -464,17 +524,64 @@ export default function PlanPacksPage() {
     [playerPasses, trackerByPassId],
   )
 
-  /** DONE (remaining ≤ 0 / at Iconic) first; stable order within each group. */
+  /** Sort planned players; DONE (at Iconic) stays first for finish-based sorts. */
   const sortedPlayerPasses = useMemo(() => {
-    return [...playerPasses].sort((a, b) => {
-      const aTracker = trackerByPassId.get(a.id)
-      const bTracker = trackerByPassId.get(b.id)
-      const aDone = aTracker ? estimatePackProgress(aTracker).atTarget : false
-      const bDone = bTracker ? estimatePackProgress(bTracker).atTarget : false
-      if (aDone !== bDone) return aDone ? -1 : 1
-      return 0
-    })
-  }, [playerPasses, trackerByPassId])
+    const indexed = playerPasses.map((pass, index) => ({ pass, index }))
+    return indexed
+      .sort((a, b) => {
+        if (passSortMode === 'plan') return a.index - b.index
+        if (passSortMode === 'name') {
+          return a.pass.name.localeCompare(b.pass.name, undefined, { sensitivity: 'base' })
+        }
+
+        const aTracker = trackerByPassId.get(a.pass.id)
+        const bTracker = trackerByPassId.get(b.pass.id)
+        const aEstimate = aTracker
+          ? estimatePackProgress(aTracker)
+          : null
+        const bEstimate = bTracker
+          ? estimatePackProgress(bTracker)
+          : null
+
+        // Untracked after tracked for progress/finish sorts.
+        if ((aEstimate === null) !== (bEstimate === null)) {
+          return aEstimate === null ? 1 : -1
+        }
+        if (aEstimate === null || bEstimate === null) {
+          return a.pass.name.localeCompare(b.pass.name)
+        }
+
+        if (aEstimate.atTarget !== bEstimate.atTarget) {
+          return aEstimate.atTarget ? -1 : 1
+        }
+
+        if (passSortMode === 'most-upgraded') {
+          if (aEstimate.totalRating !== bEstimate.totalRating) {
+            return bEstimate.totalRating - aEstimate.totalRating
+          }
+          return a.pass.name.localeCompare(b.pass.name)
+        }
+
+        if (passSortMode === 'least-upgraded') {
+          if (aEstimate.totalRating !== bEstimate.totalRating) {
+            return aEstimate.totalRating - bEstimate.totalRating
+          }
+          return a.pass.name.localeCompare(b.pass.name)
+        }
+
+        // soonest finish
+        if (aEstimate.daysRemaining === null && bEstimate.daysRemaining === null) {
+          return a.pass.name.localeCompare(b.pass.name)
+        }
+        if (aEstimate.daysRemaining === null) return 1
+        if (bEstimate.daysRemaining === null) return -1
+        if (aEstimate.daysRemaining !== bEstimate.daysRemaining) {
+          return aEstimate.daysRemaining - bEstimate.daysRemaining
+        }
+        return a.pass.name.localeCompare(b.pass.name)
+      })
+      .map((entry) => entry.pass)
+  }, [passSortMode, playerPasses, trackerByPassId])
 
   const trackAllUntracked = () => {
     if (untrackedPlayerPasses.length === 0) {
@@ -633,6 +740,15 @@ export default function PlanPacksPage() {
       setApplyTemplatesStatus('Add at least one shared account first.')
       return
     }
+    const templatesWithUsername = packAccountTemplates.filter((template) =>
+      Boolean(normalizePackUsername(template.username)),
+    )
+    if (templatesWithUsername.length === 0) {
+      setApplyTemplatesStatus(
+        'Enter a Real username on each shared account before applying — blank usernames are skipped.',
+      )
+      return
+    }
     if (packTrackers.length === 0) {
       setApplyTemplatesStatus('Track at least one player pack first, then apply.')
       return
@@ -653,6 +769,18 @@ export default function PlanPacksPage() {
     if (result.accountsUpdated > 0) {
       parts.push(
         `Updated ${result.accountsUpdated} existing row${result.accountsUpdated === 1 ? '' : 's'}.`,
+      )
+    }
+    if (result.accountsRemoved > 0) {
+      parts.push(
+        `Removed ${result.accountsRemoved} blank placeholder${result.accountsRemoved === 1 ? '' : 's'}.`,
+      )
+    }
+    if (templatesWithUsername.length < packAccountTemplates.length) {
+      parts.push(
+        `Skipped ${packAccountTemplates.length - templatesWithUsername.length} shared account${
+          packAccountTemplates.length - templatesWithUsername.length === 1 ? '' : 's'
+        } without a username.`,
       )
     }
     setApplyTemplatesStatus(parts.join(' '))
@@ -1001,7 +1129,7 @@ export default function PlanPacksPage() {
       <CollapsiblePanel
         className="pack-shared-accounts-panel"
         title="Shared accounts"
-        description="Define your Real accounts once. New “Track packs” rows seed from these, or apply them to every tracked pass without retyping."
+        description="Define your Real accounts once (with usernames). New “Track packs” rows seed from these, or apply them to every tracked pass — blank placeholders like “Account 1” are cleaned up automatically."
         defaultOpen={false}
         badge={`${packAccountTemplates.length}`}
         actions={
@@ -1167,15 +1295,30 @@ export default function PlanPacksPage() {
                   : `${untrackedPlayerPasses.length} pass${untrackedPlayerPasses.length === 1 ? '' : 'es'} not tracking yet — same seeding as “Track packs” (shared accounts when set).`}
               </p>
             </div>
-            <button
-              className="button compact"
-              type="button"
-              disabled={untrackedPlayerPasses.length === 0}
-              onClick={trackAllUntracked}
-            >
-              Track all
-              {untrackedPlayerPasses.length > 0 ? ` (${untrackedPlayerPasses.length})` : ''}
-            </button>
+            <div className="pack-tracker-list-actions">
+              <label className="field inline-field">
+                <span>Sort</span>
+                <select
+                  value={passSortMode}
+                  onChange={(event) => setPassSortMode(event.target.value as PackPassSortMode)}
+                >
+                  <option value="soonest">Soonest finish</option>
+                  <option value="most-upgraded">Most upgraded</option>
+                  <option value="least-upgraded">Least upgraded</option>
+                  <option value="name">Name A–Z</option>
+                  <option value="plan">Plan order</option>
+                </select>
+              </label>
+              <button
+                className="button compact"
+                type="button"
+                disabled={untrackedPlayerPasses.length === 0}
+                onClick={trackAllUntracked}
+              >
+                Track all
+                {untrackedPlayerPasses.length > 0 ? ` (${untrackedPlayerPasses.length})` : ''}
+              </button>
+            </div>
           </div>
           {trackAllStatus ? <p className="import-status">{trackAllStatus}</p> : null}
           {sortedPlayerPasses.map((pass) => {
@@ -1194,6 +1337,10 @@ export default function PlanPacksPage() {
                 onUpdateRatingPerPack={(value) => {
                   if (!tracker) return
                   updatePackTracker(tracker.id, { ratingPerPack: value })
+                }}
+                onUpdateDailySwaps={(value) => {
+                  if (!tracker) return
+                  updatePackTracker(tracker.id, { dailySwaps: value })
                 }}
                 onAddAccount={() => {
                   const id = tracker?.id ?? upsertPackTracker(pass.id)

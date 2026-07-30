@@ -3,7 +3,17 @@ const COOKIE_NAME = 'rax_session'
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 function sessionSecret(): string | undefined {
-  return process.env.AUTH_SESSION_SECRET?.trim() || process.env.BASIC_AUTH_PASSWORD?.trim()
+  const raw =
+    process.env.AUTH_SESSION_SECRET?.trim() || process.env.BASIC_AUTH_PASSWORD?.trim() || ''
+  if (!raw) return undefined
+  if (
+    (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) ||
+    (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2)
+  ) {
+    const stripped = raw.slice(1, -1).trim()
+    return stripped || undefined
+  }
+  return raw
 }
 
 export function getSigningSecret(): string | undefined {

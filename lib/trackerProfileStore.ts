@@ -14,7 +14,7 @@ import {
   trackerProfileJsonByteLength,
 } from './cloudSyncPayload'
 import { normalizeRealUsername } from './importOwnershipTypes'
-import { hashSyncPassphrase } from './syncPassphrase'
+import { hashSyncPassphrase, matchesSyncPassphrase } from './syncPassphrase'
 
 const PROFILE_PREFIX = 'rax:tracker-profile:'
 const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'
@@ -237,8 +237,7 @@ export async function verifyAccountCredentials(
     return { ok: false, storageConfigured: true, unauthorized: false, notFound: true }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, validatedPassword)
-  if (stored.passphraseHash !== passphraseHash) {
+  if (!(await matchesSyncPassphrase(normalizedUsername, validatedPassword, stored.passphraseHash))) {
     return { ok: false, storageConfigured: true, unauthorized: true, notFound: false }
   }
 
@@ -388,8 +387,7 @@ export async function getTrackerProfileMeta(
     return { meta: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
-  if (stored.passphraseHash !== passphraseHash) {
+  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
     return { meta: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -435,8 +433,7 @@ export async function getTrackerProfile(
     return { profile: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
-  if (stored.passphraseHash !== passphraseHash) {
+  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
     return { profile: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -489,8 +486,7 @@ export async function getTrackerProfileTransfer(
     return { transfer: null, storageConfigured: true, unauthorized: false }
   }
 
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
-  if (stored.passphraseHash !== passphraseHash) {
+  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
     return { transfer: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -537,7 +533,10 @@ export async function saveTrackerProfile(input: {
   const existing = await kv.get<StoredTrackerProfile | null>(key)
   const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
 
-  if (existing && existing.passphraseHash !== passphraseHash) {
+  if (
+    existing &&
+    !(await matchesSyncPassphrase(normalizedUsername, password, existing.passphraseHash))
+  ) {
     return { ok: false, storageConfigured: true, unauthorized: true, conflict: false }
   }
 
@@ -815,8 +814,7 @@ export async function changeTrackerProfilePin(input: {
     return { ok: false, notFound: true, unauthorized: false, storageConfigured: true }
   }
 
-  const currentHash = await hashSyncPassphrase(normalizedUsername, currentPassword)
-  if (existing.passphraseHash !== currentHash) {
+  if (!(await matchesSyncPassphrase(normalizedUsername, currentPassword, existing.passphraseHash))) {
     return { ok: false, notFound: false, unauthorized: true, storageConfigured: true }
   }
 

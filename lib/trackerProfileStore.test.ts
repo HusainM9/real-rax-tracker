@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hashSyncPassphrase } from './syncPassphrase'
+import { hashSyncPassphrase, matchesSyncPassphrase } from './syncPassphrase'
 import { validateTrackerProfileData } from './trackerProfileStore'
 
 describe('hashSyncPassphrase', () => {
@@ -13,6 +13,23 @@ describe('hashSyncPassphrase', () => {
     const first = await hashSyncPassphrase('playerone', 'one')
     const second = await hashSyncPassphrase('playerone', 'two')
     expect(first).not.toBe(second)
+  })
+
+  it('matches hashes created under an alternate pepper', async () => {
+    const previous = process.env.AUTH_SESSION_SECRET
+    const previousBasic = process.env.BASIC_AUTH_PASSWORD
+    const previousTracker = process.env.TRACKER_SYNC_SECRET
+    process.env.TRACKER_SYNC_SECRET = ''
+    process.env.AUTH_SESSION_SECRET = 'new-secret'
+    process.env.BASIC_AUTH_PASSWORD = 'old-secret'
+
+    const storedHash = await hashSyncPassphrase('gordon', 'mypass', 'old-secret')
+    await expect(matchesSyncPassphrase('gordon', 'mypass', storedHash)).resolves.toBe(true)
+    await expect(matchesSyncPassphrase('gordon', 'nope', storedHash)).resolves.toBe(false)
+
+    process.env.AUTH_SESSION_SECRET = previous
+    process.env.BASIC_AUTH_PASSWORD = previousBasic
+    process.env.TRACKER_SYNC_SECRET = previousTracker
   })
 })
 

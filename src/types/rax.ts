@@ -194,6 +194,11 @@ export type PackTracker = {
   accounts: PackTrackerAccount[]
   /** Estimate divisor for packs needed / days remaining (default 10). */
   ratingPerPack?: number
+  /**
+   * Extra packs of this player opened per day via swaps from unrelated player packs.
+   * Counts toward daily gain on top of accounts with “Opens packs”.
+   */
+  dailySwaps?: number
   /** Mean |Real Rating| per play from `/plays/top` (or recent fallback); negatives absolutized. */
   averagePlayRating?: number
   /** Number of rated plays included in the average. */

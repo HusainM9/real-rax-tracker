@@ -16,12 +16,23 @@ export type PackProgressEstimate = {
   remaining: number
   ratingPerPack: number
   openingAccounts: number
+  /** Extra daily packs from swaps (normalized ≥0). */
+  dailySwaps: number
+  /** openingAccounts + dailySwaps — effective packs opened per day. */
+  effectiveDailyOpens: number
   packsNeeded: number
   dailyGain: number
-  /** null when no accounts open packs and rating remains. */
+  /** null when no effective opens and rating remains. */
   daysRemaining: number | null
   atTarget: boolean
   progressRatio: number
+}
+
+/** Normalize daily-swap count: whole numbers ≥0; invalid → 0. */
+export function normalizeDailySwaps(value: number | undefined | null): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.floor(n)
 }
 
 function clampRating(value: number): number {
@@ -55,15 +66,17 @@ export function countOpeningAccounts(accounts: PackTrackerAccount[]): number {
 }
 
 export function estimatePackProgress(
-  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number },
+  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number; dailySwaps?: number },
   target: number = ICONIC_RATING_TARGET,
 ): PackProgressEstimate {
   const totalRating = sumAccountRatings(tracker.accounts)
   const remaining = Math.max(0, target - totalRating)
   const ratingPerPack = normalizeRatingPerPack(tracker.ratingPerPack)
   const openingAccounts = countOpeningAccounts(tracker.accounts)
+  const dailySwaps = normalizeDailySwaps(tracker.dailySwaps)
+  const effectiveDailyOpens = openingAccounts + dailySwaps
   const packsNeeded = remaining === 0 ? 0 : Math.ceil(remaining / ratingPerPack)
-  const dailyGain = openingAccounts * ratingPerPack
+  const dailyGain = effectiveDailyOpens * ratingPerPack
   const daysRemaining =
     remaining === 0 ? 0 : dailyGain <= 0 ? null : Math.ceil(remaining / dailyGain)
   const progressRatio = target <= 0 ? 1 : Math.min(1, totalRating / target)
@@ -73,6 +86,8 @@ export function estimatePackProgress(
     remaining,
     ratingPerPack,
     openingAccounts,
+    dailySwaps,
+    effectiveDailyOpens,
     packsNeeded,
     dailyGain,
     daysRemaining,
@@ -127,33 +142,47 @@ function templateDisplayName(template: Pick<PackAccountTemplate, 'name' | 'usern
   return normalizePackUsername(template.username) || 'Account'
 }
 
+/** True when a row looks like an empty placeholder (no username, no progress). */
+export function isBlankPackAccountPlaceholder(account: PackTrackerAccount): boolean {
+  if (packUsernameKey(account.username)) return false
+  if (clampRating(account.rating) > 0) return false
+  if (account.lastImportedAt || account.ownershipStatus || account.rarityLabel) return false
+  const name = account.name.trim()
+  return name === '' || /^account\s*\d*$/i.test(name)
+}
+
 /** Seed pack-tracker rows from shared account templates (rating starts at 0). */
 export function accountsFromPackTemplates(
   templates: PackAccountTemplate[],
   createId: (prefix: string) => string,
 ): PackTrackerAccount[] {
-  return templates.map((template) => {
-    const username = normalizePackUsername(template.username)
-    return {
-      id: createId('pacc'),
-      name: templateDisplayName(template),
-      username: username || undefined,
-      rating: 0,
-      opensPacks: template.opensPacks,
-    }
-  })
+  return templates
+    .filter((template) => Boolean(normalizePackUsername(template.username)))
+    .map((template) => {
+      const username = normalizePackUsername(template.username)
+      return {
+        id: createId('pacc'),
+        name: templateDisplayName(template),
+        username,
+        rating: 0,
+        opensPacks: template.opensPacks,
+      }
+    })
 }
 
 export type ApplyPackTemplatesResult = {
   accounts: PackTrackerAccount[]
   added: number
   updated: number
+  removed: number
 }
 
 /**
  * Ensures each template with a username exists on the tracker.
  * Matches by username (case-insensitive). Updates name / username / opensPacks
  * without wiping rating or import metadata. Adds missing rows at rating 0.
+ * When at least one username template applies, drops leftover blank placeholders
+ * (e.g. default “Account 1” with no username) so Apply stays user-friendly.
  */
 export function applyPackTemplatesToAccounts(
   accounts: PackTrackerAccount[],
@@ -163,11 +192,13 @@ export function applyPackTemplatesToAccounts(
   let added = 0
   let updated = 0
   const next = [...accounts]
+  let appliedUsernameTemplate = false
 
   for (const template of templates) {
     const username = normalizePackUsername(template.username)
     const key = username.toLowerCase()
     if (!key) continue
+    appliedUsernameTemplate = true
 
     const name = templateDisplayName(template)
     const index = next.findIndex((account) => packUsernameKey(account.username) === key)
@@ -200,7 +231,17 @@ export function applyPackTemplatesToAccounts(
     added += 1
   }
 
-  return { accounts: next, added, updated }
+  let removed = 0
+  let resolved = next
+  if (appliedUsernameTemplate) {
+    const kept = next.filter((account) => !isBlankPackAccountPlaceholder(account))
+    removed = next.length - kept.length
+    // Never leave a tracker with zero accounts after pruning.
+    resolved = kept.length > 0 ? kept : next
+    if (kept.length === 0) removed = 0
+  }
+
+  return { accounts: resolved, added, updated, removed }
 }
 
 /** One tracked pass row for a single Real account across pack trackers. */

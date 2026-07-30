@@ -8,6 +8,8 @@ import {
   formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
   ICONIC_RATING_TARGET,
+  isBlankPackAccountPlaceholder,
+  normalizeDailySwaps,
   normalizeRatingPerPack,
   projectedFinishDate,
   removeFinishedPlannedPass,
@@ -155,6 +157,39 @@ describe('estimatePackProgress', () => {
     expect(estimate.packsNeeded).toBe(0)
     expect(estimate.daysRemaining).toBe(0)
   })
+
+  it('adds daily swaps on top of opening accounts for daily gain', () => {
+    const estimate = estimatePackProgress(tracker({ dailySwaps: 2 }))
+    expect(estimate.openingAccounts).toBe(2)
+    expect(estimate.dailySwaps).toBe(2)
+    expect(estimate.effectiveDailyOpens).toBe(4)
+    expect(estimate.dailyGain).toBe(40)
+    expect(estimate.daysRemaining).toBe(Math.ceil((ICONIC_RATING_TARGET - 1500) / 40))
+  })
+
+  it('can estimate finish from swaps alone when no accounts open packs', () => {
+    const estimate = estimatePackProgress(
+      tracker({
+        accounts: [{ id: 'acc_1', name: 'Main', rating: 100, opensPacks: false }],
+        dailySwaps: 1,
+        ratingPerPack: 10,
+      }),
+    )
+    expect(estimate.openingAccounts).toBe(0)
+    expect(estimate.dailySwaps).toBe(1)
+    expect(estimate.dailyGain).toBe(10)
+    expect(estimate.daysRemaining).toBe(Math.ceil((ICONIC_RATING_TARGET - 100) / 10))
+  })
+})
+
+describe('normalizeDailySwaps', () => {
+  it('floors positive values and treats invalid as 0', () => {
+    expect(normalizeDailySwaps(undefined)).toBe(0)
+    expect(normalizeDailySwaps(0)).toBe(0)
+    expect(normalizeDailySwaps(-2)).toBe(0)
+    expect(normalizeDailySwaps(2.9)).toBe(2)
+    expect(normalizeDailySwaps(3)).toBe(3)
+  })
 })
 
 describe('projectedFinishDate', () => {
@@ -200,6 +235,26 @@ describe('pack account templates', () => {
     ])
   })
 
+  it('skips templates without a username when seeding', () => {
+    idSeq = 0
+    const accounts = accountsFromPackTemplates(
+      [
+        { id: 't0', name: 'Blank', username: '', opensPacks: true },
+        { id: 't1', name: 'Main', username: 'gordon', opensPacks: true },
+      ],
+      nextId,
+    )
+    expect(accounts).toEqual([
+      {
+        id: 'pacc_1',
+        name: 'Main',
+        username: 'gordon',
+        rating: 0,
+        opensPacks: true,
+      },
+    ])
+  })
+
   it('adds missing accounts and updates name/opensPacks without wiping rating', () => {
     idSeq = 0
     const result = applyPackTemplatesToAccounts(
@@ -220,6 +275,7 @@ describe('pack account templates', () => {
 
     expect(result.added).toBe(1)
     expect(result.updated).toBe(1)
+    expect(result.removed).toBe(0)
     expect(result.accounts).toEqual([
       {
         id: 'acc_1',
@@ -248,7 +304,36 @@ describe('pack account templates', () => {
       nextId,
     )
     expect(result.added).toBe(0)
+    expect(result.removed).toBe(0)
     expect(result.accounts).toEqual([])
+  })
+
+  it('removes blank Account placeholders when applying shared usernames', () => {
+    idSeq = 0
+    const result = applyPackTemplatesToAccounts(
+      [
+        { id: 'acc_blank', name: 'Account 1', rating: 0, opensPacks: true },
+        {
+          id: 'acc_keep',
+          name: 'Manual',
+          rating: 500,
+          opensPacks: true,
+        },
+      ],
+      templates,
+      nextId,
+    )
+
+    expect(result.removed).toBe(1)
+    expect(result.added).toBe(2)
+    expect(result.accounts.map((account) => account.id)).toEqual([
+      'acc_keep',
+      'pacc_1',
+      'pacc_2',
+    ])
+    expect(isBlankPackAccountPlaceholder({ id: 'x', name: 'Account 1', rating: 0, opensPacks: true })).toBe(
+      true,
+    )
   })
 })
 

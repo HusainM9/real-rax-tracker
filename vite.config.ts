@@ -76,7 +76,14 @@ function localApiPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   for (const [key, value] of Object.entries(env)) {
-    process.env[key] ??= value
+    let next = value
+    if (
+      (next.startsWith('"') && next.endsWith('"') && next.length >= 2) ||
+      (next.startsWith("'") && next.endsWith("'") && next.length >= 2)
+    ) {
+      next = next.slice(1, -1)
+    }
+    process.env[key] ??= next
   }
 
   return {

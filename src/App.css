@@ -2280,8 +2280,40 @@ button.plan-tag:hover {
   min-width: 0;
 }
 
-.pack-tracker-list-header .button {
+.pack-tracker-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
   margin-left: auto;
+}
+
+.pack-tracker-list-actions .inline-field {
+  margin: 0;
+}
+
+.pack-tracker-list-actions .inline-field span {
+  font-size: 0.78rem;
+}
+
+.pack-daily-swaps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.15rem;
+}
+
+.pack-daily-swaps-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.pack-daily-swaps-hint {
+  flex: 1 1 12rem;
+  margin: 0;
+  min-width: 0;
 }
 
 .pack-tracker-list .pack-tracker-row.panel {

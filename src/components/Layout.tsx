@@ -166,7 +166,11 @@ export default function Layout() {
 
       <footer className="site-footer">
         <p>
-          {username ? (
+          {accountDevBypass ? (
+            <>
+              Local browser data (not signed into a cloud account).
+            </>
+          ) : username ? (
             <>
               Signed in as{' '}
               <NavLink className="footer-profile-link" to="/profile">
@@ -183,15 +187,13 @@ export default function Layout() {
           <NavLink className="footer-help-link" to="/help">
             Help
           </NavLink>
-          {!accountDevBypass ? (
-            <button
-              className="button auth-sign-out"
-              type="button"
-              onClick={() => void signOutAccount()}
-            >
-              Switch account
-            </button>
-          ) : null}
+          <button
+            className="button auth-sign-out"
+            type="button"
+            onClick={() => void signOutAccount()}
+          >
+            {accountDevBypass ? 'Sign in to account' : 'Switch account'}
+          </button>
           {!devBypass ? (
             <button className="button auth-sign-out" type="button" onClick={() => void signOut()}>
               Sign out

@@ -135,7 +135,12 @@ type RaxDataContextValue = {
     patch: Partial<
       Pick<
         PackTracker,
-        'accounts' | 'ratingPerPack' | 'averagePlayRating' | 'playCount' | 'lastPlaysImportedAt'
+        | 'accounts'
+        | 'ratingPerPack'
+        | 'dailySwaps'
+        | 'averagePlayRating'
+        | 'playCount'
+        | 'lastPlaysImportedAt'
       >
     >,
   ) => void
@@ -173,6 +178,7 @@ type RaxDataContextValue = {
     trackersTouched: number
     accountsAdded: number
     accountsUpdated: number
+    accountsRemoved: number
   }
   saveCardProfile: (cardId: string, rawJson?: string) => void
   restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
@@ -690,9 +696,10 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           trackerId = id
           const stamp = nowIso()
           const templates = current.packAccountTemplates ?? []
+          const seeded = accountsFromPackTemplates(templates, createId)
           const accounts =
-            templates.length > 0
-              ? accountsFromPackTemplates(templates, createId)
+            seeded.length > 0
+              ? seeded
               : [
                   {
                     id: createId('pacc'),
@@ -730,9 +737,10 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           for (const pass of current.plannedPasses ?? []) {
             if (pass.passKind === 'team') continue
             if (existingPassIds.has(pass.id)) continue
+            const seeded = accountsFromPackTemplates(templates, createId)
             const accounts =
-              templates.length > 0
-                ? accountsFromPackTemplates(templates, createId)
+              seeded.length > 0
+                ? seeded
                 : [
                     {
                       id: createId('pacc'),
@@ -767,12 +775,19 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               if (tracker.id !== id) return tracker
               const averagePlayRating = Number(patch.averagePlayRating)
               const playCount = Number(patch.playCount)
+              const dailySwaps = Number(patch.dailySwaps)
               return {
                 ...tracker,
                 ratingPerPack:
                   patch.ratingPerPack !== undefined
                     ? normalizeRatingPerPack(patch.ratingPerPack)
                     : tracker.ratingPerPack,
+                dailySwaps:
+                  'dailySwaps' in patch
+                    ? Number.isFinite(dailySwaps) && dailySwaps > 0
+                      ? Math.floor(dailySwaps)
+                      : undefined
+                    : tracker.dailySwaps,
                 averagePlayRating:
                   patch.averagePlayRating !== undefined
                     ? Number.isFinite(averagePlayRating)
@@ -1057,10 +1072,12 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         let trackersTouched = 0
         let accountsAdded = 0
         let accountsUpdated = 0
+        let accountsRemoved = 0
         setData((current) => {
           trackersTouched = 0
           accountsAdded = 0
           accountsUpdated = 0
+          accountsRemoved = 0
           const templates = current.packAccountTemplates ?? []
           if (templates.length === 0) return current
 
@@ -1075,10 +1092,13 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           const packTrackers = (current.packTrackers ?? []).map((tracker) => {
             if (!playerPassIds.has(tracker.plannedPassId)) return tracker
             const applied = applyPackTemplatesToAccounts(tracker.accounts, templates, createId)
-            if (applied.added === 0 && applied.updated === 0) return tracker
+            if (applied.added === 0 && applied.updated === 0 && applied.removed === 0) {
+              return tracker
+            }
             trackersTouched += 1
             accountsAdded += applied.added
             accountsUpdated += applied.updated
+            accountsRemoved += applied.removed
             changed = true
             return {
               ...tracker,
@@ -1091,7 +1111,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
             ? syncPlanProgressFromPackTrackers({ ...current, packTrackers })
             : current
         })
-        return { trackersTouched, accountsAdded, accountsUpdated }
+        return { trackersTouched, accountsAdded, accountsUpdated, accountsRemoved }
       },
       saveCardProfile: (cardId, rawJson) => {
         setData((current) => {

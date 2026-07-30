@@ -360,6 +360,11 @@ function hydratePackTracker(value: unknown): PackTracker | null {
         ? undefined
         : Number(value.ratingPerPack),
     ),
+    dailySwaps: (() => {
+      const n = Number(value.dailySwaps)
+      if (!Number.isFinite(n) || n <= 0) return undefined
+      return Math.floor(n)
+    })(),
     averagePlayRating: (() => {
       const n = Number(value.averagePlayRating)
       return Number.isFinite(n) ? n : undefined

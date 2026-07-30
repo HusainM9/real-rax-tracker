@@ -6,7 +6,7 @@ import { useAccountAuth } from '../context/AccountAuthContext'
 type Mode = 'login' | 'register'
 
 export default function AccountPage() {
-  const { status, login, register } = useAccountAuth()
+  const { status, login, register, continueWithLocalData } = useAccountAuth()
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const [mode, setMode] = useState<Mode>('login')
@@ -14,6 +14,7 @@ export default function AccountPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const isDev = import.meta.env.DEV
 
   const nextPath =
     searchParams.get('next') ||
@@ -58,6 +59,12 @@ export default function AccountPage() {
             ? 'Sign in with your Real @username and password. Your collection stays linked to this account.'
             : 'Use your Real @username as the account name so tracking and imports stay aligned.'}
         </p>
+        {isDev ? (
+          <p className="auth-hint">
+            Localhost: signing in loads that account’s cloud collection (needs KV + AUTH_SESSION_SECRET
+            in <code>.env.local</code>, same as Vercel). Or continue with this browser’s local data.
+          </p>
+        ) : null}
 
         <form className="auth-form" onSubmit={submit}>
           <label className="field">
@@ -94,6 +101,19 @@ export default function AccountPage() {
                 : 'Create account'}
           </button>
         </form>
+
+        {isDev ? (
+          <p className="auth-switch">
+            <button
+              type="button"
+              className="linkish"
+              disabled={submitting}
+              onClick={() => continueWithLocalData()}
+            >
+              Continue with local browser data
+            </button>
+          </p>
+        ) : null}
 
         <p className="auth-switch">
           {mode === 'login' ? (
