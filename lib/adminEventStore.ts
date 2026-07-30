@@ -16,7 +16,18 @@ const USER_STATS_PREFIX = 'rax:userstats:'
 const MAX_EVENTS = 5000
 
 export function adminStorageConfigured(): boolean {
-  return Boolean(process.env.KV_REST_API_URL?.trim() && process.env.KV_REST_API_TOKEN?.trim())
+  const url = process.env.KV_REST_API_URL?.trim() ?? ''
+  const token = process.env.KV_REST_API_TOKEN?.trim() ?? ''
+  const strip = (value: string) => {
+    if (
+      (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+      (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+    ) {
+      return value.slice(1, -1).trim()
+    }
+    return value
+  }
+  return Boolean(strip(url) && strip(token))
 }
 
 function userStatsKey(realUsername: string): string {

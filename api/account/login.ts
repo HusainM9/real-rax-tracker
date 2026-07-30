@@ -2,6 +2,7 @@ import {
   buildAccountSessionCookieHeader,
   createAccountSessionToken,
 } from '../../lib/accountAuth'
+import { accountLoginEnvHint, getAccountEnvStatus } from '../../lib/accountEnvStatus'
 import {
   checkLoginRateLimit,
   clearLoginRateLimitHeaders,
@@ -42,9 +43,16 @@ export default async function handler(request: Request): Promise<Response> {
   const denied = await requireAppSession(request)
   if (denied) return denied
 
+  const envStatus = getAccountEnvStatus()
+
   if (!accountsConfigured()) {
     return Response.json(
-      { error: 'Account storage is not configured in this environment.', storageConfigured: false },
+      {
+        error: 'Account storage is not configured in this environment.',
+        storageConfigured: false,
+        hint: accountLoginEnvHint(envStatus),
+        env: envStatus.vercelEnv,
+      },
       { status: 503 },
     )
   }
@@ -77,12 +85,28 @@ export default async function handler(request: Request): Promise<Response> {
     const error = result.notFound
       ? 'No account found for this Real @username.'
       : 'Incorrect username or password.'
-    return Response.json({ error }, { status: 401, headers: failureHeaders.headers })
+    const hint = result.notFound ? null : accountLoginEnvHint(envStatus)
+    return Response.json(
+      {
+        error,
+        ...(hint ? { hint } : {}),
+        env: envStatus.vercelEnv,
+        storageConfigured: true,
+      },
+      { status: 401, headers: failureHeaders.headers },
+    )
   }
 
   const token = await createAccountSessionToken(result.username!)
   if (!token) {
-    return Response.json({ error: 'Session secret is not configured' }, { status: 500 })
+    return Response.json(
+      {
+        error: 'Session secret is not configured',
+        hint: accountLoginEnvHint(envStatus),
+        env: envStatus.vercelEnv,
+      },
+      { status: 500 },
+    )
   }
 
   return Response.json(

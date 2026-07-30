@@ -64,7 +64,14 @@ export default function AccountPage() {
             Localhost: signing in loads that account’s cloud collection (needs KV + AUTH_SESSION_SECRET
             in <code>.env.local</code>, same as Vercel). Or continue with this browser’s local data.
           </p>
-        ) : null}
+        ) : (
+          <p className="auth-hint">
+            Preview/production use separate cookies from each other. Sign in with the same Real
+            @username and account password. If login fails only on Preview, enable the same
+            AUTH_SESSION_SECRET, TRACKER_SYNC_SECRET, and KV vars for the Preview environment in
+            Vercel, then redeploy.
+          </p>
+        )}
 
         <form className="auth-form" onSubmit={submit}>
           <label className="field">

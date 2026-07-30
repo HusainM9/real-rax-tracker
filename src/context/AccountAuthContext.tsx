@@ -91,12 +91,15 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as
-          | { error?: string; storageConfigured?: boolean }
+          | { error?: string; storageConfigured?: boolean; hint?: string; env?: string }
           | null
-        if (data?.storageConfigured === false && import.meta.env.DEV) {
+        if (data?.hint) {
+          return [data.error, data.hint].filter(Boolean).join(' ')
+        }
+        if (data?.storageConfigured === false) {
           return (
             data.error ??
-            'Account storage is not configured. Add KV_REST_API_URL, KV_REST_API_TOKEN, and AUTH_SESSION_SECRET to .env.local (same as Vercel), then restart npm run dev.'
+            'Account storage is not configured. In Vercel, enable KV_REST_API_URL and KV_REST_API_TOKEN for Preview, then redeploy.'
           )
         }
         if (import.meta.env.DEV && response.status === 401 && data?.error?.includes('Incorrect')) {

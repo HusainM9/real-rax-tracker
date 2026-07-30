@@ -97,6 +97,11 @@ export function clearSessionCookieHeader(): string {
 }
 
 export function authConfigured(): boolean {
-  const password = process.env.BASIC_AUTH_PASSWORD?.trim()
+  const raw = process.env.BASIC_AUTH_PASSWORD?.trim() ?? ''
+  const password =
+    (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) ||
+    (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2)
+      ? raw.slice(1, -1).trim()
+      : raw
   return Boolean(password && sessionSecret())
 }
