@@ -27,10 +27,12 @@ export function accountLoginEnvHint(status: AccountEnvStatus = getAccountEnvStat
     return 'This deployment is missing KV storage. In Vercel → Settings → Environment Variables, enable KV_REST_API_URL and KV_REST_API_TOKEN for Preview (not Production only), then redeploy.'
   }
   if (!status.sessionSecretConfigured) {
-    return 'This deployment is missing AUTH_SESSION_SECRET. Enable it for Preview in Vercel, then redeploy.'
+    return 'This deployment is missing AUTH_SESSION_SECRET / site password secret. Enable AUTH_SESSION_SECRET (or BASIC_AUTH_PASSWORD) for Preview in Vercel, then redeploy.'
   }
-  if (!status.trackerSyncSecretConfigured) {
-    return 'TRACKER_SYNC_SECRET is not set on this deployment. If account passwords were created in Production with that secret, enable TRACKER_SYNC_SECRET for Preview in Vercel (same value as Production), then redeploy.'
+  // TRACKER_SYNC_SECRET is optional — only mention it when it is actually configured here
+  // but login still fails (usually means Preview/local value differs from Production).
+  if (status.trackerSyncSecretConfigured) {
+    return 'If this password works on Production, confirm AUTH_SESSION_SECRET and TRACKER_SYNC_SECRET on this environment match Production exactly, then redeploy.'
   }
-  return 'If this password works on Production, confirm AUTH_SESSION_SECRET and TRACKER_SYNC_SECRET on Preview match Production exactly, then redeploy.'
+  return 'If this password works on Production, confirm AUTH_SESSION_SECRET on this environment matches Production exactly (Preview must not be Production-only), then redeploy.'
 }

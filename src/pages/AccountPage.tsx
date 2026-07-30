@@ -68,8 +68,8 @@ export default function AccountPage() {
           <p className="auth-hint">
             Preview/production use separate cookies from each other. Sign in with the same Real
             @username and account password. If login fails only on Preview, enable the same
-            AUTH_SESSION_SECRET, TRACKER_SYNC_SECRET, and KV vars for the Preview environment in
-            Vercel, then redeploy.
+            AUTH_SESSION_SECRET and KV vars for the Preview environment in Vercel (not Production
+            only), then redeploy.
           </p>
         )}
 

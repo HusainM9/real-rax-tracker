@@ -103,7 +103,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
           )
         }
         if (import.meta.env.DEV && response.status === 401 && data?.error?.includes('Incorrect')) {
-          return `${data.error} If this password works on production, copy TRACKER_SYNC_SECRET from Vercel into .env.local (and match AUTH_SESSION_SECRET), then restart npm run dev.`
+          return `${data.error} If this password works on production, make sure AUTH_SESSION_SECRET in .env.local matches Vercel Production exactly, then restart npm run dev.`
         }
         return data?.error ?? 'Login failed'
       }
