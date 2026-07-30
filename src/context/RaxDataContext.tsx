@@ -27,7 +27,7 @@ import {
   persistTrackerData,
   storageWarningMessage,
 } from '../lib/trackerPersistence'
-import { loadAccountData, saveAccountData } from '../lib/accountData'
+import { loadAccountData, saveAccountData, AccountDataConflictError } from '../lib/accountData'
 import { useAccountAuth } from './AccountAuthContext'
 import {
   importFromUsername as runUsernameImport,
@@ -273,16 +273,23 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     }
 
     const handle = window.setTimeout(() => {
-      void saveAccountData(data, { ifUnmodifiedSince: accountUpdatedAtRef.current })
-        .then((result) => {
+      const save = async (ifUnmodifiedSince: string | undefined, allowRetry: boolean) => {
+        try {
+          const result = await saveAccountData(data, { ifUnmodifiedSince })
           accountUpdatedAtRef.current = result.meta.updatedAt
           setStorageWarning(null)
-        })
-        .catch((error) => {
+        } catch (error) {
+          if (error instanceof AccountDataConflictError && allowRetry) {
+            accountUpdatedAtRef.current = error.existingUpdatedAt
+            await save(error.existingUpdatedAt, false)
+            return
+          }
           const message = error instanceof Error ? error.message : 'Could not save account data.'
           setStorageWarning(message)
           console.warn('Could not save account data:', error)
-        })
+        }
+      }
+      void save(accountUpdatedAtRef.current, true)
     }, 800)
 
     return () => window.clearTimeout(handle)

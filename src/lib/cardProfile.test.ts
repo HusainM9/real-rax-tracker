@@ -127,6 +127,7 @@ describe('cardProfile', () => {
       ...createEmptyData(),
       cards: [card],
       performances,
+      sellExcludedPassKeys: ['player:123:2023:NFL', 'other-key'],
       sellExcludedCardIds: ['card-1', 'other'],
       savedSellRankings: {
         calculatedAt: '2026-01-01T00:00:00.000Z',
@@ -149,6 +150,7 @@ describe('cardProfile', () => {
     }
     const next = removeCardFromCollection(base, 'card-1', { archiveProfile: false })
     expect(next?.savedSellRankings?.rows).toHaveLength(0)
+    expect(next?.sellExcludedPassKeys).toEqual(['other-key'])
     expect(next?.sellExcludedCardIds).toEqual(['other'])
   })
 })

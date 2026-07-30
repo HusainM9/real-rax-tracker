@@ -37,6 +37,7 @@ function emptyAccountDataForUsername(username: string) {
     cachedPlayerEarnings: [],
     savedSellRankings: null,
     plannedPasses: [],
+    sellExcludedPassKeys: [],
     sellExcludedCardIds: [],
     packTrackers: [],
     /** Seed one shared pack-account template so Packs / Admin account trackers start ready. */

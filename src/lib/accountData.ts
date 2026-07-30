@@ -21,6 +21,16 @@ export type AccountDataSaveResult = {
   storageConfigured: boolean
 }
 
+export class AccountDataConflictError extends Error {
+  readonly existingUpdatedAt: string
+
+  constructor(existingUpdatedAt: string, message = 'Account data was updated on another device.') {
+    super(message)
+    this.name = 'AccountDataConflictError'
+    this.existingUpdatedAt = existingUpdatedAt
+  }
+}
+
 async function parseError(response: Response): Promise<string> {
   return readResponseError(response, 'Account sync failed')
 }
@@ -94,6 +104,22 @@ export async function saveAccountData(
   if (response.status === 503) {
     throw new Error('Account storage is not configured on this server.')
   }
+
+  if (response.status === 409) {
+    const payload = await readResponseJson<{
+      error?: string
+      existingMeta?: { updatedAt?: string }
+    }>(response)
+    const existingUpdatedAt = payload.existingMeta?.updatedAt
+    if (existingUpdatedAt) {
+      throw new AccountDataConflictError(
+        existingUpdatedAt,
+        typeof payload.error === 'string' ? payload.error : undefined,
+      )
+    }
+    throw new Error(payload.error ?? 'Account data was updated on another device.')
+  }
+
   if (!response.ok) {
     throw new Error(await parseError(response))
   }

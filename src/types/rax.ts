@@ -238,8 +238,13 @@ export type RaxTrackerData = {
    */
   planSoldCardIds?: string[]
   /**
-   * Owned card ids omitted from If sold rankings / sell analysis baselines.
+   * Pass keys omitted from If sold rankings / sell analysis baselines
+   * (`externalKey`, or `id:<cardId>` when a pass has no external key).
    * Persisted with the account; never removes cards from the collection.
+   */
+  sellExcludedPassKeys?: string[]
+  /**
+   * @deprecated Legacy card-id exclusions — migrated to sellExcludedPassKeys on load.
    */
   sellExcludedCardIds?: string[]
   packTrackers?: PackTracker[]

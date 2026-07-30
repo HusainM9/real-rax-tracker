@@ -39,6 +39,7 @@ import {
   withoutCards,
   type SellRankProgress,
 } from '../lib/removeCardAnalysis'
+import { withoutSellExcludedCards } from '../lib/sellExcludedPasses'
 import {
   filterSellRankRows,
   SELL_RANK_SORT_OPTIONS,
@@ -333,13 +334,14 @@ export default function PlanPage() {
   }, [sellableCards, soldFilter])
 
   const planBaselineData = useMemo(
-    () => withoutCards(data, [...soldCardIds, ...(data.sellExcludedCardIds ?? [])]),
+    () => withoutCards(withoutSellExcludedCards(data), soldCardIds),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sold fingerprint + collection slices below
     [
       data.cards,
       data.performances,
       data.settings.proBonusEnabled,
       soldCardIdsFingerprint,
+      data.sellExcludedPassKeys,
       data.sellExcludedCardIds,
     ],
   )

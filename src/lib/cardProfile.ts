@@ -222,6 +222,10 @@ export function removeCardFromCollection(
   }
 
   const planSoldCardIds = (next.planSoldCardIds ?? []).filter((id) => id !== cardId)
+  const exclusionKey = card.externalKey?.trim() || `id:${cardId}`
+  const sellExcludedPassKeys = (next.sellExcludedPassKeys ?? []).filter(
+    (key) => key !== exclusionKey && key !== `id:${cardId}`,
+  )
   const sellExcludedCardIds = (next.sellExcludedCardIds ?? []).filter((id) => id !== cardId)
 
   next = {
@@ -229,6 +233,7 @@ export function removeCardFromCollection(
     cards: next.cards.filter((item) => item.id !== cardId),
     performances: next.performances.filter((performance) => performance.cardId !== cardId),
     planSoldCardIds,
+    sellExcludedPassKeys,
     sellExcludedCardIds,
   }
 

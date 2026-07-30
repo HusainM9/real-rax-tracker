@@ -86,10 +86,6 @@ export default function SellPage() {
   const rankAbortRef = useRef<AbortController | null>(null)
 
   const savedRankings = data.savedSellRankings
-  const sellExcludedIds = useMemo(
-    () => new Set(data.sellExcludedCardIds ?? []),
-    [data.sellExcludedCardIds],
-  )
   const excludedCards = useMemo(() => listSellExcludedCards(data), [data])
 
   const rollup = useMemo(() => {
@@ -100,9 +96,9 @@ export default function SellPage() {
   const playerCards = useMemo(
     () =>
       rollup.cards.filter(
-        (row) => isPlayerPassForSell(row.card) && !sellExcludedIds.has(row.card.id),
+        (row) => isPlayerPassForSell(row.card) && !isCardSellExcluded(data, row.card.id),
       ),
-    [rollup.cards, sellExcludedIds],
+    [data, rollup.cards],
   )
 
   const sortedCards = useMemo(
@@ -234,20 +230,20 @@ export default function SellPage() {
   const displayedRankings = useMemo(() => {
     if (!savedRankings) return []
     const filtered = filterSellRankRows(
-      savedRankings.rows.filter((row) => !sellExcludedIds.has(row.cardId)),
+      savedRankings.rows.filter((row) => !isCardSellExcluded(data, row.cardId)),
       rankSportFilter,
       rankRarityFilter,
       rankQuery,
     )
     return sortSellRankRows(filtered, rankSortKey, rankSortDirection)
   }, [
+    data,
     rankQuery,
     rankRarityFilter,
     rankSortDirection,
     rankSortKey,
     rankSportFilter,
     savedRankings,
-    sellExcludedIds,
   ])
 
   useEffect(() => {

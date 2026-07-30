@@ -18,6 +18,7 @@ import type {
 import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
 import { normalizeRatingPerPack } from './packTracker'
+import { hydrateSellExcludedPassKeys } from './sellExcludedPasses'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
 export const EXPORT_VERSION = 1
@@ -39,6 +40,7 @@ export function createEmptyData(): RaxTrackerData {
     savedSellRankings: null,
     plannedPasses: [],
     planSoldCardIds: [],
+    sellExcludedPassKeys: [],
     sellExcludedCardIds: [],
     packTrackers: [],
     packAccountTemplates: [],
@@ -474,7 +476,13 @@ export function normalizeData(value: unknown): RaxTrackerData {
           .filter((pass): pass is PlannedPass => pass !== null)
       : [],
     planSoldCardIds: hydratePlanSoldCardIds(value.planSoldCardIds, validCardIds),
-    sellExcludedCardIds: hydratePlanSoldCardIds(value.sellExcludedCardIds, validCardIds),
+    sellExcludedPassKeys: hydrateSellExcludedPassKeys(
+      value.sellExcludedPassKeys,
+      value.sellExcludedCardIds,
+      cards,
+    ),
+    // Legacy field cleared after migration into sellExcludedPassKeys.
+    sellExcludedCardIds: [],
     packTrackers: Array.isArray(value.packTrackers)
       ? value.packTrackers
           .map(hydratePackTracker)
