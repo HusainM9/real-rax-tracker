@@ -175,14 +175,90 @@ export type ApplyPackTemplatesResult = {
   added: number
   updated: number
   removed: number
+  renamed: number
+}
+
+export type RenamePackUsernameResult = {
+  accounts: PackTrackerAccount[]
+  renamed: number
+  merged: number
+}
+
+/**
+ * Renames a Real username on tracker rows. If both old and new already exist on
+ * the same tracker, keeps the richer row (higher rating / import metadata) under
+ * the new username and drops the duplicate.
+ */
+export function renamePackUsernameInAccounts(
+  accounts: PackTrackerAccount[],
+  fromUsername: string,
+  toUsername: string,
+): RenamePackUsernameResult {
+  const fromKey = packUsernameKey(fromUsername)
+  const toUser = normalizePackUsername(toUsername)
+  const toKey = toUser.toLowerCase()
+  if (!fromKey || !toKey || fromKey === toKey) {
+    return { accounts, renamed: 0, merged: 0 }
+  }
+
+  const fromIndexes: number[] = []
+  let toIndex = -1
+  for (let i = 0; i < accounts.length; i++) {
+    const key = packUsernameKey(accounts[i]?.username)
+    if (key === fromKey) fromIndexes.push(i)
+    if (key === toKey) toIndex = i
+  }
+  if (fromIndexes.length === 0) {
+    return { accounts, renamed: 0, merged: 0 }
+  }
+
+  const next = [...accounts]
+  let renamed = 0
+  let merged = 0
+
+  const preferAccount = (a: PackTrackerAccount, b: PackTrackerAccount): PackTrackerAccount => {
+    const aRating = clampRating(a.rating)
+    const bRating = clampRating(b.rating)
+    if (aRating !== bRating) return aRating >= bRating ? a : b
+    if (Boolean(a.lastImportedAt) !== Boolean(b.lastImportedAt)) {
+      return a.lastImportedAt ? a : b
+    }
+    return a
+  }
+
+  for (const fromIndex of fromIndexes.sort((a, b) => b - a)) {
+    const fromAccount = next[fromIndex]!
+    if (toIndex >= 0 && toIndex !== fromIndex) {
+      const kept = preferAccount(next[toIndex]!, fromAccount)
+      next[toIndex] = {
+        ...kept,
+        username: toUser,
+      }
+      next.splice(fromIndex, 1)
+      if (fromIndex < toIndex) toIndex -= 1
+      merged += 1
+      continue
+    }
+
+    next[fromIndex] = {
+      ...fromAccount,
+      username: toUser,
+    }
+    toIndex = fromIndex
+    renamed += 1
+  }
+
+  return { accounts: next, renamed, merged }
 }
 
 /**
  * Ensures each template with a username exists on the tracker.
- * Matches by username (case-insensitive). Updates name / username / opensPacks
- * without wiping rating or import metadata. Adds missing rows at rating 0.
- * When at least one username template applies, drops leftover blank placeholders
- * (e.g. default “Account 1” with no username) so Apply stays user-friendly.
+ * Matches by username (case-insensitive), else by display name for rows whose
+ * username is not already a template username (so renaming a shared account
+ * updates the existing row instead of adding a duplicate). Updates name /
+ * username / opensPacks without wiping rating or import metadata.
+ * Drops blank placeholders and leftover rows that share a template display
+ * name but still have an obsolete username after a rename.
  */
 export function applyPackTemplatesToAccounts(
   accounts: PackTrackerAccount[],
@@ -191,8 +267,20 @@ export function applyPackTemplatesToAccounts(
 ): ApplyPackTemplatesResult {
   let added = 0
   let updated = 0
+  let renamed = 0
   const next = [...accounts]
   let appliedUsernameTemplate = false
+
+  const templateUsernames = new Set(
+    templates
+      .map((template) => packUsernameKey(template.username))
+      .filter((key): key is string => Boolean(key)),
+  )
+  const templateNames = new Set(
+    templates
+      .filter((template) => Boolean(normalizePackUsername(template.username)))
+      .map((template) => templateDisplayName(template).toLowerCase()),
+  )
 
   for (const template of templates) {
     const username = normalizePackUsername(template.username)
@@ -201,7 +289,18 @@ export function applyPackTemplatesToAccounts(
     appliedUsernameTemplate = true
 
     const name = templateDisplayName(template)
-    const index = next.findIndex((account) => packUsernameKey(account.username) === key)
+    let index = next.findIndex((account) => packUsernameKey(account.username) === key)
+
+    if (index < 0) {
+      // Rename an existing row with the same display name whose username is no
+      // longer (or never was) one of the current shared usernames.
+      index = next.findIndex((account) => {
+        if (account.name.trim().toLowerCase() !== name.toLowerCase()) return false
+        const accountKey = packUsernameKey(account.username)
+        return !accountKey || !templateUsernames.has(accountKey)
+      })
+      if (index >= 0) renamed += 1
+    }
 
     if (index >= 0) {
       const existing = next[index]!
@@ -234,14 +333,48 @@ export function applyPackTemplatesToAccounts(
   let removed = 0
   let resolved = next
   if (appliedUsernameTemplate) {
-    const kept = next.filter((account) => !isBlankPackAccountPlaceholder(account))
-    removed = next.length - kept.length
+    const working = [...next]
+    for (let i = working.length - 1; i >= 0; i--) {
+      const account = working[i]!
+      if (isBlankPackAccountPlaceholder(account)) {
+        working.splice(i, 1)
+        removed += 1
+        continue
+      }
+      const accountKey = packUsernameKey(account.username)
+      if (!accountKey || templateUsernames.has(accountKey)) continue
+      const accountName = account.name.trim().toLowerCase()
+      if (!accountName || !templateNames.has(accountName)) continue
+
+      // Obsolete shared username after a rename — fold rating into the live
+      // template row with the same display name, then drop the leftover.
+      const survivorIndex = working.findIndex((candidate, candidateIndex) => {
+        if (candidateIndex === i) return false
+        if (candidate.name.trim().toLowerCase() !== accountName) return false
+        return templateUsernames.has(packUsernameKey(candidate.username))
+      })
+      if (survivorIndex >= 0) {
+        const survivor = working[survivorIndex]!
+        const accountRating = clampRating(account.rating)
+        const survivorRating = clampRating(survivor.rating)
+        working[survivorIndex] = {
+          ...survivor,
+          rating: Math.max(survivorRating, accountRating),
+          rarityLabel: survivor.rarityLabel || account.rarityLabel,
+          lastImportedAt: survivor.lastImportedAt || account.lastImportedAt,
+          ownershipStatus: survivor.ownershipStatus ?? account.ownershipStatus,
+          ignoredMissing: survivor.ignoredMissing ?? account.ignoredMissing,
+        }
+      }
+      working.splice(i, 1)
+      removed += 1
+    }
     // Never leave a tracker with zero accounts after pruning.
-    resolved = kept.length > 0 ? kept : next
-    if (kept.length === 0) removed = 0
+    resolved = working.length > 0 ? working : next
+    if (working.length === 0) removed = 0
   }
 
-  return { accounts: resolved, added, updated, removed }
+  return { accounts: resolved, added, updated, removed, renamed }
 }
 
 /** One tracked pass row for a single Real account across pack trackers. */

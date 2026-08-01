@@ -68,7 +68,9 @@ import {
   DEFAULT_PACK_RATING_INCREMENT,
   normalizePackUsername,
   normalizeRatingPerPack,
+  packUsernameKey,
   removeFinishedPlannedPass,
+  renamePackUsernameInAccounts,
 } from '../lib/packTracker'
 
 type CardInput = Pick<
@@ -1047,9 +1049,21 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         return id
       },
       updatePackAccountTemplate: (id, patch) => {
-        setData((current) => ({
-          ...current,
-          packAccountTemplates: (current.packAccountTemplates ?? []).map((template) => {
+        setData((current) => {
+          const templates = current.packAccountTemplates ?? []
+          const existing = templates.find((template) => template.id === id)
+          if (!existing) return current
+
+          const nextUsername =
+            patch.username !== undefined
+              ? normalizePackUsername(patch.username)
+              : existing.username
+          const usernameChanged =
+            packUsernameKey(existing.username) !== packUsernameKey(nextUsername) &&
+            Boolean(packUsernameKey(existing.username)) &&
+            Boolean(packUsernameKey(nextUsername))
+
+          const packAccountTemplates = templates.map((template) => {
             if (template.id !== id) return template
             return {
               ...template,
@@ -1057,15 +1071,37 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                 patch.name !== undefined
                   ? patch.name.trim() || template.name
                   : template.name,
-              username:
-                patch.username !== undefined
-                  ? normalizePackUsername(patch.username)
-                  : template.username,
+              username: nextUsername,
               opensPacks:
                 patch.opensPacks !== undefined ? patch.opensPacks : template.opensPacks,
             }
-          }),
-        }))
+          })
+
+          if (!usernameChanged) {
+            return { ...current, packAccountTemplates }
+          }
+
+          const stamp = nowIso()
+          const packTrackers = (current.packTrackers ?? []).map((tracker) => {
+            const renamed = renamePackUsernameInAccounts(
+              tracker.accounts,
+              existing.username,
+              nextUsername,
+            )
+            if (renamed.renamed === 0 && renamed.merged === 0) return tracker
+            return {
+              ...tracker,
+              accounts: renamed.accounts,
+              updatedAt: stamp,
+            }
+          })
+
+          return syncPlanProgressFromPackTrackers({
+            ...current,
+            packAccountTemplates,
+            packTrackers,
+          })
+        })
       },
       removePackAccountTemplate: (id) => {
         setData((current) => ({

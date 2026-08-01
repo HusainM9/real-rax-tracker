@@ -13,6 +13,7 @@ import {
   normalizeRatingPerPack,
   projectedFinishDate,
   removeFinishedPlannedPass,
+  renamePackUsernameInAccounts,
   summarizeAccountAcrossPacks,
 } from './packTracker'
 
@@ -334,6 +335,103 @@ describe('pack account templates', () => {
     expect(isBlankPackAccountPlaceholder({ id: 'x', name: 'Account 1', rating: 0, opensPacks: true })).toBe(
       true,
     )
+  })
+
+  it('renames an existing shared account by display name instead of duplicating', () => {
+    idSeq = 0
+    const result = applyPackTemplatesToAccounts(
+      [
+        {
+          id: 'acc_old',
+          name: 'Account 4',
+          username: 'truf',
+          rating: 1800,
+          opensPacks: true,
+          rarityLabel: 'Legendary',
+        },
+      ],
+      [{ id: 't4', name: 'Account 4', username: 'trufff', opensPacks: true }],
+      nextId,
+    )
+
+    expect(result.added).toBe(0)
+    expect(result.renamed).toBe(1)
+    expect(result.updated).toBe(1)
+    expect(result.accounts).toEqual([
+      {
+        id: 'acc_old',
+        name: 'Account 4',
+        username: 'trufff',
+        rating: 1800,
+        opensPacks: true,
+        rarityLabel: 'Legendary',
+      },
+    ])
+  })
+
+  it('drops obsolete shared username rows and folds their rating into the live one', () => {
+    idSeq = 0
+    const result = applyPackTemplatesToAccounts(
+      [
+        {
+          id: 'acc_old',
+          name: 'Account 4',
+          username: 'truf',
+          rating: 1800,
+          opensPacks: true,
+          rarityLabel: 'Legendary',
+        },
+        {
+          id: 'acc_new',
+          name: 'Account 4',
+          username: 'trufff',
+          rating: 0,
+          opensPacks: true,
+        },
+      ],
+      [{ id: 't4', name: 'Account 4', username: 'trufff', opensPacks: true }],
+      nextId,
+    )
+
+    expect(result.added).toBe(0)
+    expect(result.removed).toBe(1)
+    expect(result.accounts).toEqual([
+      {
+        id: 'acc_new',
+        name: 'Account 4',
+        username: 'trufff',
+        rating: 1800,
+        opensPacks: true,
+        rarityLabel: 'Legendary',
+      },
+    ])
+  })
+})
+
+describe('renamePackUsernameInAccounts', () => {
+  it('renames the username and preserves rating', () => {
+    const result = renamePackUsernameInAccounts(
+      [{ id: 'a1', name: 'Account 4', username: 'truf', rating: 1200, opensPacks: true }],
+      'truf',
+      'trufff',
+    )
+    expect(result.renamed).toBe(1)
+    expect(result.merged).toBe(0)
+    expect(result.accounts[0]).toMatchObject({ username: 'trufff', rating: 1200 })
+  })
+
+  it('merges into the existing new username and keeps the higher rating', () => {
+    const result = renamePackUsernameInAccounts(
+      [
+        { id: 'old', name: 'Account 4', username: 'truf', rating: 1800, opensPacks: true },
+        { id: 'neu', name: 'Account 4', username: 'trufff', rating: 50, opensPacks: true },
+      ],
+      'truf',
+      'trufff',
+    )
+    expect(result.merged).toBe(1)
+    expect(result.accounts).toHaveLength(1)
+    expect(result.accounts[0]).toMatchObject({ id: 'old', username: 'trufff', rating: 1800 })
   })
 })
 
