@@ -184,6 +184,51 @@ export type RenamePackUsernameResult = {
   merged: number
 }
 
+/** True for close renames like truf → trufff (prefix, small length delta). */
+export function isLikelyPackUsernameRename(a: string, b: string): boolean {
+  const left = packUsernameKey(a)
+  const right = packUsernameKey(b)
+  if (!left || !right || left === right) return left === right && Boolean(left)
+  const shorter = left.length <= right.length ? left : right
+  const longer = left.length <= right.length ? right : left
+  if (shorter.length < 3) return false
+  return longer.startsWith(shorter) && longer.length - shorter.length <= 3
+}
+
+function preferPackAccount(a: PackTrackerAccount, b: PackTrackerAccount): PackTrackerAccount {
+  const aRating = clampRating(a.rating)
+  const bRating = clampRating(b.rating)
+  if (aRating !== bRating) return aRating >= bRating ? a : b
+  if (Boolean(a.lastImportedAt) !== Boolean(b.lastImportedAt)) {
+    return a.lastImportedAt ? a : b
+  }
+  return a
+}
+
+function mergePackAccountDetails(
+  survivor: PackTrackerAccount,
+  donor: PackTrackerAccount,
+  username: string,
+): PackTrackerAccount {
+  const preferred = preferPackAccount(survivor, donor)
+  return {
+    ...preferred,
+    id: survivor.id,
+    username: normalizePackUsername(username) || preferred.username,
+    name: survivor.name.trim() ? survivor.name : donor.name,
+    opensPacks: survivor.opensPacks || donor.opensPacks,
+    rating: Math.max(clampRating(survivor.rating), clampRating(donor.rating)),
+    rarityLabel: survivor.rarityLabel || donor.rarityLabel,
+    lastImportedAt: survivor.lastImportedAt || donor.lastImportedAt,
+    ownershipStatus: survivor.ownershipStatus ?? donor.ownershipStatus,
+    ignoredMissing: survivor.ignoredMissing ?? donor.ignoredMissing,
+  }
+}
+
+function accountIdentityKey(account: PackTrackerAccount): string {
+  return packUsernameKey(account.username) || packUsernameKey(account.name)
+}
+
 /**
  * Renames a Real username on tracker rows. If both old and new already exist on
  * the same tracker, keeps the richer row (higher rating / import metadata) under
@@ -204,9 +249,10 @@ export function renamePackUsernameInAccounts(
   const fromIndexes: number[] = []
   let toIndex = -1
   for (let i = 0; i < accounts.length; i++) {
-    const key = packUsernameKey(accounts[i]?.username)
+    const account = accounts[i]!
+    const key = accountIdentityKey(account)
     if (key === fromKey) fromIndexes.push(i)
-    if (key === toKey) toIndex = i
+    if (packUsernameKey(account.username) === toKey) toIndex = i
   }
   if (fromIndexes.length === 0) {
     return { accounts, renamed: 0, merged: 0 }
@@ -216,24 +262,10 @@ export function renamePackUsernameInAccounts(
   let renamed = 0
   let merged = 0
 
-  const preferAccount = (a: PackTrackerAccount, b: PackTrackerAccount): PackTrackerAccount => {
-    const aRating = clampRating(a.rating)
-    const bRating = clampRating(b.rating)
-    if (aRating !== bRating) return aRating >= bRating ? a : b
-    if (Boolean(a.lastImportedAt) !== Boolean(b.lastImportedAt)) {
-      return a.lastImportedAt ? a : b
-    }
-    return a
-  }
-
   for (const fromIndex of fromIndexes.sort((a, b) => b - a)) {
     const fromAccount = next[fromIndex]!
     if (toIndex >= 0 && toIndex !== fromIndex) {
-      const kept = preferAccount(next[toIndex]!, fromAccount)
-      next[toIndex] = {
-        ...kept,
-        username: toUser,
-      }
+      next[toIndex] = mergePackAccountDetails(next[toIndex]!, fromAccount, toUser)
       next.splice(fromIndex, 1)
       if (fromIndex < toIndex) toIndex -= 1
       merged += 1
@@ -253,12 +285,9 @@ export function renamePackUsernameInAccounts(
 
 /**
  * Ensures each template with a username exists on the tracker.
- * Matches by username (case-insensitive), else by display name for rows whose
- * username is not already a template username (so renaming a shared account
- * updates the existing row instead of adding a duplicate). Updates name /
- * username / opensPacks without wiping rating or import metadata.
- * Drops blank placeholders and leftover rows that share a template display
- * name but still have an obsolete username after a rename.
+ * Shared-template usernames are the source of truth on Apply: missing ones are
+ * added or renamed onto existing rows; usernames not in the shared list are
+ * removed (with rating folded into a likely renamed survivor when possible).
  */
 export function applyPackTemplatesToAccounts(
   accounts: PackTrackerAccount[],
@@ -276,11 +305,6 @@ export function applyPackTemplatesToAccounts(
       .map((template) => packUsernameKey(template.username))
       .filter((key): key is string => Boolean(key)),
   )
-  const templateNames = new Set(
-    templates
-      .filter((template) => Boolean(normalizePackUsername(template.username)))
-      .map((template) => templateDisplayName(template).toLowerCase()),
-  )
 
   for (const template of templates) {
     const username = normalizePackUsername(template.username)
@@ -292,12 +316,21 @@ export function applyPackTemplatesToAccounts(
     let index = next.findIndex((account) => packUsernameKey(account.username) === key)
 
     if (index < 0) {
-      // Rename an existing row with the same display name whose username is no
-      // longer (or never was) one of the current shared usernames.
+      // Same shared display name, but username no longer in the shared list.
       index = next.findIndex((account) => {
         if (account.name.trim().toLowerCase() !== name.toLowerCase()) return false
         const accountKey = packUsernameKey(account.username)
         return !accountKey || !templateUsernames.has(accountKey)
+      })
+      if (index >= 0) renamed += 1
+    }
+
+    if (index < 0) {
+      // Close rename (truf → trufff), including rows where sync set name ≈ username.
+      index = next.findIndex((account) => {
+        const accountKey = accountIdentityKey(account)
+        if (!accountKey || templateUsernames.has(accountKey)) return false
+        return isLikelyPackUsernameRename(accountKey, key)
       })
       if (index >= 0) renamed += 1
     }
@@ -342,29 +375,31 @@ export function applyPackTemplatesToAccounts(
         continue
       }
       const accountKey = packUsernameKey(account.username)
-      if (!accountKey || templateUsernames.has(accountKey)) continue
-      const accountName = account.name.trim().toLowerCase()
-      if (!accountName || !templateNames.has(accountName)) continue
+      // Keep manual rows with no username; drop any username not in shared list.
+      if (!accountKey) continue
+      if (templateUsernames.has(accountKey)) continue
 
-      // Obsolete shared username after a rename — fold rating into the live
-      // template row with the same display name, then drop the leftover.
-      const survivorIndex = working.findIndex((candidate, candidateIndex) => {
+      const accountName = account.name.trim().toLowerCase()
+      let survivorIndex = working.findIndex((candidate, candidateIndex) => {
         if (candidateIndex === i) return false
-        if (candidate.name.trim().toLowerCase() !== accountName) return false
-        return templateUsernames.has(packUsernameKey(candidate.username))
+        if (!templateUsernames.has(packUsernameKey(candidate.username))) return false
+        return candidate.name.trim().toLowerCase() === accountName
       })
+      if (survivorIndex < 0) {
+        survivorIndex = working.findIndex((candidate, candidateIndex) => {
+          if (candidateIndex === i) return false
+          const survivorKey = packUsernameKey(candidate.username)
+          if (!survivorKey || !templateUsernames.has(survivorKey)) return false
+          return isLikelyPackUsernameRename(accountKey, survivorKey)
+        })
+      }
       if (survivorIndex >= 0) {
         const survivor = working[survivorIndex]!
-        const accountRating = clampRating(account.rating)
-        const survivorRating = clampRating(survivor.rating)
-        working[survivorIndex] = {
-          ...survivor,
-          rating: Math.max(survivorRating, accountRating),
-          rarityLabel: survivor.rarityLabel || account.rarityLabel,
-          lastImportedAt: survivor.lastImportedAt || account.lastImportedAt,
-          ownershipStatus: survivor.ownershipStatus ?? account.ownershipStatus,
-          ignoredMissing: survivor.ignoredMissing ?? account.ignoredMissing,
-        }
+        working[survivorIndex] = mergePackAccountDetails(
+          survivor,
+          account,
+          survivor.username || accountKey,
+        )
       }
       working.splice(i, 1)
       removed += 1

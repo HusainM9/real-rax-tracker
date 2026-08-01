@@ -13,6 +13,7 @@ import {
   normalizeRatingPerPack,
   projectedFinishDate,
   removeFinishedPlannedPass,
+  isLikelyPackUsernameRename,
   renamePackUsernameInAccounts,
   summarizeAccountAcrossPacks,
 } from './packTracker'
@@ -406,6 +407,72 @@ describe('pack account templates', () => {
       },
     ])
   })
+
+  it('removes stale usernames even when sync renamed the display name to the username', () => {
+    idSeq = 0
+    const result = applyPackTemplatesToAccounts(
+      [
+        {
+          id: 'acc_old',
+          name: 'truf',
+          username: 'truf',
+          rating: 1800,
+          opensPacks: true,
+        },
+        {
+          id: 'acc_new',
+          name: 'Account 4',
+          username: 'trufff',
+          rating: 0,
+          opensPacks: true,
+        },
+      ],
+      [{ id: 't4', name: 'Account 4', username: 'trufff', opensPacks: true }],
+      nextId,
+    )
+
+    expect(result.removed).toBe(1)
+    expect(result.accounts).toHaveLength(1)
+    expect(result.accounts[0]).toMatchObject({
+      username: 'trufff',
+      rating: 1800,
+    })
+  })
+
+  it('treats shared usernames as source of truth and drops unrelated usernames on apply', () => {
+    idSeq = 0
+    const result = applyPackTemplatesToAccounts(
+      [
+        {
+          id: 'acc_keep',
+          name: 'Main',
+          username: 'gordon',
+          rating: 1000,
+          opensPacks: true,
+        },
+        {
+          id: 'acc_stale',
+          name: 'Extra',
+          username: 'randomalt',
+          rating: 50,
+          opensPacks: true,
+        },
+      ],
+      [{ id: 't1', name: 'Main', username: 'gordon', opensPacks: true }],
+      nextId,
+    )
+
+    expect(result.removed).toBe(1)
+    expect(result.accounts.map((account) => account.username)).toEqual(['gordon'])
+  })
+})
+
+describe('isLikelyPackUsernameRename', () => {
+  it('detects close renames like truf → trufff', () => {
+    expect(isLikelyPackUsernameRename('truf', 'trufff')).toBe(true)
+    expect(isLikelyPackUsernameRename('gordon', 'neyjr')).toBe(false)
+    expect(isLikelyPackUsernameRename('ab', 'abc')).toBe(false)
+  })
 })
 
 describe('renamePackUsernameInAccounts', () => {
@@ -431,7 +498,7 @@ describe('renamePackUsernameInAccounts', () => {
     )
     expect(result.merged).toBe(1)
     expect(result.accounts).toHaveLength(1)
-    expect(result.accounts[0]).toMatchObject({ id: 'old', username: 'trufff', rating: 1800 })
+    expect(result.accounts[0]).toMatchObject({ id: 'neu', username: 'trufff', rating: 1800 })
   })
 })
 

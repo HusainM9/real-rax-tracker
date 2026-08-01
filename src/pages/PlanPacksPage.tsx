@@ -1129,7 +1129,7 @@ export default function PlanPacksPage() {
       <CollapsiblePanel
         className="pack-shared-accounts-panel"
         title="Shared accounts"
-        description="Define your Real accounts once (with usernames). Editing a username renames it on every tracked pass. Apply seeds missing accounts and cleans up blank/obsolete shared rows."
+        description="Define your Real accounts once (with usernames). Editing a username renames it on every tracked pass. Apply makes these usernames the source of truth on tracked passes — missing ones are added, stale usernames are removed."
         defaultOpen={false}
         badge={`${packAccountTemplates.length}`}
         actions={

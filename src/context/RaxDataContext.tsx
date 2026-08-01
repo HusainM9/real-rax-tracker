@@ -1135,7 +1135,12 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           const packTrackers = (current.packTrackers ?? []).map((tracker) => {
             if (!playerPassIds.has(tracker.plannedPassId)) return tracker
             const applied = applyPackTemplatesToAccounts(tracker.accounts, templates, createId)
-            if (applied.added === 0 && applied.updated === 0 && applied.removed === 0) {
+            if (
+              applied.added === 0 &&
+              applied.updated === 0 &&
+              applied.removed === 0 &&
+              applied.renamed === 0
+            ) {
               return tracker
             }
             trackersTouched += 1
