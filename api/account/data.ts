@@ -1,3 +1,4 @@
+import { readRequestJson } from '../../lib/cloudSyncCompression'
 import {
   accountsConfigured,
   getAccountProfileForSession,
@@ -48,7 +49,7 @@ export default async function handler(request: Request): Promise<Response> {
   if (request.method === 'PUT') {
     let body: PutBody
     try {
-      body = (await request.json()) as PutBody
+      body = (await readRequestJson(request)) as PutBody
     } catch {
       return Response.json({ error: 'Invalid request body' }, { status: 400 })
     }

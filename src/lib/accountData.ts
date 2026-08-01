@@ -1,5 +1,5 @@
-import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { buildGzipSyncPutBody } from '../../lib/cloudSyncRequest'
 import { readResponseError, readResponseJson } from './readResponseJson'
 import { importTrackerData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
@@ -91,18 +91,25 @@ export async function saveAccountData(
   data: RaxTrackerData,
   options?: { ifUnmodifiedSince?: string },
 ): Promise<AccountDataSaveResult> {
+  const put = await buildGzipSyncPutBody({
+    data,
+    ifUnmodifiedSince: options?.ifUnmodifiedSince,
+  })
   const response = await fetch('/api/account/data', {
     method: 'PUT',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      data: compactTrackerProfileForCloudSync(data),
-      ifUnmodifiedSince: options?.ifUnmodifiedSince,
-    }),
+    headers: put.headers,
+    body: put.body as BodyInit,
   })
 
   if (response.status === 503) {
     throw new Error('Account storage is not configured on this server.')
+  }
+
+  if (response.status === 413) {
+    throw new Error(
+      'Account data is too large to sync (server limit). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.',
+    )
   }
 
   if (response.status === 409) {

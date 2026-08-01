@@ -6,6 +6,8 @@ import {
   encodedProfileByteLength,
   gunzipBase64ToJson,
   gzipJsonToBase64,
+  gzipJsonToBytes,
+  readRequestJson,
 } from './cloudSyncCompression'
 
 describe('cloudSyncCompression', () => {
@@ -48,5 +50,29 @@ describe('cloudSyncCompression', () => {
     const payload = { cards: [], performances: [{ id: '1', cardId: '1', claimDay: '2024-01-01', raxEarned: 1, note: '', createdAt: '2024-01-01' }] }
     const encoded = await encodeStoredProfilePayload(payload)
     await expect(decodeStoredProfilePayload(encoded)).resolves.toEqual(payload)
+  })
+
+  it('reads X-Rax-Content-Encoding: gzip request bodies', async () => {
+    const payload = { data: { cards: [], performances: [] }, ifUnmodifiedSince: '2024-01-01T00:00:00.000Z' }
+    const body = await gzipJsonToBytes(payload)
+    const request = new Request('https://example.test/api/account/data', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rax-Content-Encoding': 'gzip',
+      },
+      body: body as BodyInit,
+    })
+    await expect(readRequestJson(request)).resolves.toEqual(payload)
+  })
+
+  it('reads plain JSON request bodies', async () => {
+    const payload = { data: { cards: [], performances: [] } }
+    const request = new Request('https://example.test/api/account/data', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    await expect(readRequestJson(request)).resolves.toEqual(payload)
   })
 })

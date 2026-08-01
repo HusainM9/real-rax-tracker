@@ -36,16 +36,39 @@ async function gunzipBytes(input: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
-export async function gzipJsonToBase64(data: unknown): Promise<string> {
+export async function gzipJsonToBytes(data: unknown): Promise<Uint8Array> {
   const json = JSON.stringify(data)
-  const compressed = await gzipBytes(new TextEncoder().encode(json))
-  return bytesToBase64(compressed)
+  return gzipBytes(new TextEncoder().encode(json))
+}
+
+export async function gunzipBytesToJson(bytes: Uint8Array): Promise<unknown> {
+  const jsonBytes = await gunzipBytes(bytes)
+  return JSON.parse(new TextDecoder().decode(jsonBytes))
+}
+
+export async function gzipJsonToBase64(data: unknown): Promise<string> {
+  return bytesToBase64(await gzipJsonToBytes(data))
 }
 
 export async function gunzipBase64ToJson(base64: string): Promise<unknown> {
-  const compressed = base64ToBytes(base64)
-  const jsonBytes = await gunzipBytes(compressed)
-  return JSON.parse(new TextDecoder().decode(jsonBytes))
+  return gunzipBytesToJson(base64ToBytes(base64))
+}
+
+/**
+ * Parse a JSON request body, supporting gzip-compressed bodies (binary) so large
+ * account sync PUTs stay under Vercel's ~4.5MB function payload limit.
+ *
+ * Prefer `X-Rax-Content-Encoding: gzip` (set by the client). Also accept
+ * `Content-Encoding: gzip` for compatibility.
+ */
+export async function readRequestJson(request: Request): Promise<unknown> {
+  const encoding =
+    request.headers.get('x-rax-content-encoding')?.toLowerCase().trim() ||
+    request.headers.get('content-encoding')?.toLowerCase().trim()
+  if (encoding === 'gzip') {
+    return gunzipBytesToJson(new Uint8Array(await request.arrayBuffer()))
+  }
+  return request.json()
 }
 
 export function encodedProfileByteLength(base64: string): number {

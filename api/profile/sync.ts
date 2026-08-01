@@ -1,3 +1,4 @@
+import { readRequestJson } from '../../lib/cloudSyncCompression'
 import { requireAppSession } from '../admin/_helpers'
 import {
   getTrackerProfileTransfer,
@@ -78,7 +79,7 @@ export default async function handler(request: Request): Promise<Response> {
   if (request.method === 'PUT') {
     let body: SyncPutBody
     try {
-      body = (await request.json()) as SyncPutBody
+      body = (await readRequestJson(request)) as SyncPutBody
     } catch {
       return Response.json({ error: 'Invalid request body' }, { status: 400 })
     }

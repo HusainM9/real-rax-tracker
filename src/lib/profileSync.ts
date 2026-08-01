@@ -1,5 +1,5 @@
-import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { buildGzipSyncPutBody } from '../../lib/cloudSyncRequest'
 import { readResponseError, readResponseJson } from './readResponseJson'
 import { importTrackerData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
@@ -90,20 +90,26 @@ export async function saveCloudProfile(
   data: RaxTrackerData,
   options?: { ifUnmodifiedSince?: string },
 ): Promise<CloudProfileSaveResult> {
+  const put = await buildGzipSyncPutBody({
+    username: username.trim(),
+    passphrase,
+    data,
+    ifUnmodifiedSince: options?.ifUnmodifiedSince,
+  })
   const response = await fetch('/api/profile/sync', {
     method: 'PUT',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: username.trim(),
-      passphrase,
-      data: compactTrackerProfileForCloudSync(data),
-      ifUnmodifiedSince: options?.ifUnmodifiedSince,
-    }),
+    headers: put.headers,
+    body: put.body as BodyInit,
   })
 
   if (response.status === 503) {
     throw new Error('Cloud profile sync is not configured on this server.')
+  }
+  if (response.status === 413) {
+    throw new Error(
+      'Cloud profile is too large to sync (server limit). Export a local JSON backup, then remove unused saved profiles or potential cards before retrying.',
+    )
   }
   if (!response.ok) {
     throw new Error(await parseError(response))
