@@ -2296,11 +2296,23 @@ button.plan-tag:hover {
   font-size: 0.78rem;
 }
 
+.pack-cadence-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+  min-height: 0;
+  width: 100%;
+}
+
 .pack-daily-swaps {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin-top: 0.15rem;
+  width: 100%;
+  flex: 0 0 auto;
 }
 
 .pack-daily-swaps-row {
@@ -2314,6 +2326,88 @@ button.plan-tag:hover {
   flex: 1 1 12rem;
   margin: 0;
   min-width: 0;
+}
+
+.pack-weekly-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.pack-weekly-mode-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pack-weekly-mode-header .pack-weekly-mode-hint {
+  margin: 0;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.pack-weekly-opens-hint {
+  margin: 0;
+}
+
+.pack-weekly-opens {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.pack-weekly-opens-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+}
+
+.pack-weekly-opens-form .pack-account-field {
+  flex: 0 1 12rem;
+  max-width: 16rem;
+  width: auto;
+  min-width: 10rem;
+}
+
+.pack-weekly-opens-form input,
+.pack-weekly-opens-form select {
+  width: 100%;
+  max-width: 16rem;
+}
+
+.pack-weekly-opens-form input[type='date'] {
+  min-height: 0;
+  height: auto;
+}
+
+.pack-weekly-opens-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.pack-weekly-opens-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
 .pack-tracker-list .pack-tracker-row.panel {
@@ -2407,6 +2501,13 @@ button.plan-tag:hover {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.pack-tracker-body > * {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .pack-progress-bar {

@@ -17,7 +17,7 @@ import type {
 } from '../types/rax'
 import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
-import { normalizeRatingPerPack } from './packTracker'
+import { hydrateWeeklyPackOpens, normalizeRatingPerPack } from './packTracker'
 import { hydrateSellExcludedPassKeys } from './sellExcludedPasses'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
@@ -366,6 +366,16 @@ function hydratePackTracker(value: unknown): PackTracker | null {
       const n = Number(value.dailySwaps)
       if (!Number.isFinite(n) || n <= 0) return undefined
       return Math.floor(n)
+    })(),
+    weeklyPacksOnly: value.weeklyPacksOnly === true ? true : undefined,
+    weeklyExtraAccounts: (() => {
+      const n = Number(value.weeklyExtraAccounts)
+      if (!Number.isFinite(n) || n <= 0) return undefined
+      return Math.floor(n)
+    })(),
+    weeklyPackOpens: (() => {
+      const opens = hydrateWeeklyPackOpens(value.weeklyPackOpens)
+      return opens.length > 0 ? opens : undefined
     })(),
     averagePlayRating: (() => {
       const n = Number(value.averagePlayRating)

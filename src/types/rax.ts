@@ -184,6 +184,15 @@ export type PackAccountTemplate = {
   opensPacks: boolean
 }
 
+/** One logged weekly pack open for ETA / next-pack projections. */
+export type WeeklyPackOpen = {
+  id: string
+  /** Local calendar day the pack was opened (`YYYY-MM-DD`). */
+  openedOn: string
+  /** Optional account that opened this pack. */
+  accountId?: string
+}
+
 /**
  * Tracks player-pack rating progress toward Iconic for a planned pass.
  * Rating is sourced from Real imports (and optional manual edits) across named accounts.
@@ -197,8 +206,21 @@ export type PackTracker = {
   /**
    * Extra packs of this player opened per day via swaps from unrelated player packs.
    * Counts toward daily gain on top of accounts with “Opens packs”.
+   * Ignored when `weeklyPacksOnly` is set.
    */
   dailySwaps?: number
+  /**
+   * When true, this player only has weekly packs (no daily). Estimates use packs/week
+   * from opening accounts; logged `weeklyPackOpens` refine next-pack / finish dates.
+   */
+  weeklyPacksOnly?: boolean
+  /**
+   * Extra accounts assumed to open this weekly pack each week (not listed under Accounts).
+   * Treated as opening on the same day as account 1 / the logged open cadence.
+   */
+  weeklyExtraAccounts?: number
+  /** Dates accounts opened a weekly pack (newest last preferred in UI). */
+  weeklyPackOpens?: WeeklyPackOpen[]
   /** Mean |Real Rating| per play from `/plays/top` (or recent fallback); negatives absolutized. */
   averagePlayRating?: number
   /** Number of rated plays included in the average. */

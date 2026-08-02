@@ -7,11 +7,16 @@ import {
   estimatePackProgress,
   formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
+  hydrateWeeklyPackOpens,
   ICONIC_RATING_TARGET,
   isBlankPackAccountPlaceholder,
+  latestWeeklyPackOpenDate,
+  nextWeeklyPackDate,
   normalizeDailySwaps,
+  normalizePackOpenDate,
   normalizeRatingPerPack,
   projectedFinishDate,
+  projectedWeeklyFinishDate,
   removeFinishedPlannedPass,
   isLikelyPackUsernameRename,
   renamePackUsernameInAccounts,
@@ -181,6 +186,94 @@ describe('estimatePackProgress', () => {
     expect(estimate.dailySwaps).toBe(1)
     expect(estimate.dailyGain).toBe(10)
     expect(estimate.daysRemaining).toBe(Math.ceil((ICONIC_RATING_TARGET - 100) / 10))
+  })
+
+  it('estimates weeks for weekly-packs-only players and ignores daily swaps', () => {
+    const remaining = ICONIC_RATING_TARGET - 1500
+    const estimate = estimatePackProgress(
+      tracker({
+        weeklyPacksOnly: true,
+        dailySwaps: 5,
+        ratingPerPack: 10,
+      }),
+    )
+    expect(estimate.weeklyPacksOnly).toBe(true)
+    expect(estimate.dailySwaps).toBe(0)
+    expect(estimate.effectiveWeeklyOpens).toBe(2)
+    expect(estimate.weeklyGain).toBe(20)
+    expect(estimate.weeksRemaining).toBe(Math.ceil(remaining / 20))
+    expect(estimate.daysRemaining).toBe(Math.ceil(remaining / 20) * 7)
+  })
+
+  it('adds extra weekly accounts on top of listed openers', () => {
+    const remaining = ICONIC_RATING_TARGET - 1500
+    const estimate = estimatePackProgress(
+      tracker({
+        weeklyPacksOnly: true,
+        weeklyExtraAccounts: 3,
+        ratingPerPack: 10,
+      }),
+    )
+    expect(estimate.openingAccounts).toBe(2)
+    expect(estimate.weeklyExtraAccounts).toBe(3)
+    expect(estimate.effectiveWeeklyOpens).toBe(5)
+    expect(estimate.weeklyGain).toBe(50)
+    expect(estimate.weeksRemaining).toBe(Math.ceil(remaining / 50))
+  })
+
+  it('can estimate weekly finish from extra accounts alone', () => {
+    const estimate = estimatePackProgress(
+      tracker({
+        weeklyPacksOnly: true,
+        weeklyExtraAccounts: 2,
+        accounts: [{ id: 'acc_1', name: 'Main', rating: 100, opensPacks: false }],
+        ratingPerPack: 10,
+      }),
+    )
+    expect(estimate.openingAccounts).toBe(0)
+    expect(estimate.effectiveWeeklyOpens).toBe(2)
+    expect(estimate.weeklyGain).toBe(20)
+    expect(estimate.weeksRemaining).toBe(Math.ceil((ICONIC_RATING_TARGET - 100) / 20))
+  })
+
+  it('returns null weeks when weekly mode has no opening accounts or extras', () => {
+    const estimate = estimatePackProgress(
+      tracker({
+        weeklyPacksOnly: true,
+        accounts: [{ id: 'acc_1', name: 'Main', rating: 100, opensPacks: false }],
+      }),
+    )
+    expect(estimate.weeksRemaining).toBeNull()
+    expect(estimate.daysRemaining).toBeNull()
+  })
+})
+
+describe('weekly pack open dates', () => {
+  it('normalizes and sorts open dates', () => {
+    expect(normalizePackOpenDate('2026-08-01')).toBe('2026-08-01')
+    expect(normalizePackOpenDate('2026-13-01')).toBe('')
+    expect(
+      hydrateWeeklyPackOpens([
+        { id: 'b', openedOn: '2026-08-10' },
+        { id: 'a', openedOn: '2026-08-01', accountId: 'acc_1' },
+        { id: 'bad', openedOn: 'nope' },
+      ]),
+    ).toEqual([
+      { id: 'a', openedOn: '2026-08-01', accountId: 'acc_1' },
+      { id: 'b', openedOn: '2026-08-10' },
+    ])
+  })
+
+  it('projects next open and finish from the latest logged date', () => {
+    const opens = hydrateWeeklyPackOpens([{ id: '1', openedOn: '2026-07-28' }])
+    expect(latestWeeklyPackOpenDate(opens)).toBe('2026-07-28')
+    const from = new Date(2026, 6, 30) // Jul 30
+    expect(nextWeeklyPackDate(opens, from)?.toDateString()).toBe(
+      new Date(2026, 7, 4).toDateString(), // Aug 4
+    )
+    expect(projectedWeeklyFinishDate(3, opens, from)?.toDateString()).toBe(
+      new Date(2026, 7, 18).toDateString(), // Aug 4 + 2 weeks
+    )
   })
 })
 

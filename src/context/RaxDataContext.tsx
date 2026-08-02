@@ -66,6 +66,7 @@ import {
   accountsFromPackTemplates,
   applyPackTemplatesToAccounts,
   DEFAULT_PACK_RATING_INCREMENT,
+  hydrateWeeklyPackOpens,
   normalizePackUsername,
   normalizeRatingPerPack,
   packUsernameKey,
@@ -140,6 +141,9 @@ type RaxDataContextValue = {
         | 'accounts'
         | 'ratingPerPack'
         | 'dailySwaps'
+        | 'weeklyPacksOnly'
+        | 'weeklyExtraAccounts'
+        | 'weeklyPackOpens'
         | 'averagePlayRating'
         | 'playCount'
         | 'lastPlaysImportedAt'
@@ -785,6 +789,11 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
               const averagePlayRating = Number(patch.averagePlayRating)
               const playCount = Number(patch.playCount)
               const dailySwaps = Number(patch.dailySwaps)
+              const weeklyExtraAccounts = Number(patch.weeklyExtraAccounts)
+              const weeklyPackOpens =
+                'weeklyPackOpens' in patch
+                  ? hydrateWeeklyPackOpens(patch.weeklyPackOpens)
+                  : undefined
               return {
                 ...tracker,
                 ratingPerPack:
@@ -797,6 +806,24 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
                       ? Math.floor(dailySwaps)
                       : undefined
                     : tracker.dailySwaps,
+                weeklyPacksOnly:
+                  'weeklyPacksOnly' in patch
+                    ? patch.weeklyPacksOnly === true
+                      ? true
+                      : undefined
+                    : tracker.weeklyPacksOnly,
+                weeklyExtraAccounts:
+                  'weeklyExtraAccounts' in patch
+                    ? Number.isFinite(weeklyExtraAccounts) && weeklyExtraAccounts > 0
+                      ? Math.floor(weeklyExtraAccounts)
+                      : undefined
+                    : tracker.weeklyExtraAccounts,
+                weeklyPackOpens:
+                  weeklyPackOpens !== undefined
+                    ? weeklyPackOpens.length > 0
+                      ? weeklyPackOpens
+                      : undefined
+                    : tracker.weeklyPackOpens,
                 averagePlayRating:
                   patch.averagePlayRating !== undefined
                     ? Number.isFinite(averagePlayRating)

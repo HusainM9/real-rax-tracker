@@ -3,6 +3,7 @@ import type {
   PackTracker,
   PackTrackerAccount,
   PlannedPass,
+  WeeklyPackOpen,
 } from '../types/rax'
 
 /** Rating needed to reach Iconic. */
@@ -16,14 +17,24 @@ export type PackProgressEstimate = {
   remaining: number
   ratingPerPack: number
   openingAccounts: number
-  /** Extra daily packs from swaps (normalized ≥0). */
+  /** Extra daily packs from swaps (normalized ≥0). Zero when weekly-only. */
   dailySwaps: number
-  /** openingAccounts + dailySwaps — effective packs opened per day. */
+  /** Extra weekly openers beyond listed accounts (normalized ≥0). Zero in daily mode. */
+  weeklyExtraAccounts: number
+  /** openingAccounts + dailySwaps — effective packs opened per day (0 when weekly-only). */
   effectiveDailyOpens: number
+  /** openingAccounts + weeklyExtraAccounts when weekly-only; else 0. */
+  effectiveWeeklyOpens: number
   packsNeeded: number
+  /** Rating gained per day (daily mode) or per week / 7 (weekly mode, for sort compat). */
   dailyGain: number
-  /** null when no effective opens and rating remains. */
+  /** Rating gained per week when weekly-only; else 0. */
+  weeklyGain: number
+  /** Whole weeks remaining when weekly-only; else null. */
+  weeksRemaining: number | null
+  /** null when no effective opens and rating remains. Weekly mode uses weeks × 7. */
   daysRemaining: number | null
+  weeklyPacksOnly: boolean
   atTarget: boolean
   progressRatio: number
 }
@@ -33,6 +44,11 @@ export function normalizeDailySwaps(value: number | undefined | null): number {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return 0
   return Math.floor(n)
+}
+
+/** Normalize extra weekly openers: whole numbers ≥0; invalid → 0. */
+export function normalizeWeeklyExtraAccounts(value: number | undefined | null): number {
+  return normalizeDailySwaps(value)
 }
 
 function clampRating(value: number): number {
@@ -65,21 +81,142 @@ export function countOpeningAccounts(accounts: PackTrackerAccount[]): number {
   return accounts.filter(accountCountsAsOpeningPacks).length
 }
 
+/** Normalize a calendar day string to `YYYY-MM-DD`, or empty when invalid. */
+export function normalizePackOpenDate(raw: string | undefined | null): string {
+  const value = (raw ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return ''
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year!, month! - 1, day!)
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month! - 1 ||
+    date.getDate() !== day
+  ) {
+    return ''
+  }
+  return value
+}
+
+export function hydrateWeeklyPackOpens(value: unknown): WeeklyPackOpen[] {
+  if (!Array.isArray(value)) return []
+  const opens: WeeklyPackOpen[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const record = entry as Record<string, unknown>
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    const openedOn = normalizePackOpenDate(
+      typeof record.openedOn === 'string' ? record.openedOn : undefined,
+    )
+    if (!id || !openedOn) continue
+    const accountId =
+      typeof record.accountId === 'string' && record.accountId.trim()
+        ? record.accountId.trim()
+        : undefined
+    opens.push({ id, openedOn, accountId })
+  }
+  return opens.sort((a, b) => a.openedOn.localeCompare(b.openedOn) || a.id.localeCompare(b.id))
+}
+
+/** Most recent weekly open day, or null when none. */
+export function latestWeeklyPackOpenDate(opens: WeeklyPackOpen[] | undefined): string | null {
+  let latest: string | null = null
+  for (const open of opens ?? []) {
+    const day = normalizePackOpenDate(open.openedOn)
+    if (!day) continue
+    if (!latest || day > latest) latest = day
+  }
+  return latest
+}
+
+function parseLocalDay(day: string): Date {
+  const [year, month, date] = day.split('-').map(Number)
+  return new Date(year!, month! - 1, date!)
+}
+
+/**
+ * Next calendar day a weekly pack can be opened, based on the latest logged open
+ * (+7 days, rolled forward to today or later). Null when no opens logged.
+ */
+export function nextWeeklyPackDate(
+  opens: WeeklyPackOpen[] | undefined,
+  from: Date = new Date(),
+): Date | null {
+  const latest = latestWeeklyPackOpenDate(opens)
+  if (!latest) return null
+  const fromDay = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  let next = addCalendarDays(parseLocalDay(latest), 7)
+  while (next < fromDay) {
+    next = addCalendarDays(next, 7)
+  }
+  return next
+}
+
+/** Finish date for weekly mode: first open wave on next pack day, then weekly. */
+export function projectedWeeklyFinishDate(
+  weeksRemaining: number | null,
+  opens: WeeklyPackOpen[] | undefined,
+  from: Date = new Date(),
+): Date | null {
+  if (weeksRemaining === null) return null
+  if (weeksRemaining === 0) {
+    return new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  }
+  const firstWave = nextWeeklyPackDate(opens, from) ?? new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  return addCalendarDays(firstWave, (weeksRemaining - 1) * 7)
+}
+
 export function estimatePackProgress(
-  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number; dailySwaps?: number },
+  tracker: Pick<PackTracker, 'accounts'> & {
+    ratingPerPack?: number
+    dailySwaps?: number
+    weeklyPacksOnly?: boolean
+    weeklyExtraAccounts?: number
+  },
   target: number = ICONIC_RATING_TARGET,
 ): PackProgressEstimate {
   const totalRating = sumAccountRatings(tracker.accounts)
   const remaining = Math.max(0, target - totalRating)
   const ratingPerPack = normalizeRatingPerPack(tracker.ratingPerPack)
   const openingAccounts = countOpeningAccounts(tracker.accounts)
-  const dailySwaps = normalizeDailySwaps(tracker.dailySwaps)
-  const effectiveDailyOpens = openingAccounts + dailySwaps
+  const weeklyPacksOnly = tracker.weeklyPacksOnly === true
+  const dailySwaps = weeklyPacksOnly ? 0 : normalizeDailySwaps(tracker.dailySwaps)
+  const weeklyExtraAccounts = weeklyPacksOnly
+    ? normalizeWeeklyExtraAccounts(tracker.weeklyExtraAccounts)
+    : 0
   const packsNeeded = remaining === 0 ? 0 : Math.ceil(remaining / ratingPerPack)
+  const progressRatio = target <= 0 ? 1 : Math.min(1, totalRating / target)
+
+  if (weeklyPacksOnly) {
+    const effectiveWeeklyOpens = openingAccounts + weeklyExtraAccounts
+    const weeklyGain = effectiveWeeklyOpens * ratingPerPack
+    const weeksRemaining =
+      remaining === 0 ? 0 : weeklyGain <= 0 ? null : Math.ceil(remaining / weeklyGain)
+    const daysRemaining = weeksRemaining === null ? null : weeksRemaining * 7
+    return {
+      totalRating,
+      remaining,
+      ratingPerPack,
+      openingAccounts,
+      dailySwaps: 0,
+      weeklyExtraAccounts,
+      effectiveDailyOpens: 0,
+      effectiveWeeklyOpens,
+      packsNeeded,
+      dailyGain: weeklyGain / 7,
+      weeklyGain,
+      weeksRemaining,
+      daysRemaining,
+      weeklyPacksOnly: true,
+      atTarget: remaining === 0,
+      progressRatio,
+    }
+  }
+
+  const effectiveDailyOpens = openingAccounts + dailySwaps
   const dailyGain = effectiveDailyOpens * ratingPerPack
   const daysRemaining =
     remaining === 0 ? 0 : dailyGain <= 0 ? null : Math.ceil(remaining / dailyGain)
-  const progressRatio = target <= 0 ? 1 : Math.min(1, totalRating / target)
 
   return {
     totalRating,
@@ -87,10 +224,15 @@ export function estimatePackProgress(
     ratingPerPack,
     openingAccounts,
     dailySwaps,
+    weeklyExtraAccounts: 0,
     effectiveDailyOpens,
+    effectiveWeeklyOpens: 0,
     packsNeeded,
     dailyGain,
+    weeklyGain: 0,
+    weeksRemaining: null,
     daysRemaining,
+    weeklyPacksOnly: false,
     atTarget: remaining === 0,
     progressRatio,
   }

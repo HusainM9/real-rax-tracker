@@ -3,19 +3,32 @@ import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
+import { createId } from '../lib/id'
 import {
   DEFAULT_PACK_RATING_INCREMENT,
   estimatePackProgress,
   formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
+  hydrateWeeklyPackOpens,
   ICONIC_RATING_TARGET,
+  latestWeeklyPackOpenDate,
+  nextWeeklyPackDate,
   normalizeDailySwaps,
+  normalizePackOpenDate,
   normalizePackUsername,
+  normalizeWeeklyExtraAccounts,
+  projectedWeeklyFinishDate,
 } from '../lib/packTracker'
 import { fetchPackRatings } from '../lib/packRatingsImport'
 import { fetchPlayAverages } from '../lib/playAveragesImport'
 import { MIN_RATING_PER_PACK, PLAYS_PER_PACK } from '../lib/playAveragesImport'
-import type { PackAccountTemplate, PackTracker, PackTrackerAccount, PlannedPass } from '../types/rax'
+import type {
+  PackAccountTemplate,
+  PackTracker,
+  PackTrackerAccount,
+  PlannedPass,
+  WeeklyPackOpen,
+} from '../types/rax'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
@@ -34,6 +47,33 @@ function formatDays(days: number | null): string {
   return `${days} days`
 }
 
+function formatWeeks(weeks: number | null): string {
+  if (weeks === null) return '—'
+  if (weeks === 0) return 'Done'
+  if (weeks === 1) return '1 week'
+  return `${weeks} weeks`
+}
+
+function todayLocalDay(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatOpenDay(day: string): string {
+  const [year, month, date] = day.split('-').map(Number)
+  const parsed = new Date(year!, month! - 1, date!)
+  if (Number.isNaN(parsed.getTime())) return day
+  return parsed.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 type PackPassSortMode = 'soonest' | 'most-upgraded' | 'least-upgraded' | 'name' | 'plan'
 
 function accountUsername(account: PackTrackerAccount): string {
@@ -49,6 +89,10 @@ function PackPassRow({
   onEnsureTracker,
   onUpdateRatingPerPack,
   onUpdateDailySwaps,
+  onSetWeeklyPacksOnly,
+  onUpdateWeeklyExtraAccounts,
+  onAddWeeklyPackOpen,
+  onRemoveWeeklyPackOpen,
   onAddAccount,
   onUpdateAccount,
   onRemoveAccount,
@@ -66,6 +110,10 @@ function PackPassRow({
   onEnsureTracker: () => void
   onUpdateRatingPerPack: (value: number) => void
   onUpdateDailySwaps: (value: number | undefined) => void
+  onSetWeeklyPacksOnly: (enabled: boolean) => void
+  onUpdateWeeklyExtraAccounts: (value: number | undefined) => void
+  onAddWeeklyPackOpen: (openedOn: string, accountId?: string) => void
+  onRemoveWeeklyPackOpen: (openId: string) => void
   onAddAccount: () => void
   onUpdateAccount: (
     accountId: string,
@@ -87,6 +135,7 @@ function PackPassRow({
         ratingPerPack: DEFAULT_PACK_RATING_INCREMENT,
       })
   const isDone = Boolean(tracker && estimate.atTarget)
+  const weeklyOnly = Boolean(tracker?.weeklyPacksOnly)
   const accountCount = tracker?.accounts.length ?? 0
   const importableCount = tracker
     ? tracker.accounts.filter((account) => Boolean(accountUsername(account))).length
@@ -94,6 +143,14 @@ function PackPassRow({
   const [open, setOpen] = useState(false)
   const hasDailySwaps = Boolean(tracker && normalizeDailySwaps(tracker.dailySwaps) > 0)
   const [showDailySwaps, setShowDailySwaps] = useState(hasDailySwaps)
+  const [weeklyOpenDay, setWeeklyOpenDay] = useState(todayLocalDay)
+  const [weeklyOpenAccountId, setWeeklyOpenAccountId] = useState('')
+  const weeklyOpens = tracker?.weeklyPackOpens ?? []
+  const latestOpen = latestWeeklyPackOpenDate(weeklyOpens)
+  const nextOpen = weeklyOnly ? nextWeeklyPackDate(weeklyOpens) : null
+  const weeklyFinish = weeklyOnly
+    ? projectedWeeklyFinishDate(estimate.weeksRemaining, weeklyOpens)
+    : null
   const hasIncompleteOwnership = Boolean(
     tracker?.accounts.some(
       (account) => account.ownershipStatus === 'missing' && !account.ignoredMissing,
@@ -106,12 +163,20 @@ function PackPassRow({
     ? `${pass.passKind === 'team' ? 'Team' : 'Player'} · ${pass.sport} · ${pass.season} · Not tracking yet`
     : [
         `${pass.sport} · ${pass.season}`,
+        weeklyOnly ? 'Weekly packs' : null,
         `${estimate.totalRating.toLocaleString()} / ${ICONIC_RATING_TARGET.toLocaleString()}`,
         isDone
           ? 'DONE'
-          : `${formatDays(estimate.daysRemaining)} left`,
+          : weeklyOnly
+            ? `${formatWeeks(estimate.weeksRemaining)} left`
+            : `${formatDays(estimate.daysRemaining)} left`,
         `${accountCount} account${accountCount === 1 ? '' : 's'}`,
-        estimate.dailySwaps > 0 ? `+${estimate.dailySwaps} swap${estimate.dailySwaps === 1 ? '' : 's'}/day` : null,
+        !weeklyOnly && estimate.dailySwaps > 0
+          ? `+${estimate.dailySwaps} swap${estimate.dailySwaps === 1 ? '' : 's'}/day`
+          : null,
+        weeklyOnly && estimate.weeklyExtraAccounts > 0
+          ? `+${estimate.weeklyExtraAccounts} extra/week`
+          : null,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -188,13 +253,37 @@ function PackPassRow({
               <small>est. at {estimate.ratingPerPack}/pack</small>
             </div>
             <div className="pack-stat">
-              <span>Days remaining</span>
-              <strong>{formatDays(estimate.daysRemaining)}</strong>
+              <span>{weeklyOnly ? 'Weeks remaining' : 'Days remaining'}</span>
+              <strong>
+                {weeklyOnly
+                  ? formatWeeks(estimate.weeksRemaining)
+                  : formatDays(estimate.daysRemaining)}
+              </strong>
               <small>
-                {estimate.openingAccounts} open
-                {estimate.dailySwaps > 0 ? ` + ${estimate.dailySwaps} swap` : ''}
-                {' · '}
-                est. {estimate.dailyGain}/day
+                {weeklyOnly ? (
+                  <>
+                    {estimate.openingAccounts} listed
+                    {estimate.weeklyExtraAccounts > 0
+                      ? ` + ${estimate.weeklyExtraAccounts} extra`
+                      : ''}
+                    {' · '}
+                    est. {estimate.weeklyGain}/week
+                    {weeklyFinish
+                      ? ` · ~${weeklyFinish.toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}`
+                      : ''}
+                  </>
+                ) : (
+                  <>
+                    {estimate.openingAccounts} open
+                    {estimate.dailySwaps > 0 ? ` + ${estimate.dailySwaps} swap` : ''}
+                    {' · '}
+                    est. {estimate.dailyGain}/day
+                  </>
+                )}
               </small>
             </div>
             <label className="pack-stat pack-stat-input">
@@ -210,49 +299,193 @@ function PackPassRow({
             </label>
           </div>
 
-          <div className="pack-daily-swaps">
-            {showDailySwaps || hasDailySwaps ? (
-              <div className="pack-daily-swaps-row">
-                <label className="pack-stat pack-stat-input">
-                  <span>Daily swaps</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={tracker.dailySwaps ?? 0}
-                    onChange={(event) => {
-                      const next = Number(event.target.value)
-                      onUpdateDailySwaps(Number.isFinite(next) && next > 0 ? next : undefined)
-                    }}
-                    aria-label={`Daily swaps for ${pass.name}`}
-                  />
-                </label>
-                <p className="table-sub pack-daily-swaps-hint">
-                  Extra packs of this player per day from swapping unrelated player packs. Adds{' '}
-                  {estimate.dailySwaps * estimate.ratingPerPack}/day to the estimate.
-                </p>
-                <button
-                  className="button danger compact"
-                  type="button"
-                  onClick={() => {
-                    onUpdateDailySwaps(undefined)
-                    setShowDailySwaps(false)
-                  }}
-                >
-                  Remove swaps
-                </button>
+          <div className="pack-cadence-controls">
+            {weeklyOnly ? (
+              <div className="pack-weekly-mode">
+                <div className="pack-weekly-mode-header">
+                  <p className="table-sub pack-weekly-mode-hint">
+                    Weekly packs only — listed openers plus any extra accounts each contribute one
+                    pack per week (assumed same day as account 1 / your logged open dates).
+                  </p>
+                  <button
+                    className="button compact"
+                    type="button"
+                    onClick={() => onSetWeeklyPacksOnly(false)}
+                  >
+                    Use daily packs
+                  </button>
+                </div>
+
+                <div className="pack-daily-swaps-row">
+                  <label className="pack-stat pack-stat-input">
+                    <span>Extra accounts opening</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={tracker.weeklyExtraAccounts ?? 0}
+                      onChange={(event) => {
+                        const next = Number(event.target.value)
+                        onUpdateWeeklyExtraAccounts(
+                          Number.isFinite(next) && next > 0 ? next : undefined,
+                        )
+                      }}
+                      aria-label={`Extra weekly accounts for ${pass.name}`}
+                    />
+                  </label>
+                  <p className="table-sub pack-daily-swaps-hint">
+                    Extra accounts not listed below that also open this weekly pack. Assumed to open
+                    on the same day as account 1. Adds{' '}
+                    {normalizeWeeklyExtraAccounts(tracker.weeklyExtraAccounts) *
+                      estimate.ratingPerPack}
+                    /week to the estimate.
+                  </p>
+                </div>
+
+                <div className="pack-weekly-opens">
+                  <div className="pack-accounts-header">
+                    <h4>Weekly pack opens</h4>
+                  </div>
+                  <p className="table-sub pack-weekly-opens-hint">
+                    Log when account 1 (or any account) opened this weekly pack. Extra accounts are
+                    assumed to open on that same day. Used for next-pack and finish estimates.
+                    {latestOpen ? ` Last logged ${formatOpenDay(latestOpen)}.` : ''}
+                    {nextOpen
+                      ? ` Next pack ~ ${nextOpen.toLocaleDateString(undefined, {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                        })}.`
+                      : ''}
+                  </p>
+                  <div className="pack-weekly-opens-form">
+                    <label className="pack-account-field">
+                      <span>Opened on</span>
+                      <input
+                        type="date"
+                        value={weeklyOpenDay}
+                        onChange={(event) => setWeeklyOpenDay(event.target.value)}
+                        aria-label={`Weekly pack open date for ${pass.name}`}
+                      />
+                    </label>
+                    <label className="pack-account-field">
+                      <span>Account</span>
+                      <select
+                        value={weeklyOpenAccountId}
+                        onChange={(event) => setWeeklyOpenAccountId(event.target.value)}
+                        aria-label={`Account that opened weekly pack for ${pass.name}`}
+                      >
+                        <option value="">Any / unspecified</option>
+                        {tracker.accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name.trim() || accountUsername(account) || 'Account'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="button compact"
+                      type="button"
+                      onClick={() => {
+                        const day = normalizePackOpenDate(weeklyOpenDay)
+                        if (!day) return
+                        onAddWeeklyPackOpen(day, weeklyOpenAccountId || undefined)
+                        setWeeklyOpenDay(todayLocalDay())
+                      }}
+                    >
+                      Add open date
+                    </button>
+                  </div>
+                  {weeklyOpens.length === 0 ? (
+                    <p className="import-hint">No opens logged yet.</p>
+                  ) : (
+                    <ul className="pack-weekly-opens-list">
+                      {[...weeklyOpens].reverse().map((entry) => {
+                        const account = entry.accountId
+                          ? tracker.accounts.find((row) => row.id === entry.accountId)
+                          : undefined
+                        return (
+                          <li key={entry.id}>
+                            <span>
+                              {formatOpenDay(entry.openedOn)}
+                              {account
+                                ? ` · ${account.name.trim() || accountUsername(account) || 'Account'}`
+                                : ''}
+                            </span>
+                            <button
+                              className="button danger compact"
+                              type="button"
+                              onClick={() => onRemoveWeeklyPackOpen(entry.id)}
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
             ) : (
-              <button
-                className="button compact"
-                type="button"
-                onClick={() => {
-                  setShowDailySwaps(true)
-                  onUpdateDailySwaps(1)
-                }}
-              >
-                Add daily swaps
-              </button>
+              <>
+                <div className="pack-daily-swaps">
+                  {showDailySwaps || hasDailySwaps ? (
+                    <div className="pack-daily-swaps-row">
+                      <label className="pack-stat pack-stat-input">
+                        <span>Daily swaps</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={tracker.dailySwaps ?? 0}
+                          onChange={(event) => {
+                            const next = Number(event.target.value)
+                            onUpdateDailySwaps(
+                              Number.isFinite(next) && next > 0 ? next : undefined,
+                            )
+                          }}
+                          aria-label={`Daily swaps for ${pass.name}`}
+                        />
+                      </label>
+                      <p className="table-sub pack-daily-swaps-hint">
+                        Extra packs of this player per day from swapping unrelated player packs. Adds{' '}
+                        {estimate.dailySwaps * estimate.ratingPerPack}/day to the estimate.
+                      </p>
+                      <button
+                        className="button danger compact"
+                        type="button"
+                        onClick={() => {
+                          onUpdateDailySwaps(undefined)
+                          setShowDailySwaps(false)
+                        }}
+                      >
+                        Remove swaps
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="button compact"
+                      type="button"
+                      onClick={() => {
+                        setShowDailySwaps(true)
+                        onUpdateDailySwaps(1)
+                      }}
+                    >
+                      Add daily swaps
+                    </button>
+                  )}
+                </div>
+                <button
+                  className="button compact"
+                  type="button"
+                  onClick={() => {
+                    setShowDailySwaps(false)
+                    onSetWeeklyPacksOnly(true)
+                  }}
+                >
+                  Weekly packs only
+                </button>
+              </>
             )}
           </div>
 
@@ -340,7 +573,7 @@ function PackPassRow({
                           onUpdateAccount(account.id, { opensPacks: event.target.checked })
                         }
                       />
-                      <span>Opens packs</span>
+                      <span>{weeklyOnly ? 'Opens weekly pack' : 'Opens packs'}</span>
                     </label>
                     <div className="pack-account-actions">
                       <button
@@ -394,8 +627,9 @@ function PackPassRow({
             <p className="import-hint plan-pass-status owned">DONE — reached Iconic rating target.</p>
           ) : estimate.daysRemaining === null ? (
             <p className="import-hint plan-pass-status warning">
-              No effective pack openers for estimates — enable “Opens packs” on an owned account, add
-              daily swaps, or Ignore missing ownership.
+              {weeklyOnly
+                ? 'No weekly pack openers for estimates — enable “Opens weekly pack” on an owned account, add extra accounts opening, or Ignore missing ownership.'
+                : 'No effective pack openers for estimates — enable “Opens packs” on an owned account, add daily swaps, or Ignore missing ownership.'}
             </p>
           ) : null}
         </div>
@@ -485,10 +719,20 @@ export default function PlanPacksPage() {
         const tracker = trackerByPassId.get(pass.id)
         if (!tracker) return null
         const estimate = estimatePackProgress(tracker)
+        const weeklyFinish = estimate.weeklyPacksOnly
+          ? projectedWeeklyFinishDate(estimate.weeksRemaining, tracker.weeklyPackOpens)
+          : null
         return {
           pass,
           estimate,
-          finishLabel: formatProjectedFinishDate(estimate.daysRemaining),
+          finishLabel: weeklyFinish
+            ? weeklyFinish.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })
+            : formatProjectedFinishDate(estimate.daysRemaining),
         }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -1059,11 +1303,13 @@ export default function PlanPacksPage() {
   return (
     <div className="page-stack plan-packs-page">
       <section className="hero-card">
-        <p className="eyebrow">Daily player packs</p>
+        <p className="eyebrow">Player pack tracking</p>
         <h1>Player packs</h1>
         <p>
-          Track rating across accounts toward Iconic ({ICONIC_RATING_TARGET.toLocaleString()}). Sync a
-          Real username to pull live play ratings for every tracked pass that account owns.
+          Track rating across accounts toward Iconic ({ICONIC_RATING_TARGET.toLocaleString()}). Use
+          weekly packs only for players without daily packs, log open dates, and estimate time to
+          Iconic. Sync a Real username to pull live play ratings for every tracked pass that account
+          owns.
         </p>
         <div className="button-row">
           <Link className="button" to="/plan">
@@ -1341,6 +1587,36 @@ export default function PlanPacksPage() {
                 onUpdateDailySwaps={(value) => {
                   if (!tracker) return
                   updatePackTracker(tracker.id, { dailySwaps: value })
+                }}
+                onSetWeeklyPacksOnly={(enabled) => {
+                  if (!tracker) return
+                  updatePackTracker(tracker.id, {
+                    weeklyPacksOnly: enabled,
+                    ...(enabled
+                      ? { dailySwaps: undefined }
+                      : { weeklyExtraAccounts: undefined }),
+                  })
+                }}
+                onUpdateWeeklyExtraAccounts={(value) => {
+                  if (!tracker) return
+                  updatePackTracker(tracker.id, { weeklyExtraAccounts: value })
+                }}
+                onAddWeeklyPackOpen={(openedOn, accountId) => {
+                  if (!tracker) return
+                  const next: WeeklyPackOpen[] = hydrateWeeklyPackOpens([
+                    ...(tracker.weeklyPackOpens ?? []),
+                    {
+                      id: createId('wpo'),
+                      openedOn,
+                      accountId,
+                    },
+                  ])
+                  updatePackTracker(tracker.id, { weeklyPackOpens: next })
+                }}
+                onRemoveWeeklyPackOpen={(openId) => {
+                  if (!tracker) return
+                  const next = (tracker.weeklyPackOpens ?? []).filter((entry) => entry.id !== openId)
+                  updatePackTracker(tracker.id, { weeklyPackOpens: next })
                 }}
                 onAddAccount={() => {
                   const id = tracker?.id ?? upsertPackTracker(pass.id)
