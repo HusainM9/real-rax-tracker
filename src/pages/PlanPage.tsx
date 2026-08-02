@@ -790,7 +790,7 @@ export default function PlanPage() {
         </p>
         <div className="button-row">
           <Link className="button" to="/potential">
-            Rank catalog
+            Rank OTD Net
           </Link>
           <Link className="button" to="/sell">
             If sold
@@ -1477,7 +1477,7 @@ export default function PlanPage() {
         </>
       ) : (
         <section className="panel plan-empty">
-          <p className="empty">No passes yet. Search below, add from your collection, or use Rank catalog on Potential.</p>
+          <p className="empty">No passes yet. Search below, add from your collection, or use Rank OTD Net on Potential.</p>
         </section>
       )}
 

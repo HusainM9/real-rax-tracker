@@ -109,10 +109,14 @@ export function buildCalendarCells(
 export function monthGroupTotals(days: ClaimDayResult[]): {
   dayCount: number
   totalClaimableRax: number
+  totalGuaranteedRax: number
+  totalProBonusRax: number
 } {
   return {
     dayCount: days.length,
     totalClaimableRax: days.reduce((sum, day) => sum + day.totalClaimableRax, 0),
+    totalGuaranteedRax: days.reduce((sum, day) => sum + day.totalGuaranteedRax, 0),
+    totalProBonusRax: days.reduce((sum, day) => sum + day.totalProBonusRax, 0),
   }
 }
 

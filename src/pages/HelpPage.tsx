@@ -133,7 +133,7 @@ export default function HelpPage() {
           </div>
           <div>
             <dt>Potential</dt>
-            <dd>Rank catalog, Check one pass, collection what-ifs.</dd>
+            <dd>Rank OTD Net, Check one pass, collection what-ifs.</dd>
           </div>
           <div>
             <dt>Plan</dt>

@@ -910,7 +910,7 @@ export default function PotentialPage() {
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
-  /** Rank catalog only — default on; turn off when max UFC already held. */
+  /** Rank OTD Net only — default on; turn off when max UFC already held. */
   const [includeRankUfc, setIncludeRankUfc] = useState(true)
   const [excludedSportSeasons, setExcludedSportSeasons] = useState<ExcludedSportSeason[]>(
     createDefaultExcludedSportSeasons,
@@ -1301,7 +1301,7 @@ export default function PotentialPage() {
   const loadRecommendationRow = (row: PassRecommendationRow) => {
     const profile = profileByKey.get(row.externalKey)
     if (!profile) {
-      setStatus('Catalog profile is no longer loaded — run Rank catalog again.')
+      setStatus('Catalog profile is no longer loaded — run Rank OTD Net again.')
       return
     }
     const soloPreviewRarity = form.previewAs || RECOMMENDATION_SIMULATED_RARITY
@@ -2366,13 +2366,13 @@ export default function PotentialPage() {
       return
     }
     if (rankCatalogProfiles.length === 0) {
-      setRankStatus('Run Rank catalog before claiming recommendations.')
+      setRankStatus('Run Rank OTD Net before claiming recommendations.')
       return
     }
 
     const missingProfile = rows.find((row) => !profileByKey.has(row.externalKey))
     if (missingProfile) {
-      setRankStatus('Catalog profile is no longer loaded — run Rank catalog again.')
+      setRankStatus('Catalog profile is no longer loaded — run Rank OTD Net again.')
       return
     }
 
@@ -2666,7 +2666,7 @@ export default function PotentialPage() {
       )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
-      setRankStatus(error instanceof Error ? error.message : 'Could not rank catalog passes.')
+      setRankStatus(error instanceof Error ? error.message : 'Could not run Rank OTD Net.')
     } finally {
       if (rankAbortRef.current === controller) {
         rankAbortRef.current = null
@@ -3243,7 +3243,7 @@ export default function PotentialPage() {
               <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
                 Baseline adjustments
               </button>{' '}
-              under Rank catalog.
+              under Rank OTD Net.
             </>
           )}
         </p>
@@ -3287,7 +3287,7 @@ export default function PotentialPage() {
                 title={
                   checkOneAlreadyInBaseline
                     ? 'Already in ranking baseline'
-                    : 'Exclude from Rank catalog without adding to baseline collection'
+                    : 'Exclude from Rank OTD Net without adding to baseline collection'
                 }
                 onClick={() => addCheckOnePassToBaseline('exclude')}
               >
@@ -3517,8 +3517,8 @@ export default function PotentialPage() {
 
       <CollapsiblePanel
         id="catalog-recommendations"
-        title="Rank catalog"
-        description={`Player passes by net claimable RAX (${RECOMMENDATION_SIMULATED_RARITY} OTD).`}
+        title="Rank OTD Net"
+        description={`Player passes by net claimable RAX (${RECOMMENDATION_SIMULATED_RARITY} OTD), with guaranteed and Pro split.`}
         open={catalogRankOpen}
         onOpenChange={setCatalogRankOpen}
         defaultOpen={false}
@@ -4044,7 +4044,7 @@ export default function PotentialPage() {
             }
             onClick={() => void runCatalogRanking()}
           >
-            {rankingInProgress ? 'Ranking…' : 'Rank catalog'}
+            {rankingInProgress ? 'Ranking…' : 'Rank OTD Net'}
           </button>
           {rankingInProgress ? (
             <button className="button" type="button" onClick={cancelRanking}>
@@ -4426,6 +4426,8 @@ export default function PotentialPage() {
                     <th>#</th>
                     <th>Pass</th>
                     <th>Net Δ</th>
+                    <th>Guaranteed</th>
+                    <th>Pro</th>
                     <th>New claimable</th>
                     <th>Displaced</th>
                     <th>Overlap</th>
@@ -4441,6 +4443,7 @@ export default function PotentialPage() {
                     const selected = rankingClaimSelection.has(row.externalKey)
                     const claimButton = recommendationClaimButtonProps(row)
                     const planButton = recommendationPlanButtonProps(row)
+                    const proNetDelta = row.netClaimableDelta - row.netGuaranteedDelta
                     return (
                     <tr key={row.externalKey}>
                       <td className="ranking-claim-col">
@@ -4488,6 +4491,28 @@ export default function PotentialPage() {
                         >
                           {formatSignedRax(displayRaxValue(row.netClaimableDelta))}
                         </strong>
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            row.netGuaranteedDelta > 0
+                              ? 'sale-positive'
+                              : row.netGuaranteedDelta < 0
+                                ? 'sale-negative'
+                                : ''
+                          }
+                        >
+                          {formatSignedRax(displayRaxValue(row.netGuaranteedDelta))}
+                        </span>
+                      </td>
+                      <td>
+                        {proNetDelta !== 0 ? (
+                          <span className={proNetDelta > 0 ? 'sale-positive' : 'sale-negative'}>
+                            {formatSignedRax(displayRaxValue(proNetDelta))}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td>{formatRax(displayRaxValue(row.newClaimableRax))}</td>
                       <td>
@@ -4735,7 +4760,7 @@ export default function PotentialPage() {
                   ) : null}
                   <div className="owned-collection-baseline-actions">
                     <p className="import-hint">
-                      Keep this upgrade in Rank catalog? Add under{' '}
+                      Keep this upgrade in Rank OTD Net? Add under{' '}
                       <button className="link-button" type="button" onClick={goToBaselineAdjustments}>
                         Baseline adjustments
                       </button>
@@ -4772,7 +4797,7 @@ export default function PotentialPage() {
         <p className="import-hint">
           Same baseline and exclusions as{' '}
           <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
-            Rank catalog
+            Rank OTD Net
           </button>
           .
           {monthBoostAllSports ? (
@@ -5028,7 +5053,7 @@ export default function PotentialPage() {
         <p className="import-hint">
           Same baseline and exclusions as{' '}
           <button className="link-button" type="button" onClick={() => setCatalogRankOpen(true)}>
-            Rank catalog
+            Rank OTD Net
           </button>
           .
           {dayBoostAllSports ? (

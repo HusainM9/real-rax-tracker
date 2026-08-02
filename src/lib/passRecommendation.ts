@@ -565,7 +565,7 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
 }
 
 /**
- * Default Rank catalog sport+season exclusions.
+ * Default Rank OTD Net sport+season exclusions.
  * Keys use season labels (`2022-23`), not seasonYear — NFL/NHL are start-year encoded
  * (`seasonYear` 2022 → label `2022-23`); CBB is end-year (`seasonYear` 2023 → `2022-23`).
  */
@@ -593,7 +593,7 @@ export function defaultRankExcludedSportSeasonKeys(): string[] {
   )
 }
 
-/** Drop UFC from Rank catalog sports when Include UFC is off (default on). */
+/** Drop UFC from Rank OTD Net sports when Include UFC is off (default on). */
 export function filterRankCatalogSports(
   sports: readonly Sport[],
   includeUfc = true,

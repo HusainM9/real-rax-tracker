@@ -83,7 +83,15 @@ function bestCatalogEarnersHref(monthDay: string): string | null {
   return `/potential?${params.toString()}`
 }
 
-function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
+function DayPanel({
+  day,
+  titleId,
+  proBonusEnabled,
+}: {
+  day: ClaimDayResult
+  titleId?: string
+  proBonusEnabled: boolean
+}) {
   const bestEarnersHref = bestCatalogEarnersHref(day.claimDay)
 
   return (
@@ -92,11 +100,19 @@ function DayPanel({ day, titleId }: { day: ClaimDayResult; titleId?: string }) {
         <div>
           <h2 id={titleId}>{formatClaimDay(day.claimDay)}</h2>
           <p>
-            {formatRax(day.totalClaimableRax)} claimable · {formatRax(day.totalOverlapRax)} overlapped
-            · top 2 per sport + Pro bonus
+            {formatRax(day.totalClaimableRax)} claimable
+            {proBonusEnabled ? ` · ${formatRax(day.totalGuaranteedRax)} guaranteed` : ''}
+            {proBonusEnabled && day.totalProBonusRax > 0
+              ? ` · ${formatRax(day.totalProBonusRax)} Pro`
+              : ''}
+            {' · '}
+            {formatRax(day.totalOverlapRax)} overlapped
+            {proBonusEnabled ? ' · top 2 per sport + Pro bonus' : ' · top 2 per sport (no Pro)'}
           </p>
         </div>
-        {day.proBonus ? <span className="badge">Pro: {day.proBonus.card.name}</span> : null}
+        {proBonusEnabled && day.proBonus ? (
+          <span className="badge">Pro: {day.proBonus.card.name}</span>
+        ) : null}
       </div>
 
       {bestEarnersHref ? (
@@ -151,9 +167,10 @@ function resolveMonthDay(searchParams: URLSearchParams): string | null {
 }
 
 export default function CalendarPage() {
-  const { data } = useRaxData()
+  const { data, setSettings } = useRaxData()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedMonthDay = resolveMonthDay(searchParams)
+  const proBonusEnabled = data.settings.proBonusEnabled
   const allResults = useMemo(() => {
     const results = computeClaimDayResults(data)
     return results.sort((a, b) => a.claimDay.localeCompare(b.claimDay))
@@ -231,8 +248,9 @@ export default function CalendarPage() {
           <div>
             <h2>Claim calendar</h2>
             <p>
-              Each OTD day pools every year together — only the top two per sport plus one Pro bonus
-              count. Values include OTD multipliers from username import.
+              Each OTD day pools every year together — only the top two per sport
+              {proBonusEnabled ? ' plus one Pro bonus' : ' (Pro bonus off)'} count. Values include
+              OTD multipliers from username import.
             </p>
           </div>
           <Link to="/entry">Add entries</Link>
@@ -241,14 +259,24 @@ export default function CalendarPage() {
           <span className="legend-item">
             <span className="legend-swatch guaranteed" /> Guaranteed (top 2/sport)
           </span>
-          <span className="legend-item">
-            <span className="legend-swatch pro-bonus" /> Pro bonus
-          </span>
+          {proBonusEnabled ? (
+            <span className="legend-item">
+              <span className="legend-swatch pro-bonus" /> Pro bonus
+            </span>
+          ) : null}
           <span className="legend-item">
             <span className="legend-swatch overlap" /> Overlap
           </span>
         </div>
         <div className="calendar-tools">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={proBonusEnabled}
+              onChange={(event) => setSettings({ proBonusEnabled: event.target.checked })}
+            />
+            {proBonusEnabled ? 'Pro claim on' : 'No Pro claim'}
+          </label>
           <label className="field inline-field">
             <span>Jump to day</span>
             <select
@@ -302,7 +330,11 @@ export default function CalendarPage() {
             >
               Close
             </button>
-            <DayPanel day={selectedDay} titleId="calendar-day-title" />
+            <DayPanel
+              day={selectedDay}
+              titleId="calendar-day-title"
+              proBonusEnabled={proBonusEnabled}
+            />
           </div>
         </div>
       ) : null}
@@ -326,6 +358,9 @@ export default function CalendarPage() {
                 <span>
                   {totals.dayCount} OTD day{totals.dayCount === 1 ? '' : 's'} ·{' '}
                   {formatRax(displayRaxValue(totals.totalClaimableRax))} claimable
+                  {proBonusEnabled
+                    ? ` · ${formatRax(displayRaxValue(totals.totalGuaranteedRax))} guaranteed · ${formatRax(displayRaxValue(totals.totalProBonusRax))} Pro`
+                    : ''}
                 </span>
               </div>
               <div className="calendar-grid-wrap">

@@ -268,7 +268,7 @@ describe('passRecommendation', () => {
     expect(passSeasonIncluded({ sport: 'NBA', seasonLabel: '2024-25', seasonYear: 2024 })).toBe(true)
   })
 
-  it('defaults Rank catalog exclusion to NFL, NHL, and CBB 2022-23', () => {
+  it('defaults Rank OTD Net exclusion to NFL, NHL, and CBB 2022-23', () => {
     expect(DEFAULT_RANK_EXCLUDED_SPORT_SEASONS).toEqual([
       { sport: 'NFL', seasonLabel: '2022-23' },
       { sport: 'NHL', seasonLabel: '2022-23' },
