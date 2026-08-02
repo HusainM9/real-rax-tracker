@@ -4,6 +4,7 @@ import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { PassIdentity } from '../components/PassIdentity'
 import { SeasonMultiSelect } from '../components/SeasonMultiSelect'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { displayRaxValue } from '../lib/displayRax'
 import {
   enrichCatalogProfilesWithAvatars,
@@ -3248,21 +3249,12 @@ export default function PotentialPage() {
           )}
         </p>
         <div className="sort-controls potential-solo-rarity">
-          <label className="field inline-field">
-            <span>Solo preview rarity</span>
-            <select
-              value={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, previewAs: event.target.value }))
-              }
-            >
-              {POTENTIAL_RARITY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="Solo preview rarity"
+            value={form.previewAs || RECOMMENDATION_SIMULATED_RARITY}
+            onChange={(value) => setForm((current) => ({ ...current, previewAs: value }))}
+            options={POTENTIAL_RARITY_OPTIONS.map((option) => ({ value: option, label: option }))}
+          />
           {checkOneBaselinePass ? (
             <span className="button-row compact-actions">
               <button
@@ -3331,19 +3323,15 @@ export default function PotentialPage() {
         {potentialBundleSelection.size > 0 ? (
           <div className="potential-bundle-controls">
             <div className="sort-controls">
-              <label className="field inline-field">
-                <span>Bundle preview rarity</span>
-                <select
-                  value={potentialBundleRarity}
-                  onChange={(event) => setPotentialBundleRarity(event.target.value)}
-                >
-                  {POTENTIAL_RARITY_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ThemedSelect
+                label="Bundle preview rarity"
+                value={potentialBundleRarity}
+                onChange={(value) => setPotentialBundleRarity(value)}
+                options={POTENTIAL_RARITY_OPTIONS.map((option) => ({
+                  value: option,
+                  label: option,
+                }))}
+              />
               <button
                 className="button"
                 type="button"
@@ -3423,21 +3411,14 @@ export default function PotentialPage() {
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               />
             </label>
-            <label className="field">
-              <span>Sport</span>
-              <select
-                value={form.sport}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, sport: event.target.value as Sport }))
-                }
-              >
-                {SPORTS.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ThemedSelect
+              label="Sport"
+              value={form.sport}
+              onChange={(next) =>
+                setForm((current) => ({ ...current, sport: next as Sport }))
+              }
+              options={SPORTS.map((sport) => ({ value: sport, label: sport }))}
+            />
             <label className="field">
               <span>Season / card label</span>
               <input
@@ -3805,20 +3786,25 @@ export default function PotentialPage() {
                     }
                   />
                   <span className="button-row compact-actions">
-                    <select
-                      className="adjustment-mode-select"
+                    <ThemedSelect
+                      className="themed-select-compact adjustment-mode-select"
+                      ariaLabel={`Baseline mode for ${adjustment.name}`}
                       value={adjustment.mode}
                       disabled={catalogAnalysisBusy}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setRankAdjustmentMode(
                           adjustment.externalKey,
-                          event.target.value as RecommendationPassAdjustmentMode,
+                          value as RecommendationPassAdjustmentMode,
                         )
                       }
-                    >
-                      <option value="assume-iconic-1">Assume {RECOMMENDATION_SIMULATED_RARITY}</option>
-                      <option value="exclude">Exclude from ranking</option>
-                    </select>
+                      options={[
+                        {
+                          value: 'assume-iconic-1',
+                          label: `Assume ${RECOMMENDATION_SIMULATED_RARITY}`,
+                        },
+                        { value: 'exclude', label: 'Exclude from ranking' },
+                      ]}
+                    />
                     <button
                       className="button danger compact"
                       type="button"
@@ -3837,27 +3823,21 @@ export default function PotentialPage() {
         </CollapsiblePanel>
 
         <div className="sort-controls rank-catalog-controls">
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={rankSport}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = event.target.value
-                setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                if (next !== ALL_SPORTS_RANK) {
-                  setExcludedRankSports([])
-                }
-              }}
-            >
-              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="Sport"
+            value={rankSport}
+            disabled={catalogAnalysisBusy}
+            onChange={(next) => {
+              setRankSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+              if (next !== ALL_SPORTS_RANK) {
+                setExcludedRankSports([])
+              }
+            }}
+            options={[
+              { value: ALL_SPORTS_RANK, label: 'All sports (slow)' },
+              ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+            ]}
+          />
           {rankAllSports ? (
             <div className="field inline-field season-multi-select-field">
               <SeasonMultiSelect
@@ -3899,7 +3879,7 @@ export default function PotentialPage() {
               )}
             </div>
           ) : null}
-          <label className="field inline-field">
+          <label className="field rank-bundle-size-field">
             <span>Bundle size</span>
             <input
               type="number"
@@ -3951,43 +3931,35 @@ export default function PotentialPage() {
           defaultOpen={false}
         >
           <div className="sort-controls">
-            <label className="field inline-field">
-              <span>Sport</span>
-              <select
-                value={excludeFormSport}
-                disabled={catalogAnalysisBusy}
-                onChange={(event) => setExcludeFormSport(event.target.value as Sport)}
-              >
-                {SPORTS.map((sport) => (
-                  <option key={sport} value={sport}>
-                    {sport}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field inline-field">
-              <span>Season</span>
-              {excludeFormSeasonOptions.length > 0 ? (
-                <select
-                  value={excludeFormSeasonLabel}
-                  disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
-                  onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
-                >
-                  {excludeFormSeasonOptions.map((option) => (
-                    <option key={option.seasonLabel} value={option.seasonLabel}>
-                      {option.seasonLabel}
-                    </option>
-                  ))}
-                </select>
-              ) : (
+            <ThemedSelect
+              label="Sport"
+              value={excludeFormSport}
+              disabled={catalogAnalysisBusy}
+              onChange={(value) => setExcludeFormSport(value as Sport)}
+              options={SPORTS.map((sport) => ({ value: sport, label: sport }))}
+            />
+            {excludeFormSeasonOptions.length > 0 ? (
+              <ThemedSelect
+                label="Season"
+                value={excludeFormSeasonLabel}
+                disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
+                onChange={(value) => setExcludeFormSeasonLabel(value)}
+                options={excludeFormSeasonOptions.map((option) => ({
+                  value: option.seasonLabel,
+                  label: option.seasonLabel,
+                }))}
+              />
+            ) : (
+              <label className="field inline-field">
+                <span>Season</span>
                 <input
                   value={excludeFormSeasonLabel}
                   disabled={catalogAnalysisBusy || excludeFormSeasonsLoading}
                   placeholder="e.g. 2022-23"
                   onChange={(event) => setExcludeFormSeasonLabel(event.target.value)}
                 />
-              )}
-            </label>
+              </label>
+            )}
             <button
               className="button"
               type="button"
@@ -4809,41 +4781,31 @@ export default function PotentialPage() {
         </p>
 
         <div className="sort-controls">
-          <label className="field inline-field">
-            <span>Month</span>
-            <select
-              value={monthBoostMonthIdx}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => setMonthBoostMonthIdx(Number(event.target.value))}
-            >
-              {CALENDAR_MONTH_NAMES.map((month, index) => (
-                <option key={month} value={index}>
-                  {month}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={monthBoostSport}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = event.target.value
-                setMonthBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                if (next !== ALL_SPORTS_RANK) {
-                  setMonthBoostExcludedSports([])
-                }
-              }}
-            >
-              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="Month"
+            value={String(monthBoostMonthIdx)}
+            disabled={catalogAnalysisBusy}
+            onChange={(next) => setMonthBoostMonthIdx(Number(next))}
+            options={CALENDAR_MONTH_NAMES.map((month, index) => ({
+              value: String(index),
+              label: month,
+            }))}
+          />
+          <ThemedSelect
+            label="Sport"
+            value={monthBoostSport}
+            disabled={catalogAnalysisBusy}
+            onChange={(next) => {
+              setMonthBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+              if (next !== ALL_SPORTS_RANK) {
+                setMonthBoostExcludedSports([])
+              }
+            }}
+            options={[
+              { value: ALL_SPORTS_RANK, label: 'All sports (slow)' },
+              ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+            ]}
+          />
           {monthBoostAllSports ? (
             <div className="field inline-field season-multi-select-field">
               <SeasonMultiSelect
@@ -5105,27 +5067,21 @@ export default function PotentialPage() {
               ) : null}
             </div>
           </div>
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={dayBoostSport}
-              disabled={catalogAnalysisBusy}
-              onChange={(event) => {
-                const next = event.target.value
-                setDayBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
-                if (next !== ALL_SPORTS_RANK) {
-                  setDayBoostExcludedSports([])
-                }
-              }}
-            >
-              <option value={ALL_SPORTS_RANK}>All sports (slow)</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="Sport"
+            value={dayBoostSport}
+            disabled={catalogAnalysisBusy}
+            onChange={(next) => {
+              setDayBoostSport(next === ALL_SPORTS_RANK ? ALL_SPORTS_RANK : (next as Sport))
+              if (next !== ALL_SPORTS_RANK) {
+                setDayBoostExcludedSports([])
+              }
+            }}
+            options={[
+              { value: ALL_SPORTS_RANK, label: 'All sports (slow)' },
+              ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+            ]}
+          />
           {dayBoostAllSports ? (
             <div className="field inline-field season-multi-select-field">
               <SeasonMultiSelect

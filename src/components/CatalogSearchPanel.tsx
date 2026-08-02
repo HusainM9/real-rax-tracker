@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PassIdentity } from './PassIdentity'
+import { ThemedSelect } from './ThemedSelect'
 import { formatClaimDay, formatRax } from '../lib/format'
 import {
   enrichCatalogProfilesWithAvatars,
@@ -182,20 +183,14 @@ export function CatalogSearchPanel({
         <p className="import-hint">Search → rarity → add. Earnings import when available.</p>
       ) : null}
       {collectionAddEnabled && collectionAdd ? (
-        <label className="field entry-default-rarity-field">
-          <span>Default rarity for new passes</span>
-          <select
-            value={collectionAdd.defaultRarity}
-            disabled={disabled}
-            onChange={(event) => collectionAdd.onDefaultRarityChange(event.target.value)}
-          >
-            {collectionAdd.rarityOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ThemedSelect
+          className="entry-default-rarity-field"
+          label="Default rarity for new passes"
+          value={collectionAdd.defaultRarity}
+          disabled={disabled}
+          onChange={(value) => collectionAdd.onDefaultRarityChange(value)}
+          options={collectionAdd.rarityOptions.map((option) => ({ value: option, label: option }))}
+        />
       ) : null}
       <label className="field">
         <span>Search by name, sport, or season</span>
@@ -244,23 +239,19 @@ export function CatalogSearchPanel({
                     )}
                   />
                   <span className="button-row compact-actions catalog-add-result-actions">
-                    <label className="field inline-field catalog-add-rarity-field">
-                      <span className="sr-only">Rarity for {profile.name}</span>
-                      <select
-                        value={rowRarity}
-                        disabled={disabled || loadingKey === profile.externalKey}
-                        aria-label={`Rarity for ${profile.name}`}
-                        onChange={(event) =>
-                          collectionAdd.onRarityForResultChange(profile.externalKey, event.target.value)
-                        }
-                      >
-                        {collectionAdd.rarityOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <ThemedSelect
+                      className="themed-select-compact catalog-add-rarity-field"
+                      ariaLabel={`Rarity for ${profile.name}`}
+                      value={rowRarity}
+                      disabled={disabled || loadingKey === profile.externalKey}
+                      onChange={(value) =>
+                        collectionAdd.onRarityForResultChange(profile.externalKey, value)
+                      }
+                      options={collectionAdd.rarityOptions.map((option) => ({
+                        value: option,
+                        label: option,
+                      }))}
+                    />
                     <button
                       className="button primary compact"
                       type="button"

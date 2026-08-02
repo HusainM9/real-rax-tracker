@@ -88,8 +88,6 @@ export function ChecklistMultiSelect({
 
   const toggleValue = (value: string) => {
     if (selectedValues.length === 0) {
-      // Was “all” — narrow to everything except this value toggled off… better: select only this.
-      // From all → clicking one option selects only that option.
       onSelectedValuesChange([value])
       return
     }
@@ -108,33 +106,33 @@ export function ChecklistMultiSelect({
     selectedValues.length === 0 || selectedValues.includes(value)
 
   return (
-    <div className={`season-multi-select${open ? ' is-open' : ''}`} ref={rootRef}>
-      <span className="field-label">{label}</span>
+    <div className={`themed-select${open ? ' is-open' : ''}`} ref={rootRef}>
+      <span className="themed-select-label">{label}</span>
       <button
         type="button"
-        className="season-multi-select-trigger"
+        className="themed-select-trigger"
         disabled={disabled || options.length === 0}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((current) => !current)}
       >
-        <span>{triggerLabel}</span>
-        <span className="season-multi-select-chevron" aria-hidden="true">
+        <span className="themed-select-value">{triggerLabel}</span>
+        <span className="themed-select-chevron" aria-hidden="true">
           ▾
         </span>
       </button>
       {open ? (
-        <div className="season-multi-select-menu" id={listboxId} role="listbox" aria-label={label}>
-          <div className="season-multi-select-menu-title">{menuTitle}</div>
+        <div className="themed-select-menu" id={listboxId} role="listbox" aria-label={label}>
+          <div className="themed-select-menu-title">{menuTitle}</div>
           <button
             type="button"
-            className={`season-multi-select-option${allSelected ? ' is-selected' : ''}`}
+            className={`themed-select-option${allSelected ? ' is-selected' : ''}`}
             role="option"
             aria-selected={allSelected}
             onClick={selectAll}
           >
-            <span className="season-multi-select-check" aria-hidden="true">
+            <span className="themed-select-check" aria-hidden="true">
               {allSelected ? '✓' : ''}
             </span>
             <span>{allOptionLabel}</span>
@@ -145,12 +143,12 @@ export function ChecklistMultiSelect({
               <button
                 type="button"
                 key={option.value}
-                className={`season-multi-select-option${selected ? ' is-selected' : ''}`}
+                className={`themed-select-option${selected ? ' is-selected' : ''}`}
                 role="option"
                 aria-selected={selected}
                 onClick={() => toggleValue(option.value)}
               >
-                <span className="season-multi-select-check" aria-hidden="true">
+                <span className="themed-select-check" aria-hidden="true">
                   {selected ? '✓' : ''}
                 </span>
                 <span>{option.label}</span>

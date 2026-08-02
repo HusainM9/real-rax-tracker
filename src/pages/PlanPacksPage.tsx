@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import { createId } from '../lib/id'
@@ -368,21 +369,19 @@ function PackPassRow({
                         aria-label={`Weekly pack open date for ${pass.name}`}
                       />
                     </label>
-                    <label className="pack-account-field">
-                      <span>Account</span>
-                      <select
-                        value={weeklyOpenAccountId}
-                        onChange={(event) => setWeeklyOpenAccountId(event.target.value)}
-                        aria-label={`Account that opened weekly pack for ${pass.name}`}
-                      >
-                        <option value="">Any / unspecified</option>
-                        {tracker.accounts.map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.name.trim() || accountUsername(account) || 'Account'}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <ThemedSelect
+                      label="Account"
+                      value={weeklyOpenAccountId}
+                      onChange={(value) => setWeeklyOpenAccountId(value)}
+                      ariaLabel={`Account that opened weekly pack for ${pass.name}`}
+                      options={[
+                        { value: '', label: 'Any / unspecified' },
+                        ...tracker.accounts.map((account) => ({
+                          value: account.id,
+                          label: account.name.trim() || accountUsername(account) || 'Account',
+                        })),
+                      ]}
+                    />
                     <button
                       className="button compact"
                       type="button"
@@ -1542,19 +1541,18 @@ export default function PlanPacksPage() {
               </p>
             </div>
             <div className="pack-tracker-list-actions">
-              <label className="field inline-field">
-                <span>Sort</span>
-                <select
-                  value={passSortMode}
-                  onChange={(event) => setPassSortMode(event.target.value as PackPassSortMode)}
-                >
-                  <option value="soonest">Soonest finish</option>
-                  <option value="most-upgraded">Most upgraded</option>
-                  <option value="least-upgraded">Least upgraded</option>
-                  <option value="name">Name A–Z</option>
-                  <option value="plan">Plan order</option>
-                </select>
-              </label>
+              <ThemedSelect
+                label="Sort"
+                value={passSortMode}
+                onChange={(value) => setPassSortMode(value as PackPassSortMode)}
+                options={[
+                  { value: 'soonest', label: 'Soonest finish' },
+                  { value: 'most-upgraded', label: 'Most upgraded' },
+                  { value: 'least-upgraded', label: 'Least upgraded' },
+                  { value: 'name', label: 'Name A–Z' },
+                  { value: 'plan', label: 'Plan order' },
+                ]}
+              />
               <button
                 className="button compact"
                 type="button"

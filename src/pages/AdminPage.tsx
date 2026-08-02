@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import AdminAccountTrackers from '../components/AdminAccountTrackers'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { ADMIN_EVENT_TYPES, type AdminEvent, type AdminUserSummary } from '../../lib/adminEventTypes'
 import {
@@ -1572,22 +1573,21 @@ export default function AdminPage() {
                 }
               />
             </label>
-            <label className="field">
-              <span>Pass type</span>
-              <select
-                value={manualUpsert.passKind}
-                disabled={manualUpsertBusy}
-                onChange={(event) =>
-                  setManualUpsert((current) => ({
-                    ...current,
-                    passKind: event.target.value as 'player' | 'team',
-                  }))
-                }
-              >
-                <option value="player">Player</option>
-                <option value="team">Team</option>
-              </select>
-            </label>
+            <ThemedSelect
+              label="Pass type"
+              value={manualUpsert.passKind}
+              disabled={manualUpsertBusy}
+              onChange={(value) =>
+                setManualUpsert((current) => ({
+                  ...current,
+                  passKind: value as 'player' | 'team',
+                }))
+              }
+              options={[
+                { value: 'player', label: 'Player' },
+                { value: 'team', label: 'Team' },
+              ]}
+            />
           </div>
           <div className="form-grid">
             <label className="field">
@@ -1864,22 +1864,18 @@ export default function AdminPage() {
               onChange={(event) => setUsernameFilter(event.target.value)}
             />
           </label>
-          <label className="field inline-field">
-            <span>Type</span>
-            <select
-              value={typeFilter}
-              onChange={(event) =>
-                setTypeFilter(event.target.value as 'all' | AdminEvent['type'])
-              }
-            >
-              <option value="all">All types</option>
-              {ADMIN_EVENT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {EVENT_TYPE_LABELS[type]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="Type"
+            value={typeFilter}
+            onChange={(value) => setTypeFilter(value as 'all' | AdminEvent['type'])}
+            options={[
+              { value: 'all', label: 'All types' },
+              ...ADMIN_EVENT_TYPES.map((type) => ({
+                value: type,
+                label: EVENT_TYPE_LABELS[type],
+              })),
+            ]}
+          />
         </div>
 
         {events.length === 0 ? (

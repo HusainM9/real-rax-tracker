@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import {
@@ -159,70 +160,56 @@ export default function CardsPage() {
             />
             Team passes
           </label>
-          <label className="field inline-field">
-            <span>Sport</span>
-            <select
-              value={sportFilter}
-              onChange={(event) => setSportFilter(event.target.value as Sport | 'All')}
-            >
-              <option value="All">All sports</option>
-              {SPORTS.map((sport) => (
-                <option key={sport} value={sport}>
-                  {sport}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field inline-field">
-            <span>Rarity</span>
-            <select
-              value={rarityFilter}
-              onChange={(event) => setRarityFilter(event.target.value as RarityFilterValue)}
-            >
-              <option value="All">All rarities</option>
-              <option value="Legendary+">Legendary+</option>
-              {RARITY_TIERS.map((tier) => (
-                <option key={tier} value={tier}>
-                  {tier}
-                </option>
-              ))}
-              <option value="Unknown">Unknown</option>
-            </select>
-          </label>
-          <label className="field inline-field">
-            <span>Sort by</span>
-            <select value={sortKey} onChange={(event) => setSortKey(event.target.value as CardSortKey)}>
-              {CARD_SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field inline-field">
-            <span>Then by</span>
-            <select
-              value={secondarySortKey}
-              onChange={(event) => setSecondarySortKey(event.target.value as CardSortKey | 'none')}
-            >
-              <option value="none">None</option>
-              {CARD_SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field inline-field">
-            <span>Direction</span>
-            <select
-              value={sortDirection}
-              onChange={(event) => setSortDirection(event.target.value as SortDirection)}
-            >
-              <option value="desc">High to low / Z-A</option>
-              <option value="asc">Low to high / A-Z</option>
-            </select>
-          </label>
+          <ThemedSelect
+            label="Sport"
+            value={sportFilter}
+            onChange={(value) => setSportFilter(value as Sport | 'All')}
+            options={[
+              { value: 'All', label: 'All sports' },
+              ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+            ]}
+          />
+          <ThemedSelect
+            label="Rarity"
+            value={rarityFilter}
+            onChange={(value) => setRarityFilter(value as RarityFilterValue)}
+            options={[
+              { value: 'All', label: 'All rarities' },
+              { value: 'Legendary+', label: 'Legendary+' },
+              ...RARITY_TIERS.map((tier) => ({ value: tier, label: tier })),
+              { value: 'Unknown', label: 'Unknown' },
+            ]}
+          />
+          <ThemedSelect
+            label="Sort by"
+            value={sortKey}
+            onChange={(value) => setSortKey(value as CardSortKey)}
+            options={CARD_SORT_OPTIONS.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+          />
+          <ThemedSelect
+            label="Then by"
+            value={secondarySortKey}
+            onChange={(value) => setSecondarySortKey(value as CardSortKey | 'none')}
+            options={[
+              { value: 'none', label: 'None' },
+              ...CARD_SORT_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+              })),
+            ]}
+          />
+          <ThemedSelect
+            label="Direction"
+            value={sortDirection}
+            onChange={(value) => setSortDirection(value as SortDirection)}
+            options={[
+              { value: 'desc', label: 'High to low / Z-A' },
+              { value: 'asc', label: 'Low to high / A-Z' },
+            ]}
+          />
         </div>
 
         {sortedCards.length > CARDS_PAGE_SIZE ? (

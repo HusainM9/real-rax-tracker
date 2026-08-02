@@ -16,6 +16,7 @@ import { currentYear, formatClaimDay, formatRax, todayIsoLocal } from '../lib/fo
 import { normalizeBestDayParam } from '../lib/passRecommendation'
 import { useRaxData } from '../context/RaxDataContext'
 import { PassIdentity } from '../components/PassIdentity'
+import { ThemedSelect } from '../components/ThemedSelect'
 import type { ClaimCandidate, ClaimDayResult } from '../types/rax'
 
 function CandidateRow({ candidate }: { candidate: ClaimCandidate }) {
@@ -255,47 +256,64 @@ export default function CalendarPage() {
           </div>
           <Link to="/entry">Add entries</Link>
         </div>
-        <div className="calendar-legend" aria-label="Claim status legend">
-          <span className="legend-item">
-            <span className="legend-swatch guaranteed" /> Guaranteed (top 2/sport)
-          </span>
-          {proBonusEnabled ? (
+        <div className="calendar-toolbar">
+          <div className="calendar-pro-mode" role="group" aria-label="Pro claim mode">
+            <span className="calendar-pro-mode-label">Pro claim</span>
+            <div className="calendar-pro-mode-options">
+              <button
+                type="button"
+                className={`calendar-pro-mode-option${proBonusEnabled ? ' is-active' : ''}`}
+                aria-pressed={proBonusEnabled}
+                onClick={() => {
+                  if (!proBonusEnabled) setSettings({ proBonusEnabled: true })
+                }}
+              >
+                <span className="legend-swatch pro-bonus" aria-hidden="true" />
+                With Pro
+              </button>
+              <button
+                type="button"
+                className={`calendar-pro-mode-option${!proBonusEnabled ? ' is-active' : ''}`}
+                aria-pressed={!proBonusEnabled}
+                onClick={() => {
+                  if (proBonusEnabled) setSettings({ proBonusEnabled: false })
+                }}
+              >
+                No Pro
+              </button>
+            </div>
+          </div>
+          <div className="calendar-legend" aria-label="Claim status legend">
             <span className="legend-item">
-              <span className="legend-swatch pro-bonus" /> Pro bonus
+              <span className="legend-swatch guaranteed" /> Guaranteed (top 2/sport)
             </span>
-          ) : null}
-          <span className="legend-item">
-            <span className="legend-swatch overlap" /> Overlap
-          </span>
+            {proBonusEnabled ? (
+              <span className="legend-item">
+                <span className="legend-swatch pro-bonus" /> Pro bonus
+              </span>
+            ) : null}
+            <span className="legend-item">
+              <span className="legend-swatch overlap" /> Overlap
+            </span>
+          </div>
         </div>
         <div className="calendar-tools">
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={proBonusEnabled}
-              onChange={(event) => setSettings({ proBonusEnabled: event.target.checked })}
-            />
-            {proBonusEnabled ? 'Pro claim on' : 'No Pro claim'}
-          </label>
-          <label className="field inline-field">
-            <span>Jump to day</span>
-            <select
-              value={selectedMonthDay ?? ''}
-              onChange={(event) =>
-                event.target.value
-                  ? setSearchParams({ monthDay: event.target.value })
-                  : setSearchParams({})
-              }
-            >
-              <option value="">All claim days</option>
-              {allResults.map((result) => (
-                <option key={result.claimDay} value={result.claimDay}>
-                  {formatClaimDay(result.claimDay)} ·{' '}
-                  {formatRax(displayRaxValue(result.totalClaimableRax))} RAX
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            className="calendar-select-field"
+            label="Jump to day"
+            value={selectedMonthDay ?? ''}
+            disabled={allResults.length === 0}
+            onChange={(next) =>
+              next ? setSearchParams({ monthDay: next }) : setSearchParams({})
+            }
+            options={[
+              { value: '', label: 'All claim days' },
+              ...allResults.map((result) => ({
+                value: result.claimDay,
+                label: `${formatClaimDay(result.claimDay)} · ${formatRax(displayRaxValue(result.totalClaimableRax))} RAX`,
+              })),
+            ]}
+          />
           {selectedMonthDay ? (
             <button className="button" type="button" onClick={closeDayPanel}>
               Show all

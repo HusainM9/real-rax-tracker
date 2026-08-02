@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
+import { ThemedSelect } from '../components/ThemedSelect'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
@@ -1093,85 +1094,59 @@ export default function PlanPage() {
                     onChange={(event) => setPlanSellRankQuery(event.target.value)}
                   />
                 </label>
-                <label className="field inline-field">
-                  <span>Source</span>
-                  <select
-                    value={planSellSourceFilter}
-                    disabled={planSellRankBusy}
-                    onChange={(event) =>
-                      setPlanSellSourceFilter(event.target.value as PlanSellSourceFilter)
-                    }
-                  >
-                    <option value="all">All passes</option>
-                    <option value="owned">Owned only</option>
-                    <option value="planned">Plan / upgrades</option>
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Sport</span>
-                  <select
-                    value={planSellRankSport}
-                    disabled={planSellRankBusy}
-                    onChange={(event) =>
-                      setPlanSellRankSport(event.target.value as Sport | 'All')
-                    }
-                  >
-                    <option value="All">All sports</option>
-                    {SPORTS.map((sport) => (
-                      <option key={sport} value={sport}>
-                        {sport}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Rarity</span>
-                  <select
-                    value={planSellRankRarity}
-                    disabled={planSellRankBusy}
-                    onChange={(event) =>
-                      setPlanSellRankRarity(event.target.value as RarityFilterValue)
-                    }
-                  >
-                    <option value="All">All rarities</option>
-                    <option value="Legendary+">Legendary+</option>
-                    {RARITY_TIERS.map((tier) => (
-                      <option key={tier} value={tier}>
-                        {tier}
-                      </option>
-                    ))}
-                    <option value="Unknown">Unknown</option>
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Sort by</span>
-                  <select
-                    value={planSellRankSortKey}
-                    disabled={planSellRankBusy}
-                    onChange={(event) =>
-                      setPlanSellRankSortKey(event.target.value as SellRankSortKey)
-                    }
-                  >
-                    {SELL_RANK_SORT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Direction</span>
-                  <select
-                    value={planSellRankSortDirection}
-                    disabled={planSellRankBusy}
-                    onChange={(event) =>
-                      setPlanSellRankSortDirection(event.target.value as SortDirection)
-                    }
-                  >
-                    <option value="desc">High to low</option>
-                    <option value="asc">Low to high</option>
-                  </select>
-                </label>
+                <ThemedSelect
+                  label="Source"
+                  value={planSellSourceFilter}
+                  disabled={planSellRankBusy}
+                  onChange={(value) => setPlanSellSourceFilter(value as PlanSellSourceFilter)}
+                  options={[
+                    { value: 'all', label: 'All passes' },
+                    { value: 'owned', label: 'Owned only' },
+                    { value: 'planned', label: 'Plan / upgrades' },
+                  ]}
+                />
+                <ThemedSelect
+                  label="Sport"
+                  value={planSellRankSport}
+                  disabled={planSellRankBusy}
+                  onChange={(value) => setPlanSellRankSport(value as Sport | 'All')}
+                  options={[
+                    { value: 'All', label: 'All sports' },
+                    ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+                  ]}
+                />
+                <ThemedSelect
+                  label="Rarity"
+                  value={planSellRankRarity}
+                  disabled={planSellRankBusy}
+                  onChange={(value) => setPlanSellRankRarity(value as RarityFilterValue)}
+                  options={[
+                    { value: 'All', label: 'All rarities' },
+                    { value: 'Legendary+', label: 'Legendary+' },
+                    ...RARITY_TIERS.map((tier) => ({ value: tier, label: tier })),
+                    { value: 'Unknown', label: 'Unknown' },
+                  ]}
+                />
+                <ThemedSelect
+                  label="Sort by"
+                  value={planSellRankSortKey}
+                  disabled={planSellRankBusy}
+                  onChange={(value) => setPlanSellRankSortKey(value as SellRankSortKey)}
+                  options={SELL_RANK_SORT_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                />
+                <ThemedSelect
+                  label="Direction"
+                  value={planSellRankSortDirection}
+                  disabled={planSellRankBusy}
+                  onChange={(value) => setPlanSellRankSortDirection(value as SortDirection)}
+                  options={[
+                    { value: 'desc', label: 'High to low' },
+                    { value: 'asc', label: 'Low to high' },
+                  ]}
+                />
               </div>
               {displayedPlanSellRankings.length === 0 ? (
                 <p className="empty">No ranked passes match the current filters.</p>
@@ -1278,19 +1253,12 @@ export default function PlanPage() {
           defaultOpen={false}
         >
           <div className="sort-controls">
-            <label className="field inline-field">
-              <span>Assume rarity</span>
-              <select
-                value={ownedAddRarity}
-                onChange={(event) => setOwnedAddRarity(event.target.value)}
-              >
-                {PLAN_RARITY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ThemedSelect
+              label="Assume rarity"
+              value={ownedAddRarity}
+              onChange={(value) => setOwnedAddRarity(value)}
+              options={PLAN_RARITY_OPTIONS.map((option) => ({ value: option, label: option }))}
+            />
             <label className="field inline-field recommendation-adjustment-owned-search">
               <span>Filter your collection</span>
               <input
@@ -1410,16 +1378,15 @@ export default function PlanPage() {
           ) : null}
 
           <div className="sort-controls plan-pass-sort-controls">
-            <label className="field inline-field">
-              <span>Sort passes</span>
-              <select
-                value={passSortMode}
-                onChange={(event) => setPassSortMode(event.target.value as PlanPassSortMode)}
-              >
-                <option value="progress">By section tags</option>
-                <option value="recent">Recently added</option>
-              </select>
-            </label>
+            <ThemedSelect
+              label="Sort passes"
+              value={passSortMode}
+              onChange={(value) => setPassSortMode(value as PlanPassSortMode)}
+              options={[
+                { value: 'progress', label: 'By section tags' },
+                { value: 'recent', label: 'Recently added' },
+              ]}
+            />
           </div>
 
           {passSortMode === 'progress' && planPassSections ? (

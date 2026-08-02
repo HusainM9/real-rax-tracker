@@ -11,6 +11,7 @@ import { reportImportAdminEvents } from '../lib/adminEvents'
 import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import {
   enrichCatalogProfilesWithAvatars,
@@ -973,24 +974,17 @@ export default function EntryPage() {
               />
             </label>
             <div className="form-grid">
-              <label className="field">
-                <span>Sport</span>
-                <select
-                  value={cardEntry.sport}
-                  onChange={(event) =>
-                    setCardEntry((current) => ({
-                      ...current,
-                      sport: event.target.value as Sport,
-                    }))
-                  }
-                >
-                  {SPORTS.map((sport) => (
-                    <option key={sport} value={sport}>
-                      {sport}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ThemedSelect
+                label="Sport"
+                value={cardEntry.sport}
+                onChange={(value) =>
+                  setCardEntry((current) => ({
+                    ...current,
+                    sport: value as Sport,
+                  }))
+                }
+                options={SPORTS.map((sport) => ({ value: sport, label: sport }))}
+              />
               <label className="field">
                 <span>Season / card label</span>
                 <input
@@ -1003,37 +997,31 @@ export default function EntryPage() {
               </label>
             </div>
             <div className="form-grid">
-              <label className="field">
-                <span>Rarity</span>
-                <select
-                  value={cardEntry.rarityLabel}
-                  onChange={(event) =>
-                    setCardEntry((current) => ({ ...current, rarityLabel: event.target.value }))
-                  }
-                >
-                  <option value="">Unknown (no OTD multiplier)</option>
-                  {CARD_RARITY_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Pass type</span>
-                <select
-                  value={cardEntry.passKind}
-                  onChange={(event) =>
-                    setCardEntry((current) => ({
-                      ...current,
-                      passKind: event.target.value as 'player' | 'team',
-                    }))
-                  }
-                >
-                  <option value="player">Player</option>
-                  <option value="team">Team</option>
-                </select>
-              </label>
+              <ThemedSelect
+                label="Rarity"
+                value={cardEntry.rarityLabel}
+                onChange={(value) =>
+                  setCardEntry((current) => ({ ...current, rarityLabel: value }))
+                }
+                options={[
+                  { value: '', label: 'Unknown (no OTD multiplier)' },
+                  ...CARD_RARITY_OPTIONS.map((option) => ({ value: option, label: option })),
+                ]}
+              />
+              <ThemedSelect
+                label="Pass type"
+                value={cardEntry.passKind}
+                onChange={(value) =>
+                  setCardEntry((current) => ({
+                    ...current,
+                    passKind: value as 'player' | 'team',
+                  }))
+                }
+                options={[
+                  { value: 'player', label: 'Player' },
+                  { value: 'team', label: 'Team' },
+                ]}
+              />
             </div>
             <label className="field">
               <span>Notes</span>
@@ -1341,16 +1329,13 @@ export default function EntryPage() {
                       <input value={card.name} onChange={(event) => updateCard(card.id, { name: event.target.value })} />
                     </td>
                     <td>
-                      <select
+                      <ThemedSelect
+                        className="themed-select-compact"
+                        ariaLabel={`Sport for ${card.name || 'card'}`}
                         value={card.sport}
-                        onChange={(event) => updateCard(card.id, { sport: event.target.value as Sport })}
-                      >
-                        {SPORTS.map((sport) => (
-                          <option key={sport} value={sport}>
-                            {sport}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => updateCard(card.id, { sport: value as Sport })}
+                        options={SPORTS.map((sport) => ({ value: sport, label: sport }))}
+                      />
                     </td>
                     <td>
                       <input
@@ -1483,18 +1468,18 @@ export default function EntryPage() {
                       </td>
                       <td>
                         {data.cards.length <= 100 ? (
-                          <select
+                          <ThemedSelect
+                            className="themed-select-compact"
+                            ariaLabel={`Player card for ${formatClaimDay(performance.claimDay)}`}
                             value={performance.cardId}
-                            onChange={(event) =>
-                              updatePerformance(performance.id, { cardId: event.target.value })
+                            onChange={(value) =>
+                              updatePerformance(performance.id, { cardId: value })
                             }
-                          >
-                            {data.cards.map((cardOption) => (
-                              <option key={cardOption.id} value={cardOption.id}>
-                                {cardOption.name} · {cardOption.sport}
-                              </option>
-                            ))}
-                          </select>
+                            options={data.cards.map((cardOption) => ({
+                              value: cardOption.id,
+                              label: `${cardOption.name} · ${cardOption.sport}`,
+                            }))}
+                          />
                         ) : (
                           <span>
                             {card ? `${card.name} · ${card.sport}` : 'Unknown card'}

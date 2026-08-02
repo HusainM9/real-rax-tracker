@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChecklistMultiSelect } from '../components/ChecklistMultiSelect'
+import { ThemedSelect } from '../components/ThemedSelect'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { PassIdentity } from '../components/PassIdentity'
 import {
@@ -329,33 +330,27 @@ export default function OtdPage() {
             disabled={seasonOptions.length === 0}
           />
 
-          <label className="field inline-field">
-            <span>Pass kind</span>
-            <select
-              value={passKind}
-              onChange={(event) => setPassKind(event.target.value as CatalogPassKind | 'all')}
-            >
-              <option value="all">All</option>
-              <option value="player">Player</option>
-              <option value="team">Team</option>
-            </select>
-          </label>
+          <ThemedSelect
+            label="Pass kind"
+            value={passKind}
+            onChange={(value) => setPassKind(value as CatalogPassKind | 'all')}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'player', label: 'Player' },
+              { value: 'team', label: 'Team' },
+            ]}
+          />
 
-          <label className="field inline-field">
-            <span>OTD month</span>
-            <select
-              value={filterMonth}
-              disabled={rankingByRange}
-              onChange={(event) => setFilterMonth(event.target.value)}
-            >
-              <option value="">Any month</option>
-              {MONTH_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ThemedSelect
+            label="OTD month"
+            value={filterMonth}
+            disabled={rankingByRange}
+            onChange={(value) => setFilterMonth(value)}
+            options={[
+              { value: '', label: 'Any month' },
+              ...MONTH_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+            ]}
+          />
 
           <button
             type="button"

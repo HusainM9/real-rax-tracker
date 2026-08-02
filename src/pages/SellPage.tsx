@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
+import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import { sortCards, type RarityFilterValue, type SortDirection } from '../lib/cardSort'
@@ -441,61 +442,44 @@ export default function SellPage() {
                     onChange={(event) => setRankQuery(event.target.value)}
                   />
                 </label>
-                <label className="field inline-field">
-                  <span>Sport</span>
-                  <select
-                    value={rankSportFilter}
-                    onChange={(event) => setRankSportFilter(event.target.value as Sport | 'All')}
-                  >
-                    <option value="All">All sports</option>
-                    {SPORTS.map((sport) => (
-                      <option key={sport} value={sport}>
-                        {sport}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Rarity</span>
-                  <select
-                    value={rankRarityFilter}
-                    onChange={(event) =>
-                      setRankRarityFilter(event.target.value as RarityFilterValue)
-                    }
-                  >
-                    <option value="All">All rarities</option>
-                    <option value="Legendary+">Legendary+</option>
-                    {RARITY_TIERS.map((tier) => (
-                      <option key={tier} value={tier}>
-                        {tier}
-                      </option>
-                    ))}
-                    <option value="Unknown">Unknown</option>
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Sort by</span>
-                  <select
-                    value={rankSortKey}
-                    onChange={(event) => setRankSortKey(event.target.value as SellRankSortKey)}
-                  >
-                    {SELL_RANK_SORT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field inline-field">
-                  <span>Direction</span>
-                  <select
-                    value={rankSortDirection}
-                    onChange={(event) => setRankSortDirection(event.target.value as SortDirection)}
-                  >
-                    <option value="desc">High to low</option>
-                    <option value="asc">Low to high</option>
-                  </select>
-                </label>
+                <ThemedSelect
+                  label="Sport"
+                  value={rankSportFilter}
+                  onChange={(value) => setRankSportFilter(value as Sport | 'All')}
+                  options={[
+                    { value: 'All', label: 'All sports' },
+                    ...SPORTS.map((sport) => ({ value: sport, label: sport })),
+                  ]}
+                />
+                <ThemedSelect
+                  label="Rarity"
+                  value={rankRarityFilter}
+                  onChange={(value) => setRankRarityFilter(value as RarityFilterValue)}
+                  options={[
+                    { value: 'All', label: 'All rarities' },
+                    { value: 'Legendary+', label: 'Legendary+' },
+                    ...RARITY_TIERS.map((tier) => ({ value: tier, label: tier })),
+                    { value: 'Unknown', label: 'Unknown' },
+                  ]}
+                />
+                <ThemedSelect
+                  label="Sort by"
+                  value={rankSortKey}
+                  onChange={(value) => setRankSortKey(value as SellRankSortKey)}
+                  options={SELL_RANK_SORT_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                />
+                <ThemedSelect
+                  label="Direction"
+                  value={rankSortDirection}
+                  onChange={(value) => setRankSortDirection(value as SortDirection)}
+                  options={[
+                    { value: 'desc', label: 'High to low' },
+                    { value: 'asc', label: 'Low to high' },
+                  ]}
+                />
               </div>
               {displayedRankings.length === 0 ? (
                 <p className="empty">No ranked passes match the current filters.</p>

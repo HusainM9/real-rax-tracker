@@ -93,33 +93,33 @@ export function SeasonMultiSelect({
   }
 
   return (
-    <div className={`season-multi-select${open ? ' is-open' : ''}`} ref={rootRef}>
-      <span className="field-label">{label}</span>
+    <div className={`themed-select${open ? ' is-open' : ''}`} ref={rootRef}>
+      <span className="themed-select-label">{label}</span>
       <button
         type="button"
-        className="season-multi-select-trigger"
+        className="themed-select-trigger"
         disabled={disabled || options.length === 0}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((current) => !current)}
       >
-        <span>{triggerLabel}</span>
-        <span className="season-multi-select-chevron" aria-hidden="true">
+        <span className="themed-select-value">{triggerLabel}</span>
+        <span className="themed-select-chevron" aria-hidden="true">
           ▾
         </span>
       </button>
       {open ? (
-        <div className="season-multi-select-menu" id={listboxId} role="listbox" aria-label={label}>
-          <div className="season-multi-select-menu-title">{menuTitle}</div>
+        <div className="themed-select-menu" id={listboxId} role="listbox" aria-label={label}>
+          <div className="themed-select-menu-title">{menuTitle}</div>
           <button
             type="button"
-            className={`season-multi-select-option${allIncluded ? ' is-selected' : ''}`}
+            className={`themed-select-option${allIncluded ? ' is-selected' : ''}`}
             role="option"
             aria-selected={allIncluded}
             onClick={toggleAllSeasons}
           >
-            <span className="season-multi-select-check" aria-hidden="true">
+            <span className="themed-select-check" aria-hidden="true">
               {allIncluded ? '✓' : ''}
             </span>
             <span>{allOptionLabel}</span>
@@ -130,12 +130,12 @@ export function SeasonMultiSelect({
               <button
                 type="button"
                 key={option.value}
-                className={`season-multi-select-option${included ? ' is-selected' : ''}`}
+                className={`themed-select-option${included ? ' is-selected' : ''}`}
                 role="option"
                 aria-selected={included}
                 onClick={() => toggleSeason(option.value)}
               >
-                <span className="season-multi-select-check" aria-hidden="true">
+                <span className="themed-select-check" aria-hidden="true">
                   {included ? '✓' : ''}
                 </span>
                 <span>{option.label}</span>

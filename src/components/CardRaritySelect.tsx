@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import ConfirmDialog from './ConfirmDialog'
+import { ThemedSelect } from './ThemedSelect'
 import {
   formatCardRarityChangeMessage,
   rarityOptionsForCard,
@@ -26,22 +27,19 @@ export default function CardRaritySelect({ card, onConfirmChange }: CardRaritySe
 
   return (
     <>
-      <select
+      <ThemedSelect
+        className="themed-select-compact"
+        ariaLabel={`Rarity for ${card.name || 'card'}`}
         value={currentRarity}
-        aria-label={`Rarity for ${card.name || 'card'}`}
-        onChange={(event) => {
-          const nextRarity = event.target.value
+        onChange={(nextRarity) => {
           if (nextRarity === currentRarity) return
           setPendingRarity(nextRarity)
         }}
-      >
-        <option value="">Unknown</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        options={[
+          { value: '', label: 'Unknown' },
+          ...options.map((option) => ({ value: option, label: option })),
+        ]}
+      />
 
       {pendingRarity != null ? (
         <ConfirmDialog
