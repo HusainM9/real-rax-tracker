@@ -277,15 +277,15 @@ export default function CardsPage() {
                       <strong>{formatRax(displayRaxValue(cardRollup.totalBaseRax))} RAX</strong>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(cardRollup.guaranteedRax))}
+                      {formatRax(displayRaxValue(cardRollup.guaranteedRax))} RAX
                       <small className="table-sub">{cardRollup.guaranteedClaims} claims</small>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(cardRollup.proBonusRax))}
+                      {formatRax(displayRaxValue(cardRollup.proBonusRax))} RAX
                       <small className="table-sub">{cardRollup.proBonusClaims} claims</small>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(cardRollup.overlapRax))}
+                      {formatRax(displayRaxValue(cardRollup.overlapRax))} RAX
                       <small className="table-sub">{cardRollup.overlapCount} overlaps</small>
                     </td>
                     <td>
@@ -427,15 +427,15 @@ export default function CardsPage() {
                       <strong>{sport.sport}</strong>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(sport.guaranteedRax))}
+                      {formatRax(displayRaxValue(sport.guaranteedRax))} RAX
                       <small className="table-sub">{sport.guaranteedClaims} claims</small>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(sport.proBonusRax))}
+                      {formatRax(displayRaxValue(sport.proBonusRax))} RAX
                       <small className="table-sub">{sport.proBonusClaims} claims</small>
                     </td>
                     <td>
-                      {formatRax(displayRaxValue(sport.overlapRax))}
+                      {formatRax(displayRaxValue(sport.overlapRax))} RAX
                       <small className="table-sub">{sport.overlapCount} overlaps</small>
                     </td>
                     <td>
