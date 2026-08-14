@@ -114,6 +114,34 @@ describe('computeClaimDayResults', () => {
     const nba = day?.sports.find((sport) => sport.sport === 'NBA')
     expect(nba?.guaranteed.map((candidate) => candidate.performance.raxEarned)).toEqual([120, 80])
   })
+
+  it('combines UFC fights on the same OTD day into one claim', () => {
+    const ufcSameDay: RaxTrackerData = {
+      version: 1,
+      settings: { proBonusEnabled: false, savedUsername: '' },
+      cards: [card('c1', 'Sakuraba', 'UFC'), card('c2', 'Silva', 'UFC')],
+      performances: [
+        { ...perf('p1', 'c1', 50, '2000-05-01'), baseRaxEarned: 50 },
+        { ...perf('p2', 'c1', 120, '2001-05-01'), baseRaxEarned: 120 },
+        { ...perf('p3', 'c1', 30, '2001-05-01'), baseRaxEarned: 30 },
+        { ...perf('p4', 'c2', 80, '2023-05-01'), baseRaxEarned: 80 },
+      ],
+      potentialCards: [],
+      savedCardProfiles: [],
+    }
+
+    const [day] = computeClaimDayResults(ufcSameDay)
+    const ufc = day?.sports.find((sport) => sport.sport === 'UFC')
+    expect(ufc?.guaranteed.map((candidate) => candidate.card.name)).toEqual(['Sakuraba', 'Silva'])
+    expect(ufc?.guaranteed.map((candidate) => candidate.performance.raxEarned)).toEqual([200, 80])
+    expect(ufc?.overlaps).toEqual([])
+
+    const rollup = computeYearRollup(ufcSameDay, [day!])
+    const sakuraba = rollup.cards.find((row) => row.card.id === 'c1')
+    expect(sakuraba?.guaranteedClaims).toBe(1)
+    expect(sakuraba?.guaranteedRax).toBe(200)
+    expect(sakuraba?.performanceCount).toBe(3)
+  })
 })
 
 describe('computeYearRollup', () => {

@@ -12,6 +12,7 @@ import type {
 } from '../types/rax'
 import { monthDayKeyFromClaimDay } from './claimDayKey'
 import { getBaseRaxEarned, withEffectiveRax } from './effectiveRax'
+import { isUfcCatalogSport } from './passKind'
 
 type IndexedCandidate = Omit<ClaimCandidate, 'status' | 'rankInSport'> & {
   status?: ClaimCandidate['status']
@@ -68,16 +69,46 @@ function emptyCardRollup(card: PlayerCard): CardRollup {
   }
 }
 
-/** Keep each card's best performance when multiple years share the same OTD day. */
-function dedupeBestPerformancePerCard(candidates: IndexedCandidate[]): IndexedCandidate[] {
-  const bestByCard = new Map<string, IndexedCandidate>()
+function summedBaseRax(a: RaxPerformance, b: RaxPerformance): number | undefined {
+  const aBase = a.baseRaxEarned
+  const bBase = b.baseRaxEarned
+  const hasA = aBase != null && aBase > 0
+  const hasB = bBase != null && bBase > 0
+  if (!hasA && !hasB) return undefined
+  return (hasA ? aBase : 0) + (hasB ? bBase : 0)
+}
+
+/**
+ * Real now combines every UFC fight on the same OTD day into one claim (summed earnings).
+ * Other sports still use each card's best performance that month/day.
+ */
+function collapsePerformancesPerCard(candidates: IndexedCandidate[]): IndexedCandidate[] {
+  const byCard = new Map<string, IndexedCandidate>()
   for (const candidate of candidates) {
-    const existing = bestByCard.get(candidate.card.id)
-    if (!existing || candidate.performance.raxEarned > existing.performance.raxEarned) {
-      bestByCard.set(candidate.card.id, candidate)
+    const existing = byCard.get(candidate.card.id)
+    if (!existing) {
+      byCard.set(candidate.card.id, candidate)
+      continue
+    }
+    if (isUfcCatalogSport(candidate.card.sport)) {
+      const primary =
+        candidate.performance.raxEarned >= existing.performance.raxEarned ? candidate : existing
+      const baseRaxEarned = summedBaseRax(existing.performance, candidate.performance)
+      byCard.set(candidate.card.id, {
+        ...primary,
+        performance: {
+          ...primary.performance,
+          raxEarned: existing.performance.raxEarned + candidate.performance.raxEarned,
+          ...(baseRaxEarned != null ? { baseRaxEarned } : {}),
+        },
+      })
+      continue
+    }
+    if (candidate.performance.raxEarned > existing.performance.raxEarned) {
+      byCard.set(candidate.card.id, candidate)
     }
   }
-  return [...bestByCard.values()]
+  return [...byCard.values()]
 }
 
 export function getValidPerformances(data: RaxTrackerData): ClaimCandidate[] {
@@ -114,7 +145,7 @@ export function computeClaimDayResults(data: RaxTrackerData): ClaimDayResult[] {
     .map(([monthDay, dayCandidates]) =>
       computeClaimDay(
         monthDay,
-        dedupeBestPerformancePerCard(dayCandidates),
+        collapsePerformancesPerCard(dayCandidates),
         data.settings.proBonusEnabled,
       ),
     )

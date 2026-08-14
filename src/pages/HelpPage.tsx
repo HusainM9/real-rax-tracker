@@ -161,7 +161,9 @@ export default function HelpPage() {
       <section className="panel help-section">
         <h2>OTD dates &amp; rarity</h2>
         <p>
-          Rules apply per month/day across years. Each card uses its best performance that day.
+          Rules apply per month/day across years. Each card uses its best performance that day,
+          except UFC: if a fighter fought more than once on that month/day, those fights are
+          combined into one claim.
           Change rarity on Cards or Entry after a merge — earnings recalculate and save with your
           collection.
         </p>
