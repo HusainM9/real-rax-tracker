@@ -8,34 +8,50 @@ import {
 
 const COOKIE_NAME = 'rax_account_session'
 
-function encodePayload(expiresAt: string, username: string): string {
-  const raw = `${expiresAt}\n${username}`
+function encodePayload(expiresAt: string, username: string, credentialsUpdatedAt: string): string {
+  const raw = credentialsUpdatedAt
+    ? `${expiresAt}\n${username}\n${credentialsUpdatedAt}`
+    : `${expiresAt}\n${username}`
   return toBase64Url(new TextEncoder().encode(raw))
 }
 
-function decodePayload(encoded: string): { expiresAt: string; username: string } | null {
+function decodePayload(encoded: string): {
+  expiresAt: string
+  username: string
+  credentialsUpdatedAt: string
+} | null {
   try {
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/')
     const padLength = (4 - (padded.length % 4)) % 4
     const binary = atob(padded + '='.repeat(padLength))
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
     const raw = new TextDecoder().decode(bytes)
-    const separator = raw.indexOf('\n')
-    if (separator < 0) return null
-    const expiresAt = raw.slice(0, separator)
-    const username = raw.slice(separator + 1)
+    const [expiresAt, username, credentialsUpdatedAt = ''] = raw.split('\n')
     if (!expiresAt || !username) return null
-    return { expiresAt, username }
+    return { expiresAt, username, credentialsUpdatedAt }
   } catch {
     return null
   }
+}
+
+/** False after an admin/user password change that the session predates. */
+export function sessionMatchesCredentials(
+  tokenCredentialsUpdatedAt: string | undefined,
+  storedCredentialsUpdatedAt: string | undefined,
+): boolean {
+  const stored = storedCredentialsUpdatedAt ?? ''
+  if (!stored) return true
+  return (tokenCredentialsUpdatedAt ?? '') === stored
 }
 
 export function getAccountCookieName(): string {
   return COOKIE_NAME
 }
 
-export async function createAccountSessionToken(username: string): Promise<string | null> {
+export async function createAccountSessionToken(
+  username: string,
+  credentialsUpdatedAt = '',
+): Promise<string | null> {
   const secret = getSigningSecret()
   if (!secret) return null
 
@@ -43,14 +59,17 @@ export async function createAccountSessionToken(username: string): Promise<strin
   if (!normalized) return null
 
   const expiresAt = String(Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
-  const payload = encodePayload(expiresAt, normalized)
+  const payload = encodePayload(expiresAt, normalized, credentialsUpdatedAt)
   const signature = await signPayload(payload, secret)
   return `${payload}.${signature}`
 }
 
 export async function verifyAccountSessionToken(
   token: string | null | undefined,
-): Promise<{ ok: true; username: string } | { ok: false; username?: never }> {
+): Promise<
+  | { ok: true; username: string; credentialsUpdatedAt: string }
+  | { ok: false; username?: never; credentialsUpdatedAt?: never }
+> {
   if (!token) return { ok: false }
 
   const secret = getSigningSecret()
@@ -73,7 +92,7 @@ export async function verifyAccountSessionToken(
   const username = normalizeRealUsername(decoded.username)
   if (!username) return { ok: false }
 
-  return { ok: true, username }
+  return { ok: true, username, credentialsUpdatedAt: decoded.credentialsUpdatedAt }
 }
 
 export function buildAccountSessionCookieHeader(token: string): string {

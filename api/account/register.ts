@@ -84,7 +84,10 @@ export default async function handler(request: Request): Promise<Response> {
       return Response.json({ error: 'Could not create account.' }, { status: 500 })
     }
 
-    const token = await createAccountSessionToken(result.username)
+    const token = await createAccountSessionToken(
+      result.username,
+      result.credentialsUpdatedAt ?? '',
+    )
     if (!token) {
       return Response.json({ error: 'Session secret is not configured' }, { status: 500 })
     }

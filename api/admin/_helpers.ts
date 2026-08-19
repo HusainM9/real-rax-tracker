@@ -12,6 +12,7 @@ import {
   getAdminCookieName,
   verifyAdminSessionToken,
 } from '../../lib/adminAuth'
+import { accountSessionIsRevoked } from '../../lib/accountCredentialsStore'
 
 export async function hasAppSession(request: Request): Promise<boolean> {
   if (process.env.NODE_ENV === 'development') return true
@@ -43,7 +44,11 @@ export async function getAccountSessionUsername(
 ): Promise<string | null> {
   const token = readCookie(request, getAccountCookieName())
   const result = await verifyAccountSessionToken(token)
-  return result.ok ? result.username : null
+  if (!result.ok) return null
+  if (await accountSessionIsRevoked(result.username, result.credentialsUpdatedAt)) {
+    return null
+  }
+  return result.username
 }
 
 export async function requireAccountSession(

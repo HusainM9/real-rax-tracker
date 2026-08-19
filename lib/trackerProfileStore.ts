@@ -1,6 +1,12 @@
 import { kv } from '@vercel/kv'
 import { adminStorageConfigured } from './adminEventStore'
 import {
+  deleteProfileAuth,
+  getProfileAuth,
+  newCredentialsUpdatedAt,
+  persistProfileAuth,
+} from './accountCredentialsStore'
+import {
   validateAccountPassword,
   validateAccountUsername,
 } from './accountPasswordRules'
@@ -82,6 +88,8 @@ export type StoredTrackerProfile = {
   username: string
   /** Password hash (legacy field name passphraseHash for KV compatibility). */
   passphraseHash: string
+  /** ISO timestamp bumped on password reset/change so older sessions are rejected. */
+  credentialsUpdatedAt?: string
   data?: unknown
   dataBlob?: string
   dataEncoding?: 'gzip-base64'
@@ -174,6 +182,7 @@ export async function registerAccount(input: {
   storageConfigured: boolean
   alreadyExists: boolean
   username?: string
+  credentialsUpdatedAt?: string
 }> {
   if (!accountsConfigured()) {
     return { ok: false, storageConfigured: false, alreadyExists: false }
@@ -189,16 +198,19 @@ export async function registerAccount(input: {
 
   const encoded = await encodeAndAssertSize(emptyAccountDataForUsername(normalizedUsername))
   const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
-  const updatedAt = new Date().toISOString()
+  const credentialsUpdatedAt = newCredentialsUpdatedAt()
+  const updatedAt = credentialsUpdatedAt
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
     passphraseHash,
+    credentialsUpdatedAt,
     dataBlob: encoded.dataBlob,
     dataEncoding: encoded.dataEncoding,
     updatedAt,
     ...encoded.counts,
   }
 
+  await persistProfileAuth(normalizedUsername, passphraseHash, credentialsUpdatedAt)
   await kv.set(key, stored)
   await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
 
@@ -207,6 +219,7 @@ export async function registerAccount(input: {
     storageConfigured: true,
     alreadyExists: false,
     username: normalizedUsername,
+    credentialsUpdatedAt,
   }
 }
 
@@ -219,6 +232,7 @@ export async function verifyAccountCredentials(
   unauthorized: boolean
   notFound: boolean
   username?: string
+  credentialsUpdatedAt?: string
 }> {
   if (!accountsConfigured()) {
     return { ok: false, storageConfigured: false, unauthorized: false, notFound: false }
@@ -238,7 +252,12 @@ export async function verifyAccountCredentials(
     return { ok: false, storageConfigured: true, unauthorized: false, notFound: true }
   }
 
-  if (!(await matchesSyncPassphrase(normalizedUsername, validatedPassword, stored.passphraseHash))) {
+  const auth = await getProfileAuth(normalizedUsername, stored)
+  if (!auth) {
+    return { ok: false, storageConfigured: true, unauthorized: false, notFound: true }
+  }
+
+  if (!(await matchesSyncPassphrase(normalizedUsername, validatedPassword, auth.passphraseHash))) {
     return { ok: false, storageConfigured: true, unauthorized: true, notFound: false }
   }
 
@@ -248,6 +267,7 @@ export async function verifyAccountCredentials(
     unauthorized: false,
     notFound: false,
     username: normalizedUsername,
+    credentialsUpdatedAt: auth.credentialsUpdatedAt,
   }
 }
 
@@ -314,6 +334,7 @@ export async function saveAccountProfileForSession(input: {
     return { ok: false, storageConfigured: true, notFound: true, conflict: false }
   }
 
+  const encoded = await encodeAndAssertSize(input.data)
   const key = profileKey(normalizedUsername)
   const existing = await kv.get<StoredTrackerProfile | null>(key)
   if (!existing) {
@@ -334,11 +355,12 @@ export async function saveAccountProfileForSession(input: {
     }
   }
 
-  const encoded = await encodeAndAssertSize(input.data)
+  const auth = await getProfileAuth(normalizedUsername, existing)
   const updatedAt = new Date().toISOString()
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
-    passphraseHash: existing.passphraseHash,
+    passphraseHash: auth?.passphraseHash ?? existing.passphraseHash,
+    credentialsUpdatedAt: auth?.credentialsUpdatedAt || existing.credentialsUpdatedAt,
     dataBlob: encoded.dataBlob,
     dataEncoding: encoded.dataEncoding,
     updatedAt,
@@ -388,7 +410,8 @@ export async function getTrackerProfileMeta(
     return { meta: null, storageConfigured: true, unauthorized: false }
   }
 
-  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
+  const auth = await getProfileAuth(normalizedUsername, stored)
+  if (!auth || !(await matchesSyncPassphrase(normalizedUsername, password, auth.passphraseHash))) {
     return { meta: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -434,7 +457,8 @@ export async function getTrackerProfile(
     return { profile: null, storageConfigured: true, unauthorized: false }
   }
 
-  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
+  const auth = await getProfileAuth(normalizedUsername, stored)
+  if (!auth || !(await matchesSyncPassphrase(normalizedUsername, password, auth.passphraseHash))) {
     return { profile: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -487,7 +511,8 @@ export async function getTrackerProfileTransfer(
     return { transfer: null, storageConfigured: true, unauthorized: false }
   }
 
-  if (!(await matchesSyncPassphrase(normalizedUsername, password, stored.passphraseHash))) {
+  const auth = await getProfileAuth(normalizedUsername, stored)
+  if (!auth || !(await matchesSyncPassphrase(normalizedUsername, password, auth.passphraseHash))) {
     return { transfer: null, storageConfigured: true, unauthorized: true }
   }
 
@@ -532,12 +557,10 @@ export async function saveTrackerProfile(input: {
   const encoded = await encodeAndAssertSize(input.data)
   const key = profileKey(normalizedUsername)
   const existing = await kv.get<StoredTrackerProfile | null>(key)
-  const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
+  const auth = await getProfileAuth(normalizedUsername, existing)
+  const currentHash = auth?.passphraseHash ?? existing?.passphraseHash
 
-  if (
-    existing &&
-    !(await matchesSyncPassphrase(normalizedUsername, password, existing.passphraseHash))
-  ) {
+  if (currentHash && !(await matchesSyncPassphrase(normalizedUsername, password, currentHash))) {
     return { ok: false, storageConfigured: true, unauthorized: true, conflict: false }
   }
 
@@ -555,10 +578,15 @@ export async function saveTrackerProfile(input: {
     }
   }
 
+  const credentialsUpdatedAt = existing
+    ? auth?.credentialsUpdatedAt || existing.credentialsUpdatedAt
+    : newCredentialsUpdatedAt()
+  const passphraseHash = currentHash ?? (await hashSyncPassphrase(normalizedUsername, password))
   const updatedAt = new Date().toISOString()
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
     passphraseHash,
+    credentialsUpdatedAt,
     dataBlob: encoded.dataBlob,
     dataEncoding: encoded.dataEncoding,
     updatedAt,
@@ -567,6 +595,9 @@ export async function saveTrackerProfile(input: {
 
   await kv.set(key, stored)
   await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
+  if (!existing) {
+    await persistProfileAuth(normalizedUsername, passphraseHash, credentialsUpdatedAt ?? '')
+  }
 
   return {
     ok: true,
@@ -689,7 +720,7 @@ export async function lookupTrackerProfilePacksForAdmin(
   }
 }
 
-/** Admin password reset — keeps account data intact. */
+/** Admin password reset — permanent; collection data stays intact. */
 export async function adminResetTrackerProfilePin(
   username: string,
   newPassphrase: string,
@@ -712,10 +743,13 @@ export async function adminResetTrackerProfilePin(
   }
 
   const passphraseHash = await hashSyncPassphrase(normalizedUsername, password)
-  const updatedAt = new Date().toISOString()
+  const credentialsUpdatedAt = newCredentialsUpdatedAt()
+  const updatedAt = credentialsUpdatedAt
+  await persistProfileAuth(normalizedUsername, passphraseHash, credentialsUpdatedAt)
   await kv.set(key, {
     ...existing,
     passphraseHash,
+    credentialsUpdatedAt,
     updatedAt,
   })
   await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
@@ -751,6 +785,7 @@ export async function adminDeleteTrackerProfile(
   }
 
   await kv.del(key)
+  await deleteProfileAuth(normalizedUsername)
   await kv.srem(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
   return { ok: true, notFound: false, storageConfigured: true }
 }
@@ -774,6 +809,7 @@ export async function adminDeleteAllTrackerProfiles(): Promise<{
 
   for (const username of usernames) {
     await kv.del(profileKey(username))
+    await deleteProfileAuth(username)
   }
   if (usernames.length > 0) {
     await kv.del(TRACKER_PROFILE_USERNAMES_KEY)
@@ -815,15 +851,22 @@ export async function changeTrackerProfilePin(input: {
     return { ok: false, notFound: true, unauthorized: false, storageConfigured: true }
   }
 
-  if (!(await matchesSyncPassphrase(normalizedUsername, currentPassword, existing.passphraseHash))) {
+  const auth = await getProfileAuth(normalizedUsername, existing)
+  if (
+    !auth ||
+    !(await matchesSyncPassphrase(normalizedUsername, currentPassword, auth.passphraseHash))
+  ) {
     return { ok: false, notFound: false, unauthorized: true, storageConfigured: true }
   }
 
   const passphraseHash = await hashSyncPassphrase(normalizedUsername, newPassword)
-  const updatedAt = new Date().toISOString()
+  const credentialsUpdatedAt = newCredentialsUpdatedAt()
+  const updatedAt = credentialsUpdatedAt
+  await persistProfileAuth(normalizedUsername, passphraseHash, credentialsUpdatedAt)
   await kv.set(key, {
     ...existing,
     passphraseHash,
+    credentialsUpdatedAt,
     updatedAt,
   })
 

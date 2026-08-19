@@ -97,7 +97,10 @@ export default async function handler(request: Request): Promise<Response> {
     )
   }
 
-  const token = await createAccountSessionToken(result.username!)
+  const token = await createAccountSessionToken(
+    result.username!,
+    result.credentialsUpdatedAt ?? '',
+  )
   if (!token) {
     return Response.json(
       {

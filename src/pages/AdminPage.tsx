@@ -419,7 +419,7 @@ export default function AdminPage() {
     }
     if (
       !window.confirm(
-        `Reset the password for @${username}? Their saved account data stays intact. Share the new password with them privately.`,
+        `Permanently reset the password for @${username}? Their saved account data stays intact. They will be signed out everywhere and must use this new password.`,
       )
     ) {
       return
@@ -440,7 +440,7 @@ export default function AdminPage() {
       }
       setCloudProfileSummary(body.profile ?? null)
       setCloudProfileStatus(
-        `Password reset for @${username}. Share the new password with the user privately.`,
+        `Password permanently reset for @${username}. Existing sessions were signed out. Share the new password with the user privately.`,
       )
       setAccountTrackersRefreshKey((current) => current + 1)
     } catch (error) {
@@ -1672,8 +1672,9 @@ export default function AdminPage() {
       >
         <p className="import-hint">
           Accounts are keyed by Real @username. Passwords are stored as hashes — admins cannot read
-          the old password. Reset keeps their account data and sets a new password you share
-          privately. Delete removes one account so they can register fresh. Use{' '}
+          the old password. Reset permanently replaces their password, signs out existing sessions,
+          and keeps their account data. Share the new password privately. Delete removes one
+          account so they can register fresh. Use{' '}
           <strong>Delete all accounts</strong> to wipe legacy cloud-sync profiles.
         </p>
         <div className="button-row">
@@ -1710,7 +1711,7 @@ export default function AdminPage() {
               type="password"
               value={cloudProfileNewPin}
               disabled={cloudProfileBusy}
-              placeholder="Temporary password for the user"
+              placeholder="New password for the user"
               autoComplete="off"
               spellCheck={false}
               maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}

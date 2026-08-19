@@ -27,7 +27,7 @@ import {
   persistTrackerData,
   storageWarningMessage,
 } from '../lib/trackerPersistence'
-import { loadAccountData, saveAccountData, AccountDataConflictError } from '../lib/accountData'
+import { loadAccountData, saveAccountData, AccountDataConflictError, AccountAuthRequiredError } from '../lib/accountData'
 import { useAccountAuth } from './AccountAuthContext'
 import {
   importFromUsername as runUsernameImport,
@@ -217,7 +217,8 @@ function nowIso(): string {
 }
 
 export function RaxDataProvider({ children }: { children: ReactNode }) {
-  const { username: accountUsername, devBypass: accountDevBypass } = useAccountAuth()
+  const { username: accountUsername, devBypass: accountDevBypass, refresh: refreshAccount } =
+    useAccountAuth()
   const [data, setData] = useState<RaxTrackerData>(createEmptyData)
   const [storageReady, setStorageReady] = useState(false)
   const [storageWarning, setStorageWarning] = useState<string | null>(null)
@@ -240,6 +241,10 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           void persistTrackerData(loaded.data)
           return
         } catch (error) {
+          if (error instanceof AccountAuthRequiredError) {
+            await refreshAccount()
+            return
+          }
           console.warn('Could not load account data; falling back to local storage.', error)
         }
       }
@@ -255,7 +260,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [accountUsername, accountDevBypass])
+  }, [accountUsername, accountDevBypass, refreshAccount])
 
   useEffect(() => {
     if (!storageReady) return
@@ -285,6 +290,10 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
           accountUpdatedAtRef.current = result.meta.updatedAt
           setStorageWarning(null)
         } catch (error) {
+          if (error instanceof AccountAuthRequiredError) {
+            await refreshAccount()
+            return
+          }
           if (error instanceof AccountDataConflictError && allowRetry) {
             accountUpdatedAtRef.current = error.existingUpdatedAt
             await save(error.existingUpdatedAt, false)
@@ -299,7 +308,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     }, 800)
 
     return () => window.clearTimeout(handle)
-  }, [data, storageReady, accountDevBypass])
+  }, [data, storageReady, accountDevBypass, refreshAccount])
 
   const missingAvatarKeysFingerprint = useMemo(() => {
     const keys = new Set<string>()

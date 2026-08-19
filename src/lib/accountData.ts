@@ -31,6 +31,13 @@ export class AccountDataConflictError extends Error {
   }
 }
 
+export class AccountAuthRequiredError extends Error {
+  constructor(message = 'Account login required') {
+    super(message)
+    this.name = 'AccountAuthRequiredError'
+  }
+}
+
 async function parseError(response: Response): Promise<string> {
   return readResponseError(response, 'Account sync failed')
 }
@@ -42,6 +49,9 @@ export async function loadAccountData(): Promise<AccountDataLoadResult> {
 
   if (response.status === 503) {
     throw new Error('Account storage is not configured on this server.')
+  }
+  if (response.status === 401) {
+    throw new AccountAuthRequiredError()
   }
   if (!response.ok) {
     throw new Error(await parseError(response))
@@ -104,6 +114,10 @@ export async function saveAccountData(
 
   if (response.status === 503) {
     throw new Error('Account storage is not configured on this server.')
+  }
+
+  if (response.status === 401) {
+    throw new AccountAuthRequiredError()
   }
 
   if (response.status === 413) {

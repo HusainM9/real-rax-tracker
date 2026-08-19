@@ -9,6 +9,7 @@ import {
   getAccountCookieName,
   verifyAccountSessionToken,
 } from './lib/accountAuth'
+import { accountSessionIsRevoked } from './lib/accountCredentialsStore'
 import {
   getAdminCookieName,
   verifyAdminSessionToken,
@@ -72,7 +73,8 @@ async function hasValidSession(request: Request): Promise<boolean> {
 async function hasValidAccountSession(request: Request): Promise<boolean> {
   const token = readCookie(request, getAccountCookieName())
   const result = await verifyAccountSessionToken(token)
-  return result.ok
+  if (!result.ok) return false
+  return !(await accountSessionIsRevoked(result.username, result.credentialsUpdatedAt))
 }
 
 async function hasValidAdminSession(request: Request): Promise<boolean> {
