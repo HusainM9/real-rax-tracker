@@ -8,9 +8,9 @@ describe('seasonLabelFromPass', () => {
     expect(seasonLabelFromPass(2026, 'ncaam')).toBe('2025-26')
   })
 
-  it('uses start-year labels for NFL and NHL', () => {
+  it('uses start-year labels for NFL and end-year labels for NHL', () => {
     expect(seasonLabelFromPass(2026, 'nfl')).toBe('2026-27')
-    expect(seasonLabelFromPass(2026, 'nhl')).toBe('2026-27')
+    expect(seasonLabelFromPass(2026, 'nhl')).toBe('2025-26')
   })
 
   it('uses prior-year labels for NBA', () => {

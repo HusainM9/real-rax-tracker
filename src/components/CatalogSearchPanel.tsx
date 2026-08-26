@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PassIdentity } from './PassIdentity'
 import { ThemedSelect } from './ThemedSelect'
-import { formatClaimDay, formatRax } from '../lib/format'
+import { formatRax } from '../lib/format'
 import {
   enrichCatalogProfilesWithAvatars,
   searchCatalog,
@@ -29,7 +29,6 @@ function catalogResultMeta(profile: CatalogSearchResult, extra?: string): string
   parts.push(`${profile.rowCount} row${profile.rowCount === 1 ? '' : 's'}`)
   if (profile.totalBaseRax > 0) parts.push(`${formatRax(profile.totalBaseRax)} base RAX`)
   else if (profile.hasEarnings === false) parts.push('no earnings yet')
-  if (profile.latestClaimDay) parts.push(`latest ${formatClaimDay(profile.latestClaimDay)}`)
   if (extra) parts.push(extra)
   return parts.join(' · ')
 }

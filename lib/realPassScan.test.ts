@@ -107,6 +107,8 @@ describe('normalizeRealPass', () => {
       ?.seasonLabel).toBe('2026-27')
     expect(normalizeRealPass(realPass({ sport: 'nfl', season: 2026, seasonDisplay: 'Season 2026' }))
       ?.seasonLabel).toBe('2026-27')
+    expect(normalizeRealPass(realPass({ sport: 'nhl', season: 2026, seasonDisplay: undefined }))
+      ?.seasonLabel).toBe('2025-26')
   })
 
   it('keeps calendar-year labels for calendar-year sports', () => {

@@ -2,31 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { canonicalizeImportPass } from './meowbotServerImport'
 
 describe('canonicalizeImportPass', () => {
-  it('keeps NHL 2023-24 on season_year 2023 (start-year encoding)', () => {
-    expect(
-      canonicalizeImportPass({
-        entityId: 8476389,
-        seasonYear: 2023,
-        sportRaw: 'nhl',
-        sport: 'NHL',
-        seasonLabel: '2023-24',
-        name: 'Vincent Trocheck',
-        passKind: 'player',
-        externalKey: '8476389|2023|NHL',
-      }),
-    ).toEqual({
-      entityId: 8476389,
-      seasonYear: 2023,
-      sportRaw: 'nhl',
-      sport: 'NHL',
-      seasonLabel: '2023-24',
-      name: 'Vincent Trocheck',
-      passKind: 'player',
-      externalKey: '8476389|2023|NHL',
-    })
-  })
-
-  it('repairs an old end-year-style 2023-24 label on NHL season_year 2024 to 2024-25', () => {
+  it('keeps NHL 2023-24 on season_year 2024 (end-year encoding)', () => {
     expect(
       canonicalizeImportPass({
         entityId: 8476389,
@@ -38,10 +14,34 @@ describe('canonicalizeImportPass', () => {
         passKind: 'player',
         externalKey: '8476389|2024|NHL',
       }),
-    ).toMatchObject({
+    ).toEqual({
+      entityId: 8476389,
       seasonYear: 2024,
-      seasonLabel: '2024-25',
+      sportRaw: 'nhl',
+      sport: 'NHL',
+      seasonLabel: '2023-24',
+      name: 'Vincent Trocheck',
+      passKind: 'player',
       externalKey: '8476389|2024|NHL',
+    })
+  })
+
+  it('keeps Seth Jarvis 2025-26 on NHL season_year 2026', () => {
+    expect(
+      canonicalizeImportPass({
+        entityId: 950,
+        seasonYear: 2026,
+        sportRaw: 'nhl',
+        sport: 'NHL',
+        seasonLabel: '2025-26',
+        name: 'Seth Jarvis',
+        passKind: 'player',
+        externalKey: '950|2026|NHL',
+      }),
+    ).toMatchObject({
+      seasonYear: 2026,
+      seasonLabel: '2025-26',
+      externalKey: '950|2026|NHL',
     })
   })
 

@@ -147,8 +147,8 @@ async function fetchPassEarnings(
 ): Promise<RealPassEarnings | null> {
   const cachedSlug = slugCache.get(pass.sportRaw)
   const slugs = cachedSlug ? [cachedSlug] : realRequestSportSlugs(pass.sportRaw)
-  // Real's path season is start-year for NFL/NHL/CFB/FC — use canonicalized year, not a stale
-  // end-year catalog key left over from the pre-reclassification encoding.
+  // Use the canonical year for Real's path: NFL/CFB/FC use start-year while NBA/NHL/CBB use
+  // end-year. This avoids fetching the adjacent season when catalog metadata is stale.
   const season = catalogPassInput(pass).seasonYear
 
   for (const sport of slugs) {

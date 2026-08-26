@@ -30,12 +30,12 @@ function isCalendarYearSportNormalized(normalized: string): boolean {
 /**
  * Sports where Real's `season` is the season's first calendar year.
  * Confirmed from live Real `season` + `seasonDisplay` probes:
- * - NFL/NHL/CFB/FC: start-year (e.g. NFL `2024` + `"2024-25"`)
- * - NBA/CBB: end-year (handled by the default below)
+ * - NFL/CFB/FC: start-year (e.g. NFL `2024` + `"2024-25"`)
+ * - NBA/NHL/CBB: end-year (e.g. NHL `2026` + `"2025-26"`)
  */
 function isStartYearSportNormalized(normalized: string): boolean {
   const upper = normalized.toUpperCase()
-  return upper === 'NFL' || upper === 'NHL' || upper === 'CFB' || upper === 'FC'
+  return upper === 'NFL' || upper === 'CFB' || upper === 'FC'
 }
 
 /** How Real encodes `season_year` on a pass for each sport. */
@@ -111,11 +111,11 @@ export function passSeasonDateWindow(seasonYear: number, sport: string): PassSea
     case 'start': {
       const normalized = normalizeSportForSeasonWindow(sport)
       if (normalized === 'NFL') return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-04-30` }
-      if (normalized === 'NHL') return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-06-30` }
       return { start: `${seasonYear}-08-01`, end: `${seasonYear + 1}-06-30` }
     }
     case 'end': {
       const normalized = normalizeSportForSeasonWindow(sport)
+      if (normalized === 'NHL') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-06-30` }
       if (normalized === 'CBB') return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-06-30` }
       return { start: `${seasonYear - 1}-08-01`, end: `${seasonYear}-07-31` }
     }

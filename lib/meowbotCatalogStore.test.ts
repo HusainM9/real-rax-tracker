@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCatalogPassUpsertBatches,
   catalogDailyEarningsReplaceKeys,
+  fillMissingCatalogSearchTotals,
   partitionByObjectKeySignature,
   reconcileDailyRowsToPassTotal,
   type CatalogDailyEarningInput,
@@ -86,6 +87,68 @@ describe('reconcileDailyRowsToPassTotal', () => {
     const result = reconcileDailyRowsToPassTotal(440, [])
     expect(result.totalBaseRax).toBe(440)
     expect(result.rows).toEqual([])
+  })
+})
+
+describe('fillMissingCatalogSearchTotals', () => {
+  const sethJarvis = {
+    externalKey: '950|2026|NHL',
+    entityId: 950,
+    passKind: 'player' as const,
+    sport: 'NHL',
+    seasonYear: 2026,
+    seasonLabel: '2025-26',
+    name: 'Seth Jarvis',
+    cachedAt: '2026-08-27T00:00:00.000Z',
+    rowCount: 2,
+    totalBaseRax: 0,
+  }
+
+  it('shows a missing base RAX total by summing stored rows for the same season', () => {
+    const [result] = fillMissingCatalogSearchTotals(
+      [sethJarvis],
+      [
+        {
+          external_key: sethJarvis.externalKey,
+          claim_day: '2025-10-09',
+          base_rax_earned: 12,
+        },
+        {
+          external_key: sethJarvis.externalKey,
+          claim_day: '2026-03-15',
+          base_rax_earned: 18,
+        },
+      ],
+    )
+
+    expect(result?.totalBaseRax).toBe(30)
+    expect(result?.latestClaimDay).toBe('2026-03-15')
+  })
+
+  it('does not replace an existing aggregate or include adjacent NHL seasons', () => {
+    const [existing] = fillMissingCatalogSearchTotals(
+      [{ ...sethJarvis, totalBaseRax: 44 }],
+      [
+        {
+          external_key: sethJarvis.externalKey,
+          claim_day: '2024-10-09',
+          base_rax_earned: 99,
+        },
+      ],
+    )
+    expect(existing?.totalBaseRax).toBe(44)
+
+    const [missing] = fillMissingCatalogSearchTotals(
+      [sethJarvis],
+      [
+        {
+          external_key: sethJarvis.externalKey,
+          claim_day: '2024-10-09',
+          base_rax_earned: 99,
+        },
+      ],
+    )
+    expect(missing?.totalBaseRax).toBe(0)
   })
 })
 

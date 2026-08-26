@@ -566,8 +566,8 @@ export type RecommendationFilterOptions = RecommendationSeasonFilter & {
 
 /**
  * Default Rank OTD Net sport+season exclusions.
- * Keys use season labels (`2022-23`), not seasonYear — NFL/NHL are start-year encoded
- * (`seasonYear` 2022 → label `2022-23`); CBB is end-year (`seasonYear` 2023 → `2022-23`).
+ * Keys use season labels (`2022-23`), not seasonYear — NFL is start-year encoded
+ * (`seasonYear` 2022), while NHL/CBB are end-year (`seasonYear` 2023).
  */
 export const DEFAULT_RANK_EXCLUDED_SPORT_SEASONS: ReadonlyArray<{
   sport: Sport

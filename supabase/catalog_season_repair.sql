@@ -17,22 +17,23 @@
 -- -- ============================================================================
 -- --
 -- -- Encoding reference (matches seasonYearKindForSport in lib/seasonClaimWindow.ts):
--- --   NBA, CBB           -> season_label '2023-24' means season_year 2024 (END year)
--- --   NFL, NHL, CFB, FC  -> season_label '2024-25' means season_year 2024 (START year)
+-- --   NBA, NHL, CBB      -> season_label '2023-24' means season_year 2024 (END year)
+-- --   NFL, CFB, FC       -> season_label '2024-25' means season_year 2024 (START year)
 -- --   MLB, WNBA, Golf, UFC -> season_label '2024' means season_year 2024 (calendar)
 -- --
 -- -- FC moved from END to START on 2026-07-24, confirmed from a live Real pass
 -- -- (season 2025 with seasonDisplay "2025-26"). FC rows written before that date may sit on
 -- -- an external_key one year too high. See "FC encoding audit" at the bottom of this file.
 -- --
--- -- 2026-07-24 (live Real probes): NFL/NHL moved END -> START; CBB/ncaam moved START -> END.
+-- -- Correction: NHL remains END-year. Only NFL uses START-year among NFL/NHL; CBB is END-year.
 -- -- Local username-import external keys use Real's raw `season` and stay stable.
 -- -- Catalog rows previously canonicalized under the old rules may need key rewrites:
--- --   NFL/NHL old end-year keys (label '2024-25' on season_year 2025) -> start-year 2024
+-- --   NFL old end-year keys (label '2024-25' on season_year 2025) -> start-year 2024
+-- --   NHL wrong start-year keys (label '2024-25' on season_year 2024) -> end-year 2025
 -- --   CBB old start-year keys (label '2024-25' on season_year 2024) -> end-year 2025
--- -- WARNING: Steps 1b / 2 / 2b / 2c below still assume the OLD NFL/NHL END-year model.
--- -- Do not run those repair blocks until they are rewritten for start-year — use Step 1
--- -- (updated CASE) and the FC-style audit pattern instead.
+-- -- WARNING: Steps 1b / 2 / 2b / 2c combine NFL and NHL despite their different conventions.
+-- -- Keep those historical repair blocks commented out until they are split by sport. Step 1 and
+-- -- the daily-row junk audits are read-only and safe.
 
 -- -- Step 1: audit misaligned passes (sport-aware) — READ ONLY, safe to run anytime
 -- with parsed as (
@@ -65,20 +66,20 @@
 --     p.*,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year
---       when sport in ('NFL', 'NHL', 'CFB', 'FC') then label_start_year
---       when sport in ('NBA', 'CBB') then label_end_year
+--       when sport in ('NFL', 'CFB', 'FC') then label_start_year
+--       when sport in ('NBA', 'NHL', 'CBB') then label_end_year
 --       else season_year
 --     end as canonical_season_year,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_year::text
---       when sport in ('NFL', 'NHL', 'CFB', 'FC') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
---       when sport in ('NBA', 'CBB') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
+--       when sport in ('NFL', 'CFB', 'FC') then season_year::text || '-' || lpad(((season_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NBA', 'NHL', 'CBB') then (season_year - 1)::text || '-' || lpad((season_year % 100)::text, 2, '0')
 --       else season_label
 --     end as expected_label_from_year,
 --     case
 --       when sport in ('MLB', 'WNBA', 'Golf', 'UFC') then season_label
---       when sport in ('NFL', 'NHL', 'CFB', 'FC') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
---       when sport in ('NBA', 'CBB') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
+--       when sport in ('NFL', 'CFB', 'FC') then label_start_year::text || '-' || lpad(((label_start_year + 1) % 100)::text, 2, '0')
+--       when sport in ('NBA', 'NHL', 'CBB') then (label_end_year - 1)::text || '-' || lpad((label_end_year % 100)::text, 2, '0')
 --       else season_label
 --     end as expected_label_from_label
 --   from parsed p
@@ -102,9 +103,9 @@
 --   )
 -- order by sport, name;
 
--- -- Step 1b: NHL/NFL only — OBSOLETE under start-year encoding (2026-07-24).
--- -- This block still compares against label_end_year and would push keys the wrong way.
--- -- Prefer Step 1 above (updated CASE) or an FC-style start-year audit until rewritten.
+-- -- Step 1b: NHL/NFL combined historical audit — OBSOLETE because NHL is END-year and NFL is
+-- -- START-year. Do not run its repair companions until they are split by sport.
+-- -- Prefer Step 1 above (updated CASE).
 -- -- Historical note: previously targeted end-year sports where wrong keys merged seasons
 -- -- (e.g. Trocheck 23-24 showing 22-23 earnings on the same external_key).
 -- with parsed as (

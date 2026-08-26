@@ -90,12 +90,11 @@ function isCalendarYearSport(raw) {
 }
 
 // Real reports the season's first year for these (matches seasonYearKindForSport).
-// CBB/ncaam is end-year: season 2026 is the 2025-26 season — do not treat as start-year.
+// NHL and CBB/ncaam are end-year: season 2026 is 2025-26.
 function isStartYearSport(raw) {
   const sport = normalizeSport(raw)
   return (
     sport === 'nfl' ||
-    sport === 'nhl' ||
     sport === 'ncaaf' ||
     sport === 'fc' ||
     sport === 'soccer'

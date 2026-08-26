@@ -398,6 +398,49 @@ export function attachPassTotals(
   }))
 }
 
+/** Derive missing search-card totals from stored dailies without replacing valid pass aggregates. */
+export function fillMissingCatalogSearchTotals(
+  results: CatalogSearchResult[],
+  dailyRows: Array<{
+    external_key: string
+    claim_day: string
+    base_rax_earned: number | string
+  }>,
+): CatalogSearchResult[] {
+  const rowsByKey = new Map<string, typeof dailyRows>()
+  for (const row of dailyRows) {
+    const bucket = rowsByKey.get(row.external_key)
+    if (bucket) bucket.push(row)
+    else rowsByKey.set(row.external_key, [row])
+  }
+
+  return results.map((result) => {
+    if (result.totalBaseRax > 0 || result.rowCount === 0) return result
+    const rows = rowsByKey.get(result.externalKey) ?? []
+    const inSeason = filterDailyRowsToPassSeason(
+      rows.map((row) => ({
+        claimDay: row.claim_day,
+        baseRaxEarned: Number(row.base_rax_earned) || 0,
+      })),
+      result.seasonYear,
+      result.sport,
+      result.seasonLabel,
+    )
+    const totalBaseRax = inSeason.reduce((sum, row) => sum + row.baseRaxEarned, 0)
+    if (totalBaseRax <= 0) return result
+    const computedLatestClaimDay = inSeason.reduce(
+      (latest, row) => (row.claimDay > latest ? row.claimDay : latest),
+      '',
+    )
+
+    return {
+      ...result,
+      totalBaseRax,
+      latestClaimDay: (result.latestClaimDay ?? computedLatestClaimDay) || undefined,
+    }
+  })
+}
+
 function normalizeSearchQuery(query: string): string {
   return query
     .trim()
@@ -528,8 +571,18 @@ export async function searchCatalogPasses(options: {
 
   const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
   const { items } = dedupeCatalogPassSummaries(passRows.map(fromPassRow))
+  const missingTotalKeys = items
+    .filter((item) => item.rowCount > 0 && item.totalBaseRax <= 0)
+    .map((item) => item.externalKey)
+  const results =
+    missingTotalKeys.length > 0
+      ? fillMissingCatalogSearchTotals(
+          items,
+          await fetchDailyRowsByExternalKeys(missingTotalKeys),
+        )
+      : items
   return {
-    results: items,
+    results,
     storageConfigured: true,
   }
 }

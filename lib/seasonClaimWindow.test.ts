@@ -16,13 +16,16 @@ import {
 describe('seasonYearKindForSport', () => {
   it('matches live Real season + seasonDisplay encoding', () => {
     expect(seasonYearKindForSport('NFL')).toBe('start')
-    expect(seasonYearKindForSport('NHL')).toBe('start')
+    expect(seasonYearKindForSport('NHL')).toBe('end')
     expect(seasonYearKindForSport('CFB')).toBe('start')
     expect(seasonYearKindForSport('FC')).toBe('start')
     expect(seasonYearKindForSport('NBA')).toBe('end')
     expect(seasonYearKindForSport('CBB')).toBe('end')
     expect(seasonYearKindForSport('ncaam')).toBe('end')
     expect(seasonYearKindForSport('MLB')).toBe('calendar')
+    expect(seasonYearKindForSport('WNBA')).toBe('calendar')
+    expect(seasonYearKindForSport('Golf')).toBe('calendar')
+    expect(seasonYearKindForSport('UFC')).toBe('calendar')
   })
 })
 
@@ -34,10 +37,10 @@ describe('passSeasonDateWindow', () => {
     })
   })
 
-  it('uses start-year windows for NHL through Stanley Cup playoffs in June', () => {
-    expect(passSeasonDateWindow(2023, 'NHL')).toEqual({
-      start: '2023-08-01',
-      end: '2024-06-30',
+  it('uses end-year windows for NHL through Stanley Cup playoffs in June', () => {
+    expect(passSeasonDateWindow(2026, 'NHL')).toEqual({
+      start: '2025-08-01',
+      end: '2026-06-30',
     })
   })
 
@@ -71,19 +74,25 @@ describe('claimDayInPassSeason', () => {
   })
 
   it('keeps NHL playoff claim days in May and June on the correct pass', () => {
-    expect(claimDayInPassSeason('2024-05-15', 2023, 'NHL', '2023-24')).toBe(true)
-    expect(claimDayInPassSeason('2024-06-18', 2023, 'NHL', '2023-24')).toBe(true)
-    expect(claimDayInPassSeason('2024-07-01', 2023, 'NHL', '2023-24')).toBe(false)
-    expect(claimDayInPassSeason('2023-05-15', 2023, 'NHL', '2023-24')).toBe(false)
+    expect(claimDayInPassSeason('2024-05-15', 2024, 'NHL', '2023-24')).toBe(true)
+    expect(claimDayInPassSeason('2024-06-18', 2024, 'NHL', '2023-24')).toBe(true)
+    expect(claimDayInPassSeason('2024-07-01', 2024, 'NHL', '2023-24')).toBe(false)
+    expect(claimDayInPassSeason('2023-05-15', 2024, 'NHL', '2023-24')).toBe(false)
   })
 })
 
 describe('expectedSeasonLabelFromYear', () => {
-  it('maps season_year 2024 per sport encoding rules', () => {
+  it('maps every sport using its own season_year convention', () => {
     expect(expectedSeasonLabelFromYear(2024, 'NFL')).toBe('2024-25')
-    expect(expectedSeasonLabelFromYear(2024, 'NBA')).toBe('2023-24')
-    expect(expectedSeasonLabelFromYear(2025, 'CBB')).toBe('2024-25')
-    expect(expectedSeasonLabelFromYear(2024, 'MLB')).toBe('2024')
+    expect(expectedSeasonLabelFromYear(2025, 'CFB')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2025, 'FC')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2026, 'NBA')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2026, 'NHL')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2026, 'CBB')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2026, 'MLB')).toBe('2026')
+    expect(expectedSeasonLabelFromYear(2026, 'WNBA')).toBe('2026')
+    expect(expectedSeasonLabelFromYear(2026, 'Golf')).toBe('2026')
+    expect(expectedSeasonLabelFromYear(2023, 'UFC')).toBe('2023')
   })
 })
 
@@ -110,9 +119,9 @@ describe('isCatalogSeasonMetadataAligned', () => {
     expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NFL')).toBe(false)
   })
 
-  it('flags NHL end-year-style metadata after the start-year flip', () => {
-    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NHL')).toBe(false)
-    expect(isCatalogSeasonMetadataAligned(2023, '2023-24', 'NHL')).toBe(true)
+  it('accepts NHL end-year metadata and rejects the shifted start-year pairing', () => {
+    expect(isCatalogSeasonMetadataAligned(2024, '2023-24', 'NHL')).toBe(true)
+    expect(isCatalogSeasonMetadataAligned(2023, '2023-24', 'NHL')).toBe(false)
   })
 
   it('accepts valid CBB 2024-25 metadata on season_year 2025', () => {
@@ -137,7 +146,7 @@ describe('canonicalCatalogPassMetadata', () => {
     })
   })
 
-  it('repairs NHL end-year collision metadata toward start-year', () => {
+  it('keeps NHL 2023-24 on end-year season_year 2024', () => {
     expect(
       canonicalCatalogPassMetadata({
         entityId: 999,
@@ -146,10 +155,10 @@ describe('canonicalCatalogPassMetadata', () => {
         seasonLabel: '2023-24',
       }),
     ).toEqual({
-      seasonYear: 2023,
+      seasonYear: 2024,
       seasonLabel: '2023-24',
-      externalKey: '999|2023|NHL',
-      aligned: false,
+      externalKey: '999|2024|NHL',
+      aligned: true,
     })
   })
 })

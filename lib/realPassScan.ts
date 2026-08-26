@@ -80,8 +80,8 @@ function rarityRank(label: string): number {
 /**
  * Real's `seasonDisplay` is authoritative and already uses the app's format ("2025-26", "2026"),
  * so it wins over the locally derived label. The derived label is only a fallback for malformed or
- * missing values — encoding rules live in seasonYearKindForSport (NFL/NHL/CFB/FC start-year;
- * NBA/CBB end-year; MLB/WNBA/Golf/UFC calendar).
+ * missing values — encoding rules live in seasonYearKindForSport (NFL/CFB/FC start-year;
+ * NBA/NHL/CBB end-year; MLB/WNBA/Golf/UFC calendar).
  */
 function seasonLabelForPass(season: number, sportRaw: string, seasonDisplay: string): string {
   const trimmed = seasonDisplay.replace(/\u2013|\u2014/g, '-').trim()
