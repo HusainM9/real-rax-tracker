@@ -5,7 +5,7 @@ import {
   resolveBaseRaxTotal,
   type EarningsBackfillPass,
 } from './realEarningsShared'
-import type { CatalogImportProfile } from './meowbotCatalogStore'
+import type { CatalogImportProfile, CatalogPassInput } from './meowbotCatalogStore'
 import { filterDailyRowsToPassSeason } from './seasonClaimWindow'
 
 const samplePass: EarningsBackfillPass = {
@@ -375,5 +375,39 @@ describe('backfillRealPassEarnings', () => {
     })
 
     expect(fetchEarnings).toHaveBeenCalled()
+  })
+
+  it('uses NHL start-year for earnings while retaining end-year catalog metadata', async () => {
+    const pass: EarningsBackfillPass = {
+      externalKey: '8471675|2025|NHL',
+      entityId: 8471675,
+      passKind: 'player',
+      sportRaw: 'nhl',
+      seasonYear: 2025,
+      seasonLabel: '2024-25',
+      name: 'Sidney Crosby',
+    }
+    const fetchEarnings = vi.fn(async (query) => {
+      expect(query.season).toBe(2024)
+      return earningsResponse([{ day: '2025-04-17', earnings: 6 }])
+    })
+    const savedPasses: CatalogPassInput[] = []
+
+    const result = await backfillRealPassEarnings([pass], {
+      fetchEarnings,
+      loadCachedProfiles: async () => ({ profiles: [], storageConfigured: true }),
+      savePasses: async (passes) => {
+        savedPasses.push(...passes)
+        return passes.length
+      },
+      saveDailyEarnings: async (rows) => rows.length,
+    })
+
+    expect(result.passes[0]?.rows).toHaveLength(1)
+    expect(savedPasses[0]).toMatchObject({
+      externalKey: '8471675|2025|NHL',
+      seasonYear: 2025,
+      seasonLabel: '2024-25',
+    })
   })
 })

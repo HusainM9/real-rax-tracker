@@ -147,9 +147,13 @@ async function fetchPassEarnings(
 ): Promise<RealPassEarnings | null> {
   const cachedSlug = slugCache.get(pass.sportRaw)
   const slugs = cachedSlug ? [cachedSlug] : realRequestSportSlugs(pass.sportRaw)
-  // Use the canonical year for Real's path: NFL/CFB/FC use start-year while NBA/NHL/CBB use
-  // end-year. This avoids fetching the adjacent season when catalog metadata is stale.
-  const season = catalogPassInput(pass).seasonYear
+  const catalogPass = catalogPassInput(pass)
+  // Real's NHL endpoints disagree: pass listings use end-year (2025 = 2024-25), while
+  // /userpassearnings uses start-year (2024 = 2024-25). Other sports use their canonical year.
+  const season =
+    normalizeSportForSeasonWindow(pass.sportRaw) === 'NHL'
+      ? catalogPass.seasonYear - 1
+      : catalogPass.seasonYear
 
   for (const sport of slugs) {
     try {
@@ -348,15 +352,20 @@ export async function backfillRealPassEarnings(
 /** Default catalog-backed dependencies; cache reads/writes are skipped when Supabase is absent. */
 export function catalogEarningsBackfillDeps(
   fetchEarnings: EarningsBackfillDeps['fetchEarnings'],
-  options: { concurrency?: number } = {},
+  options: { concurrency?: number; cacheTtlMs?: number } = {},
 ): EarningsBackfillDeps {
   if (!meowbotCatalogConfigured()) {
-    return { fetchEarnings, concurrency: options.concurrency }
+    return {
+      fetchEarnings,
+      concurrency: options.concurrency,
+      cacheTtlMs: options.cacheTtlMs,
+    }
   }
 
   return {
     fetchEarnings,
     concurrency: options.concurrency,
+    cacheTtlMs: options.cacheTtlMs,
     loadCachedProfiles: (externalKeys) => fetchCatalogImportProfilesBulk(externalKeys),
     savePasses: (passes) => upsertCatalogPasses(passes),
     saveDailyEarnings: (rows, options) =>

@@ -20,6 +20,7 @@ export const config = {
 
 type RealEarningsRequest = {
   passes?: unknown
+  forceRefresh?: unknown
 }
 
 function parsePass(raw: unknown): EarningsBackfillPass | null {
@@ -123,6 +124,7 @@ export default async function handler(request: Request): Promise<Response> {
       passes,
       catalogEarningsBackfillDeps((query) => getPassEarnings(query, context), {
         concurrency: realConfig.concurrency,
+        cacheTtlMs: body.forceRefresh === true ? 0 : undefined,
       }),
     )
 
