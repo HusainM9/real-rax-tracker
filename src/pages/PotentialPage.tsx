@@ -3922,7 +3922,7 @@ export default function PotentialPage() {
         <CollapsiblePanel
           className="nested-panel recommendation-exclusions"
           title="Exclude sport + season"
-          description="Skip catalog passes for a sport/season. NFL, NHL, and CBB 2022-23 start excluded by default; remove a pair below if you want it ranked."
+          description="Skip catalog passes for a sport/season. NHL 2020-21 through 2022-23, plus NFL and CBB 2022-23, start excluded by default; remove a pair below if you want it ranked."
           badge={
             excludedSportSeasons.length > 0
               ? `${excludedSportSeasons.length} excluded`

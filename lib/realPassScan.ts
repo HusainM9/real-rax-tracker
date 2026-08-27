@@ -80,8 +80,7 @@ function rarityRank(label: string): number {
 /**
  * Real's `seasonDisplay` is authoritative and already uses the app's format ("2025-26", "2026"),
  * so it wins over the locally derived label. The derived label is only a fallback for malformed or
- * missing values — encoding rules live in seasonYearKindForSport (NFL/CFB/FC start-year;
- * NBA/NHL/CBB end-year; MLB/WNBA/Golf/UFC calendar).
+ * missing values — normalized pass years use the catalog conventions in seasonYearKindForSport.
  */
 function seasonLabelForPass(season: number, sportRaw: string, seasonDisplay: string): string {
   const trimmed = seasonDisplay.replace(/\u2013|\u2014/g, '-').trim()
@@ -107,11 +106,14 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
   if (raw.isRefunded === true) return null
 
   const entityId = Number(raw.entityId)
-  const season = Number(raw.season)
+  const sourceSeason = Number(raw.season)
   const sportRaw = canonicalRealSport(String(raw.sport ?? ''))
   if (!Number.isFinite(entityId) || entityId <= 0) return null
-  if (!Number.isInteger(season) || season <= 0) return null
+  if (!Number.isInteger(sourceSeason) || sourceSeason <= 0) return null
   if (!sportRaw) return null
+  // Real's NHL /userpasses response uses start-year (2025 = "2025-26"), while the catalog and
+  // the rest of the app use end-year for NHL. Normalize at the provider boundary.
+  const season = sportRaw === 'nhl' ? sourceSeason + 1 : sourceSeason
 
   const rarityLabel = normalizeRealRarityLabel(String(raw.boostInfo?.rarityLabel ?? ''))
   const playerName = String(raw.label ?? '').trim()

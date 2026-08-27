@@ -574,6 +574,8 @@ export const DEFAULT_RANK_EXCLUDED_SPORT_SEASONS: ReadonlyArray<{
   seasonLabel: string
 }> = [
   { sport: 'NFL', seasonLabel: '2022-23' },
+  { sport: 'NHL', seasonLabel: '2020-21' },
+  { sport: 'NHL', seasonLabel: '2021-22' },
   { sport: 'NHL', seasonLabel: '2022-23' },
   { sport: 'CBB', seasonLabel: '2022-23' },
 ]
