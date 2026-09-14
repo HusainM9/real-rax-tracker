@@ -37,6 +37,7 @@ export type MeowbotPlayerPass = {
   rarityMultiplierLabel?: string
   /** One-day booster multiplier label from `boosterCardInfo`, e.g. `15x`. */
   boosterMultiplierLabel?: string
+  teamId?: number
 }
 
 export type MeowbotPlayerRow = {

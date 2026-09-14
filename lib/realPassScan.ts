@@ -27,6 +27,8 @@ export type NormalizedRealPass = {
   rarityMultiplierLabel?: string
   /** One-day booster, e.g. `15x`. */
   boosterMultiplierLabel?: string
+  /** Real club/franchise id; team passes use entityId. */
+  teamId?: number
 }
 
 export type RealPassPayload = {
@@ -136,6 +138,10 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
     typeof raw.boostInfo?.multiplier === 'string' ? raw.boostInfo.multiplier.trim() : ''
   const boosterFromInfo = parseBoosterCardMultiplier(raw.boosterCardInfo)
   const boosterMultiplierLabel = boosterFromInfo > 1 ? `${boosterFromInfo}x` : ''
+  const teamIdRaw = Number(
+    raw.teamId ?? (raw.entity && typeof raw.entity === 'object' ? (raw.entity as { teamId?: unknown }).teamId : undefined),
+  )
+  const teamId = Number.isFinite(teamIdRaw) && teamIdRaw > 0 ? teamIdRaw : undefined
 
   return {
     entityId,
@@ -153,6 +159,7 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
     boostValueDisplay: boostValueDisplay || undefined,
     rarityMultiplierLabel: rarityMultiplierLabel || undefined,
     boosterMultiplierLabel: boosterMultiplierLabel || undefined,
+    teamId: String(raw.entityType ?? '').trim().toLowerCase() === 'team' ? entityId : teamId,
   }
 }
 

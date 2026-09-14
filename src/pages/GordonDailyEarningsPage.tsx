@@ -4,7 +4,7 @@ import { canUseGordonTools, LOCAL_DEV_ACCOUNT_USERNAME } from '../../lib/gordonA
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
 import { displayRaxValue } from '../lib/displayRax'
-import { formatClaimDay, formatRax, todayIsoLocal } from '../lib/format'
+import { formatClaimDay, formatRax } from '../lib/format'
 import {
   calculateSeasonDailyForUsername,
   fetchGordonAccountList,
@@ -17,7 +17,7 @@ import {
   type SeasonDailyAccountSummary,
 } from '../lib/gordonDailyEarnings'
 import CollapsiblePanel from '../components/CollapsiblePanel'
-import { formatMultiplier } from '../lib/seasonDailyEarnings'
+import { formatMultiplier, realDailyGameDay, realDailyPayoutDay } from '../lib/seasonDailyEarnings'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
@@ -152,7 +152,9 @@ function GordonDailyEarningsContent({
   }, [storageReady])
 
   const ready = useMemo(() => results.filter((item) => !item.error), [results])
-  const claimDay = ready[0]?.claimDay ?? todayIsoLocal()
+  const gameDay = realDailyGameDay()
+  const claimDay = ready[0]?.claimDay ?? gameDay
+  const payoutDay = realDailyPayoutDay(claimDay)
   const combinedEarned = ready.reduce((sum, item) => sum + item.earnedRax, 0)
   const combinedPlayed = ready.reduce((sum, item) => sum + item.currentPassCount, 0)
   const combinedBoosted = ready.reduce((sum, item) => sum + item.boostedPassCount, 0)
@@ -183,8 +185,9 @@ function GordonDailyEarningsContent({
           <p className="eyebrow">Gordon tools</p>
           <h2>Daily earnings</h2>
           <p>
-            Today only — {formatClaimDay(claimDay)}. Performance RAX × (rarity + boost). Not OTD, and not
-            past dates.
+            Game day {formatClaimDay(claimDay)}. Live RAX from today’s games (player box score / plays).
+            The player-link series posts {formatClaimDay(payoutDay)} at 7am ET. Performance × (rarity +
+            boost). Not OTD.
           </p>
         </div>
         <div className="hero-actions">
@@ -272,24 +275,24 @@ function GordonDailyEarningsContent({
 
       <section className="stats-grid">
         <StatCard
-          label="Today"
+          label="Game day"
           value={formatClaimDay(claimDay)}
-          hint="Current day only"
+          hint={`Payout ${formatClaimDay(payoutDay)} 7am ET`}
         />
         <StatCard
           label="Passes with a game"
           value={String(combinedPlayed)}
-          hint="Owned current-season cards that have a performance today"
+          hint="Current-season cards with live RAX in today’s games"
         />
         <StatCard
-          label="Today RAX"
+          label="Tomorrow RAX"
           value={formatRax(displayRaxValue(combinedEarned))}
-          hint="Performance × (rarity + boost)"
+          hint="Live box/plays calc · posts 7am ET tomorrow"
         />
         <StatCard
           label="Boosted"
           value={String(combinedBoosted)}
-          hint="Passes with a one-day booster today"
+          hint="Passes with a one-day booster on this game day"
         />
       </section>
 
@@ -297,7 +300,7 @@ function GordonDailyEarningsContent({
         <div className="section-heading">
           <div>
             <h2>Account totals</h2>
-            <p>What each account earns today from owned passes that have a performance.</p>
+            <p>What each account earns from today’s games. Real confirms it on the player link at 7am ET.</p>
           </div>
         </div>
         {accountRows.length === 0 ? (
@@ -308,9 +311,9 @@ function GordonDailyEarningsContent({
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Played today</th>
+                  <th>Played</th>
                   <th>Performance</th>
-                  <th>Today RAX</th>
+                  <th>Tomorrow RAX</th>
                   <th>Boosted</th>
                 </tr>
               </thead>
@@ -342,17 +345,17 @@ function GordonDailyEarningsContent({
       <section className="panel">
         <div className="section-heading">
           <div>
-            <h2>Today’s performances</h2>
+            <h2>Game-day performances</h2>
             <p>
-              Performance RAX × (rarity + boost). Boost is a one-day booster multiplier added to rarity, not
-              play rating.
+              Latest Real calc for {formatClaimDay(claimDay)}. RAX posts {formatClaimDay(payoutDay)} at 7am
+              ET. Boost is a one-day booster added to rarity, not play rating.
             </p>
           </div>
         </div>
         {passRows.length === 0 ? (
           <p className="empty">
-            No performances posted for {formatClaimDay(claimDay)} yet. Real sends earnings the morning after
-            games.
+            No live RAX for {formatClaimDay(claimDay)} yet. Calculate again while games are on; the
+            player-link series still posts {formatClaimDay(payoutDay)} 7am ET.
           </p>
         ) : (
           <div className="table-wrap">
@@ -365,7 +368,7 @@ function GordonDailyEarningsContent({
                   <th>Boost</th>
                   <th>Total</th>
                   <th>Performance</th>
-                  <th>Today RAX</th>
+                  <th>Tomorrow RAX</th>
                 </tr>
               </thead>
               <tbody>

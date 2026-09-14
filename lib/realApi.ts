@@ -364,6 +364,8 @@ export type RealPass = {
   boostInfo?: RealBoostInfo | null
   /** Nested entity — source of player face / team badge avatar keys. */
   entity?: RealPassEntity | null
+  /** Club/franchise id for the player; team passes use entityId instead. */
+  teamId?: number | string | null
 }
 
 export type RealCollectingInfo = {
@@ -598,6 +600,28 @@ export type RealPlayerPlaysQuery = {
   viewFrame?: string
 }
 
+/** Recent plays for a team entity (`/teams/{id}/sport/{sport}/plays/recent`). */
+export async function listTeamRecentPlays(
+  query: RealPlayerPlaysQuery,
+  context: RealApiContext,
+): Promise<RealPlayerPlay[]> {
+  const path = `/teams/${query.entityId}/sport/${encodeURIComponent(query.sport)}/plays/recent`
+  try {
+    const data = await realGetJson<{ plays?: unknown }>(path, context, {
+      limit: query.limit ?? 1000,
+      season: query.season,
+      viewFrame: query.viewFrame ?? 'default',
+      beforeDay: query.beforeDay,
+    })
+    return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
+  } catch (error) {
+    if (error instanceof RealApiError && (error.kind === 'not_found' || error.kind === 'upstream')) {
+      return []
+    }
+    throw error
+  }
+}
+
 /**
  * Recent plays for a player. Empty for many MLB pitchers who never bat;
  * prefer {@link listPlayerTopPlays} for season pack averages.
@@ -711,4 +735,68 @@ export async function listAllPlayerRecentPlays(
   }
 
   return [...byId.values()]
+}
+
+export type RealDayGame = {
+  id?: number | string
+  sport?: string
+  day?: string
+  status?: string
+  homeTeamId?: number | string
+  awayTeamId?: number | string
+  scorers?: unknown
+  [key: string]: unknown
+}
+
+/** Today's (or any day's) games for a Real sport slug (`soccer`, `mlb`, …). */
+export async function listGamesByDay(
+  sport: string,
+  day: string,
+  context: RealApiContext,
+): Promise<RealDayGame[]> {
+  const path = `/games/${encodeURIComponent(sport)}/day/${encodeURIComponent(day)}`
+  try {
+    const data = await realGetJson<{ games?: unknown }>(path, context)
+    return Array.isArray(data.games) ? (data.games as RealDayGame[]) : []
+  } catch (error) {
+    if (error instanceof RealApiError && (error.kind === 'not_found' || error.kind === 'upstream')) {
+      return []
+    }
+    throw error
+  }
+}
+
+export type RealPlayerBoxScorePayload = {
+  playerBoxScore?: {
+    id?: number
+    playerId?: number
+    gameId?: number
+    day?: string
+    played?: boolean
+    minutes?: number
+    value?: string | number
+    [key: string]: unknown
+  } | null
+  advancedStats?: {
+    raxEarnings?: number
+    earningsConfirmed?: boolean
+    [key: string]: unknown
+  } | null
+  [key: string]: unknown
+}
+
+/** Live player-link box score. `advancedStats.raxEarnings` is today's RAX before the 7am series drop. */
+export async function getPlayerBoxScore(
+  boxScoreId: number,
+  context: RealApiContext,
+): Promise<RealPlayerBoxScorePayload | null> {
+  if (!Number.isInteger(boxScoreId) || boxScoreId <= 0) return null
+  try {
+    return await realGetJson<RealPlayerBoxScorePayload>(`/playerboxscores/${boxScoreId}`, context)
+  } catch (error) {
+    if (error instanceof RealApiError && (error.kind === 'not_found' || error.kind === 'upstream')) {
+      return null
+    }
+    throw error
+  }
 }

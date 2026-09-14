@@ -55,6 +55,7 @@ export type DailyRaxBackfillOptions = {
   onProgress?: (progress: DailyRaxBackfillProgress) => void
   batchSize?: number
   concurrency?: number
+  forceRefresh?: boolean
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -108,6 +109,7 @@ type BatchOutcome = {
 async function fetchEarningsBatchOnce(
   passes: EarningsBackfillPass[],
   signal?: AbortSignal,
+  forceRefresh = false,
 ): Promise<{
   passes: EarningsBackfillPassResult[]
   failures: EarningsBackfillFailure[]
@@ -116,7 +118,7 @@ async function fetchEarningsBatchOnce(
   const response = await fetch(REAL_EARNINGS_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ passes }),
+    body: JSON.stringify({ passes, forceRefresh }),
     signal,
   })
 
@@ -164,6 +166,7 @@ async function fetchEarningsBatchOnce(
 async function fetchEarningsBatch(
   passes: EarningsBackfillPass[],
   signal?: AbortSignal,
+  forceRefresh = false,
 ): Promise<{
   passes: EarningsBackfillPassResult[]
   failures: EarningsBackfillFailure[]
@@ -177,7 +180,7 @@ async function fetchEarningsBatch(
       await sleep(batchRetryDelayMs(attempt - 1), signal)
     }
     try {
-      return await fetchEarningsBatchOnce(passes, signal)
+      return await fetchEarningsBatchOnce(passes, signal, forceRefresh)
     } catch (error) {
       if (error instanceof DailyRaxBackfillFatalError) throw error
       if (error instanceof DOMException && error.name === 'AbortError') throw error
@@ -238,7 +241,10 @@ export async function fetchDailyRaxRows(
     const settled = await Promise.all(
       wave.map(async (batch): Promise<BatchOutcome> => {
         try {
-          return { batch, result: await fetchEarningsBatch(batch, options.signal) }
+          return {
+            batch,
+            result: await fetchEarningsBatch(batch, options.signal, options.forceRefresh === true),
+          }
         } catch (error) {
           if (error instanceof DailyRaxBackfillFatalError) throw error
           if (error instanceof DOMException && error.name === 'AbortError') throw error

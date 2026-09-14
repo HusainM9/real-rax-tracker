@@ -70,6 +70,7 @@ describe('normalizeRealPass', () => {
       boostValueDisplay: undefined,
       rarityMultiplierLabel: '150x',
       boosterMultiplierLabel: undefined,
+      teamId: undefined,
     })
   })
 
@@ -85,6 +86,11 @@ describe('normalizeRealPass', () => {
       }),
     )
     expect(pass?.avatar).toBe('c5f7b44ab4ea35fa57df203aa18eed54')
+  })
+
+  it('keeps the player’s Real teamId for today’s game matching', () => {
+    const pass = normalizeRealPass(realPass({ teamId: 1347167 }))
+    expect(pass?.teamId).toBe(1347167)
   })
 
   it('keeps team entityType instead of guessing from the label', () => {

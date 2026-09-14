@@ -3,6 +3,8 @@ import {
   computeDailyEarnedRax,
   filterCurrentSeasonPasses,
   isPassCurrentlyPlaying,
+  realDailyGameDay,
+  realDailyPayoutDay,
   resolveSeasonDailyRarityMultiplier,
   summarizeSeasonDailyAccount,
   summarizeTodayPass,
@@ -88,6 +90,23 @@ describe('isPassCurrentlyPlaying', () => {
       ),
     ).toBe(false)
   })
+
+  it('keeps the latest FC season when that is the only FC season in the collection', () => {
+    const result = filterCurrentSeasonPasses(
+      [
+        pass({
+          entityId: 3,
+          sportRaw: 'fc',
+          sport: 'FC',
+          seasonYear: 2025,
+          seasonLabel: '2025-26',
+          externalKey: '3|2025|FC',
+        }),
+      ],
+      '2026-09-14',
+    )
+    expect(result.current.map((item) => item.entityId)).toEqual([3])
+  })
 })
 
 describe('resolveSeasonDailyRarityMultiplier', () => {
@@ -96,6 +115,18 @@ describe('resolveSeasonDailyRarityMultiplier', () => {
       153,
     )
     expect(resolveSeasonDailyRarityMultiplier(pass({ rarityLabel: 'Iconic 1' }))).toBe(150)
+  })
+})
+
+describe('realDailyGameDay', () => {
+  it('stays on the current ET game day after the 7am drop', () => {
+    expect(realDailyGameDay(new Date('2026-09-14T20:00:00.000Z'))).toBe('2026-09-14')
+  })
+
+  it('keeps yesterday until 7am ET, then switches to the next game day', () => {
+    expect(realDailyGameDay(new Date('2026-09-15T10:59:00.000Z'))).toBe('2026-09-14')
+    expect(realDailyGameDay(new Date('2026-09-15T11:00:00.000Z'))).toBe('2026-09-15')
+    expect(realDailyPayoutDay('2026-09-14')).toBe('2026-09-15')
   })
 })
 
@@ -119,6 +150,22 @@ describe('summarizeTodayPass', () => {
   it('returns null when the pass has no performance today', () => {
     expect(
       summarizeTodayPass(pass(), [{ claimDay: '2026-09-13', baseRaxEarned: 10 }], '2026-09-14'),
+    ).toBeNull()
+  })
+
+  it('ignores yesterday’s already-paid games on the current game day', () => {
+    expect(
+      summarizeTodayPass(
+        pass({
+          sportRaw: 'fc',
+          sport: 'FC',
+          seasonYear: 2026,
+          seasonLabel: '2026-27',
+          externalKey: '1|2026|FC',
+        }),
+        [{ claimDay: '2026-09-13T07:00:00.000Z', baseRaxEarned: 10 }],
+        '2026-09-14',
+      ),
     ).toBeNull()
   })
 })

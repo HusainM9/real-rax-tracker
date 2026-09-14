@@ -2,24 +2,23 @@ import { normalizeRealUsername } from '../../lib/importOwnershipTypes'
 import { validateAccountUsername } from '../../lib/accountPasswordRules'
 import { parseFetchJson } from './readResponseJson'
 import { fetchRealUserPasses } from './realPassImport'
-import { fetchDailyRaxRows } from './realEarningsImport'
 import {
-  dailyRowsFromTrackerCard,
   filterCurrentSeasonPasses,
   seasonDailyAccountError,
   seasonDailyPassFromReal,
   seasonDailyPassesFromTrackerData,
   summarizeSeasonDailyAccount,
   summarizeTodayPass,
+  realDailyGameDay,
   type SeasonDailyAccountSummary,
   type SeasonDailyPassInput,
 } from './seasonDailyEarnings'
-import { todayIsoLocal } from './format'
 import type { RaxTrackerData } from '../types/rax'
-import type { EarningsBackfillDailyRow, EarningsBackfillPass } from '../../lib/realEarningsShared'
+import type { EarningsBackfillDailyRow } from '../../lib/realEarningsShared'
 
 export const GORDON_DAILY_ACCOUNTS_STORAGE_KEY = 'real-rax-tracker:gordon-daily-accounts:v1'
 export const MAX_GORDON_DAILY_ACCOUNTS = 20
+export const GORDON_DAILY_LIVE_ENDPOINT = '/api/gordon/daily-live'
 
 export type GordonAccountProfileSummary = {
   username: string
@@ -98,56 +97,57 @@ export async function fetchGordonAccountList(): Promise<GordonAccountProfileSumm
   return Array.isArray(payload.profiles) ? payload.profiles : []
 }
 
-function toBackfillPass(pass: SeasonDailyPassInput): EarningsBackfillPass | null {
-  if (pass.entityId <= 0) return null
-  return {
-    externalKey: pass.externalKey,
-    entityId: pass.entityId,
-    passKind: pass.passKind,
-    sportRaw: pass.sportRaw,
-    seasonYear: pass.seasonYear,
-    seasonLabel: pass.seasonLabel,
-    name: pass.name,
-    rarityLabel: pass.rarityLabel,
-    avatar: pass.avatar,
-  }
-}
-
-async function loadSeasonDailyRows(
+async function loadLiveDailyRows(
   current: SeasonDailyPassInput[],
-  localData: RaxTrackerData | undefined,
+  claimDay: string,
   onProgress?: (progress: SeasonDailyProgress) => void,
   signal?: AbortSignal,
 ): Promise<Map<string, EarningsBackfillDailyRow[]>> {
   const rowsByKey = new Map<string, EarningsBackfillDailyRow[]>()
+  if (current.length === 0) return rowsByKey
 
-  if (localData) {
-    const cardsById = new Map(localData.cards.map((card) => [card.id, card]))
-    for (const pass of current) {
-      if (!pass.cardId) continue
-      const card = cardsById.get(pass.cardId)
-      if (!card) continue
-      rowsByKey.set(pass.externalKey, dailyRowsFromTrackerCard(localData, pass.cardId, card))
-    }
-    return rowsByKey
-  }
-
-  const backfill = current.map(toBackfillPass).filter((pass): pass is EarningsBackfillPass => pass != null)
-  if (backfill.length === 0) return rowsByKey
-
-  const result = await fetchDailyRaxRows(backfill, {
-    signal,
-    onProgress: (progress) =>
-      onProgress?.({
-        phase: 'earnings',
-        current: progress.completed,
-        total: progress.total,
-        label: `Today’s performances ${progress.completed}/${progress.total}`,
-      }),
+  onProgress?.({
+    phase: 'earnings',
+    current: 0,
+    total: current.length,
+    label: 'Loading live game RAX',
   })
-  for (const [key, rows] of result.rowsByExternalKey) {
-    rowsByKey.set(key, rows)
+
+  const response = await fetch(GORDON_DAILY_LIVE_ENDPOINT, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      day: claimDay,
+      passes: current.map((pass) => ({
+        externalKey: pass.externalKey,
+        entityId: pass.entityId,
+        sportRaw: pass.sportRaw,
+        seasonYear: pass.seasonYear,
+        passKind: pass.passKind,
+        teamId: pass.teamId,
+      })),
+    }),
+    signal,
+  })
+  const payload = await parseFetchJson<{
+    rows?: Array<{ externalKey?: string; claimDay?: string; baseRaxEarned?: number }>
+  }>(response, 'Could not load live daily RAX')
+
+  for (const row of payload.rows ?? []) {
+    const key = typeof row.externalKey === 'string' ? row.externalKey : ''
+    const day = typeof row.claimDay === 'string' ? row.claimDay : claimDay
+    const earned = Number(row.baseRaxEarned)
+    if (!key || !Number.isFinite(earned) || earned <= 0) continue
+    rowsByKey.set(key, [{ claimDay: day, baseRaxEarned: earned }])
   }
+
+  onProgress?.({
+    phase: 'earnings',
+    current: current.length,
+    total: current.length,
+    label: `Live RAX for ${rowsByKey.size} pass${rowsByKey.size === 1 ? '' : 'es'}`,
+  })
   return rowsByKey
 }
 
@@ -161,7 +161,7 @@ export async function calculateSeasonDailyForUsername(
   } = {},
 ): Promise<SeasonDailyAccountSummary> {
   const normalized = normalizeRealUsername(username)
-  const today = options.today ?? todayIsoLocal()
+  const today = options.today ?? realDailyGameDay()
 
   try {
     options.onProgress?.({
@@ -189,15 +189,11 @@ export async function calculateSeasonDailyForUsername(
       label: `${current.length} current-season passes`,
     })
 
-    const rowsByKey = await loadSeasonDailyRows(
-      current,
-      options.localData,
-      options.onProgress,
-      options.signal,
-    )
+    const rowsByKey = await loadLiveDailyRows(current, today, options.onProgress, options.signal)
     const summaries = current
       .map((pass) => summarizeTodayPass(pass, rowsByKey.get(pass.externalKey) ?? [], today))
       .filter((summary): summary is NonNullable<typeof summary> => summary != null)
+
     return summarizeSeasonDailyAccount(normalized, today, summaries, current.length, skipped)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not calculate daily earnings.'

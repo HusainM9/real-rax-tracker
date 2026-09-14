@@ -40,6 +40,7 @@ export type SeasonDailyPassInput = {
   externalKey: string
   /** Present when the pass came from a local tracker collection. */
   cardId?: string
+  teamId?: number
 }
 
 export type SeasonDailyPassSummary = {
@@ -102,6 +103,53 @@ export function formatMultiplier(value: number): string {
   return `${rounded}×`
 }
 
+export function normalizeClaimDay(value: string): string | null {
+  return /^(\d{4}-\d{2}-\d{2})/.exec(value.trim())?.[1] ?? null
+}
+
+export function shiftIsoDate(iso: string, days: number): string {
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + days))
+  return date.toISOString().slice(0, 10)
+}
+
+/** Real posts the previous game day’s earnings around this hour Eastern. */
+export const REAL_DAILY_PAYOUT_HOUR_ET = 7
+
+function etDateTimeParts(now: Date): { year: string; month: string; day: string; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now)
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return {
+    year: value('year'),
+    month: value('month'),
+    day: value('day'),
+    hour: Number(value('hour')),
+  }
+}
+
+/**
+ * Current Real game day: Eastern calendar date, rolling forward at the 7am ET payout drop.
+ * Before 7am ET the previous game day is still in progress (those earnings pay at 7am).
+ */
+export function realDailyGameDay(now = new Date()): string {
+  const { year, month, day, hour } = etDateTimeParts(now)
+  const etDate = `${year}-${month}-${day}`
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(etDate)) return todayIsoLocal()
+  return hour < REAL_DAILY_PAYOUT_HOUR_ET ? shiftIsoDate(etDate, -1) : etDate
+}
+
+/** Morning Real posts the previous game day’s earnings (game day + 1, 7am ET). */
+export function realDailyPayoutDay(gameDay: string): string {
+  return shiftIsoDate(gameDay, 1)
+}
+
 export function latestSeasonBySport(passes: SeasonDailyPassInput[]): Map<string, number> {
   const latest = new Map<string, number>()
   for (const pass of passes) {
@@ -124,9 +172,10 @@ export function isPassCurrentlyPlaying(
   }
   if (sportSkipsClaimDaySeasonFilter(pass.sport)) {
     const window = resolvePassSeasonDateWindow(pass.seasonYear, pass.sport, pass.seasonLabel)
-    if (window) return today >= window.start && today <= window.end
+    const inWindow = Boolean(window && today >= window.start && today <= window.end)
     const latest = latestSeasons?.get(pass.sportRaw)
-    return latest != null && pass.seasonYear === latest
+    const isLatest = latest != null && pass.seasonYear === latest
+    return inWindow || isLatest
   }
   return claimDayInPassSeason(today, pass.seasonYear, pass.sport, pass.seasonLabel)
 }
@@ -151,6 +200,7 @@ export function seasonDailyPassFromReal(pass: MeowbotPlayerPass): SeasonDailyPas
     rarityMultiplierLabel: pass.rarityMultiplierLabel,
     boosterMultiplierLabel: pass.boosterMultiplierLabel,
     externalKey: usernameImportExternalKey(pass.entityId, pass.season, pass.sportRaw),
+    teamId: pass.teamId,
   }
 }
 
@@ -213,14 +263,14 @@ export function todayPerformanceRow(
   rows: EarningsBackfillDailyRow[],
   today: string,
 ): EarningsBackfillDailyRow | null {
-  const match = rows.find((row) => row.claimDay.slice(0, 10) === today && row.baseRaxEarned > 0)
+  const match = rows.find((row) => normalizeClaimDay(row.claimDay) === today && row.baseRaxEarned > 0)
   return match ?? null
 }
 
 export function summarizeTodayPass(
   pass: SeasonDailyPassInput,
   rows: EarningsBackfillDailyRow[],
-  today = todayIsoLocal(),
+  today = realDailyGameDay(),
 ): SeasonDailyPassSummary | null {
   const row = todayPerformanceRow(rows, today)
   if (!row) return null
@@ -271,7 +321,7 @@ export function summarizeSeasonDailyAccount(
 export function seasonDailyAccountError(
   username: string,
   error: string,
-  claimDay = todayIsoLocal(),
+  claimDay = realDailyGameDay(),
 ): SeasonDailyAccountSummary {
   return {
     username,
@@ -289,7 +339,7 @@ export function seasonDailyAccountError(
 
 export function filterCurrentSeasonPasses(
   passes: SeasonDailyPassInput[],
-  today = todayIsoLocal(),
+  today = realDailyGameDay(),
 ): { current: SeasonDailyPassInput[]; skipped: number } {
   const latest = latestSeasonBySport(passes)
   const current = passes.filter((pass) => isPassCurrentlyPlaying(pass, today, latest))
