@@ -6,6 +6,8 @@ export const config = {
   runtime: 'edge',
 }
 
+export const MAX_LIVE_DAILY_PASSES_PER_REQUEST = 12
+
 type DailyLiveRequest = {
   day?: unknown
   passes?: unknown
@@ -88,6 +90,12 @@ export default async function handler(request: Request): Promise<Response> {
   const day = typeof body.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : ''
   if (!day) {
     return Response.json({ error: 'day (YYYY-MM-DD) is required.' }, { status: 400 })
+  }
+  if (Array.isArray(body.passes) && body.passes.length > MAX_LIVE_DAILY_PASSES_PER_REQUEST) {
+    return Response.json(
+      { error: `At most ${MAX_LIVE_DAILY_PASSES_PER_REQUEST} passes can be checked per request.` },
+      { status: 413 },
+    )
   }
 
   const passes = parsePasses(body.passes)

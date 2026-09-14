@@ -17,7 +17,7 @@ import {
   type SeasonDailyAccountSummary,
 } from '../lib/gordonDailyEarnings'
 import CollapsiblePanel from '../components/CollapsiblePanel'
-import { formatMultiplier, realDailyGameDay, realDailyPayoutDay } from '../lib/seasonDailyEarnings'
+import { realDailyGameDay, realDailyPayoutDay } from '../lib/seasonDailyEarnings'
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
@@ -156,8 +156,6 @@ function GordonDailyEarningsContent({
   const claimDay = ready[0]?.claimDay ?? gameDay
   const payoutDay = realDailyPayoutDay(claimDay)
   const combinedEarned = ready.reduce((sum, item) => sum + item.earnedRax, 0)
-  const combinedPlayed = ready.reduce((sum, item) => sum + item.currentPassCount, 0)
-  const combinedBoosted = ready.reduce((sum, item) => sum + item.boostedPassCount, 0)
   const listedUsernames = useMemo(() => {
     const fromProfiles = profiles.map((profile) => profile.username)
     return normalizeGordonDailyUsernames([...fromProfiles, ...selected], ownUsername)
@@ -174,10 +172,6 @@ function GordonDailyEarningsContent({
       )
     })
   }, [calculating, claimDay, results, selected])
-  const passRows = ready.flatMap((account) =>
-    account.passes.map((pass) => ({ account: account.username, pass })),
-  )
-
   return (
     <div className="page-stack gordon-daily-page">
       <section className="hero-card">
@@ -185,9 +179,8 @@ function GordonDailyEarningsContent({
           <p className="eyebrow">Gordon tools</p>
           <h2>Daily earnings</h2>
           <p>
-            Game day {formatClaimDay(claimDay)}. Live RAX from today’s games (player box score / plays).
-            The player-link series posts {formatClaimDay(payoutDay)} at 7am ET. Performance × (rarity +
-            boost). Not OTD.
+            Current estimated earnings from {formatClaimDay(claimDay)}, expected to post{' '}
+            {formatClaimDay(payoutDay)} at 7am ET.
           </p>
         </div>
         <div className="hero-actions">
@@ -280,9 +273,9 @@ function GordonDailyEarningsContent({
           hint={`Payout ${formatClaimDay(payoutDay)} 7am ET`}
         />
         <StatCard
-          label="Passes with a game"
-          value={String(combinedPlayed)}
-          hint="Current-season cards with live RAX in today’s games"
+          label="Payout"
+          value={formatClaimDay(payoutDay)}
+          hint="Expected at 7am ET"
         />
         <StatCard
           label="Tomorrow RAX"
@@ -290,9 +283,9 @@ function GordonDailyEarningsContent({
           hint="Live box/plays calc · posts 7am ET tomorrow"
         />
         <StatCard
-          label="Boosted"
-          value={String(combinedBoosted)}
-          hint="Passes with a one-day booster on this game day"
+          label="Accounts"
+          value={String(ready.length)}
+          hint={`${selected.length} selected`}
         />
       </section>
 
@@ -311,10 +304,7 @@ function GordonDailyEarningsContent({
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Played</th>
-                  <th>Performance</th>
                   <th>Tomorrow RAX</th>
-                  <th>Boosted</th>
                 </tr>
               </thead>
               <tbody>
@@ -325,15 +315,10 @@ function GordonDailyEarningsContent({
                       <small className="table-sub">
                         {summary.error
                           ? summary.error
-                          : `${summary.ownedPassCount} current-season pass${summary.ownedPassCount === 1 ? '' : 'es'} owned`}
+                          : `Payout ${formatClaimDay(realDailyPayoutDay(summary.claimDay))} at 7am ET`}
                       </small>
                     </td>
-                    <td>{summary.error ? '—' : String(summary.currentPassCount)}</td>
-                    <td>
-                      {summary.error ? '—' : `${formatRax(displayRaxValue(summary.performanceRax))} RAX`}
-                    </td>
                     <td>{summary.error ? '—' : `${formatRax(displayRaxValue(summary.earnedRax))} RAX`}</td>
-                    <td>{summary.error ? '—' : String(summary.boostedPassCount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -342,61 +327,6 @@ function GordonDailyEarningsContent({
         )}
       </section>
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <h2>Game-day performances</h2>
-            <p>
-              Latest Real calc for {formatClaimDay(claimDay)}. RAX posts {formatClaimDay(payoutDay)} at 7am
-              ET. Boost is a one-day booster added to rarity, not play rating.
-            </p>
-          </div>
-        </div>
-        {passRows.length === 0 ? (
-          <p className="empty">
-            No live RAX for {formatClaimDay(claimDay)} yet. Calculate again while games are on; the
-            player-link series still posts {formatClaimDay(payoutDay)} 7am ET.
-          </p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  {ready.length > 1 ? <th>Account</th> : null}
-                  <th>Pass</th>
-                  <th>Rarity</th>
-                  <th>Boost</th>
-                  <th>Total</th>
-                  <th>Performance</th>
-                  <th>Tomorrow RAX</th>
-                </tr>
-              </thead>
-              <tbody>
-                {passRows.map(({ account, pass }) => (
-                  <tr key={`${account}:${pass.externalKey}`}>
-                    {ready.length > 1 ? <td>@{account}</td> : null}
-                    <td>
-                      <strong>{pass.name}</strong>
-                      <small className="table-sub">
-                        {pass.sport} · {pass.seasonLabel}
-                        {pass.passKind === 'team' ? ' · team' : ''}
-                      </small>
-                    </td>
-                    <td>
-                      {pass.rarityLabel || '—'}
-                      <small className="table-sub">{formatMultiplier(pass.rarityMultiplier)}</small>
-                    </td>
-                    <td>{pass.boostLabel}</td>
-                    <td>{formatMultiplier(pass.totalMultiplier)}</td>
-                    <td>{formatRax(displayRaxValue(pass.performanceRax))} RAX</td>
-                    <td>{formatRax(displayRaxValue(pass.earnedRax))} RAX</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
     </div>
   )
 }

@@ -19,6 +19,7 @@ import type { EarningsBackfillDailyRow } from '../../lib/realEarningsShared'
 export const GORDON_DAILY_ACCOUNTS_STORAGE_KEY = 'real-rax-tracker:gordon-daily-accounts:v1'
 export const MAX_GORDON_DAILY_ACCOUNTS = 20
 export const GORDON_DAILY_LIVE_ENDPOINT = '/api/gordon/daily-live'
+export const GORDON_DAILY_LIVE_BATCH_SIZE = 12
 
 export type GordonAccountProfileSummary = {
   username: string
@@ -97,6 +98,28 @@ export async function fetchGordonAccountList(): Promise<GordonAccountProfileSumm
   return Array.isArray(payload.profiles) ? payload.profiles : []
 }
 
+/** Group by sport first so each short serverless invocation only loads one day's slate. */
+export function liveDailyPassBatches<T extends { sportRaw: string }>(
+  passes: T[],
+  batchSize = GORDON_DAILY_LIVE_BATCH_SIZE,
+): T[][] {
+  const size = Math.max(1, Math.floor(batchSize))
+  const bySport = new Map<string, T[]>()
+  for (const pass of passes) {
+    const group = bySport.get(pass.sportRaw) ?? []
+    group.push(pass)
+    bySport.set(pass.sportRaw, group)
+  }
+
+  const batches: T[][] = []
+  for (const group of bySport.values()) {
+    for (let index = 0; index < group.length; index += size) {
+      batches.push(group.slice(index, index + size))
+    }
+  }
+  return batches
+}
+
 async function loadLiveDailyRows(
   current: SeasonDailyPassInput[],
   claimDay: string,
@@ -113,33 +136,47 @@ async function loadLiveDailyRows(
     label: 'Loading live game RAX',
   })
 
-  const response = await fetch(GORDON_DAILY_LIVE_ENDPOINT, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      day: claimDay,
-      passes: current.map((pass) => ({
-        externalKey: pass.externalKey,
-        entityId: pass.entityId,
-        sportRaw: pass.sportRaw,
-        seasonYear: pass.seasonYear,
-        passKind: pass.passKind,
-        teamId: pass.teamId,
-      })),
-    }),
-    signal,
-  })
-  const payload = await parseFetchJson<{
-    rows?: Array<{ externalKey?: string; claimDay?: string; baseRaxEarned?: number }>
-  }>(response, 'Could not load live daily RAX')
+  const batches = liveDailyPassBatches(current)
+  let completed = 0
 
-  for (const row of payload.rows ?? []) {
-    const key = typeof row.externalKey === 'string' ? row.externalKey : ''
-    const day = typeof row.claimDay === 'string' ? row.claimDay : claimDay
-    const earned = Number(row.baseRaxEarned)
-    if (!key || !Number.isFinite(earned) || earned <= 0) continue
-    rowsByKey.set(key, [{ claimDay: day, baseRaxEarned: earned }])
+  for (const batch of batches) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const response = await fetch(GORDON_DAILY_LIVE_ENDPOINT, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        day: claimDay,
+        passes: batch.map((pass) => ({
+          externalKey: pass.externalKey,
+          entityId: pass.entityId,
+          sportRaw: pass.sportRaw,
+          seasonYear: pass.seasonYear,
+          passKind: pass.passKind,
+          teamId: pass.teamId,
+        })),
+      }),
+      signal,
+    })
+    const payload = await parseFetchJson<{
+      rows?: Array<{ externalKey?: string; claimDay?: string; baseRaxEarned?: number }>
+    }>(response, 'Could not load live daily RAX')
+
+    for (const row of payload.rows ?? []) {
+      const key = typeof row.externalKey === 'string' ? row.externalKey : ''
+      const day = typeof row.claimDay === 'string' ? row.claimDay : claimDay
+      const earned = Number(row.baseRaxEarned)
+      if (!key || !Number.isFinite(earned) || earned <= 0) continue
+      rowsByKey.set(key, [{ claimDay: day, baseRaxEarned: earned }])
+    }
+
+    completed += batch.length
+    onProgress?.({
+      phase: 'earnings',
+      current: Math.min(completed, current.length),
+      total: current.length,
+      label: `Loading live game RAX ${Math.min(completed, current.length)}/${current.length}`,
+    })
   }
 
   onProgress?.({
