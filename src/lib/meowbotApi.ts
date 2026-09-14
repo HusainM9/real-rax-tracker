@@ -30,6 +30,13 @@ export type MeowbotPlayerPass = {
   seasonLabel?: string
   /** Real CDN avatar key for player faces / team badges. */
   avatar?: string
+  earned?: number
+  isActive?: boolean
+  boostValue?: number
+  boostValueDisplay?: string
+  rarityMultiplierLabel?: string
+  /** One-day booster multiplier label from `boosterCardInfo`, e.g. `15x`. */
+  boosterMultiplierLabel?: string
 }
 
 export type MeowbotPlayerRow = {

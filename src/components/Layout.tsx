@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import StorageWarningBanner from './StorageWarningBanner'
+import { canUseGordonTools } from '../../lib/gordonAccess'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useAuth } from '../context/AuthContext'
 
@@ -105,7 +106,10 @@ export default function Layout() {
             aria-label="Main navigation"
           >
             <ul className="nav-list">
-              {links.map((link) => (
+              {(canUseGordonTools(username, accountDevBypass)
+                ? [...links, { to: '/gordon/daily', label: 'Daily' }]
+                : links
+              ).map((link) => (
                 <li key={link.to}>
                   <NavLink
                     to={link.to}

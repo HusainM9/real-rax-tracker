@@ -1,3 +1,4 @@
+import { parseBoosterCardMultiplier } from './passEarningsBoost'
 import { RARITY_TIERS, passRarityLookupKey } from './rarityFilter'
 import { runWithConcurrency } from './runWithConcurrency'
 import { seasonLabelFromSportRaw } from './usernameImportShared'
@@ -17,6 +18,15 @@ export type NormalizedRealPass = {
   seasonLabel?: string
   /** Real CDN avatar key from `entity.avatar` (face or team badge). */
   avatar?: string
+  /** Real-reported season-to-date RAX (already rarity/boost adjusted when present). */
+  earned?: number
+  isActive?: boolean
+  boostValue?: number
+  boostValueDisplay?: string
+  /** Raw `boostInfo.multiplier` hint, e.g. `150x`. */
+  rarityMultiplierLabel?: string
+  /** One-day booster, e.g. `15x`. */
+  boosterMultiplierLabel?: string
 }
 
 export type RealPassPayload = {
@@ -118,6 +128,14 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
   const rarityLabel = normalizeRealRarityLabel(String(raw.boostInfo?.rarityLabel ?? ''))
   const playerName = String(raw.label ?? '').trim()
   const avatar = avatarFromRealEntity(raw.entity)
+  const earned = Number(raw.earned)
+  const boostValue = Number(raw.boostValue)
+  const boostValueDisplay =
+    typeof raw.boostValueDisplay === 'string' ? raw.boostValueDisplay.trim() : ''
+  const rarityMultiplierLabel =
+    typeof raw.boostInfo?.multiplier === 'string' ? raw.boostInfo.multiplier.trim() : ''
+  const boosterFromInfo = parseBoosterCardMultiplier(raw.boosterCardInfo)
+  const boosterMultiplierLabel = boosterFromInfo > 1 ? `${boosterFromInfo}x` : ''
 
   return {
     entityId,
@@ -129,6 +147,12 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
     playerName: playerName || undefined,
     seasonLabel: seasonLabelForPass(season, sportRaw, String(raw.seasonDisplay ?? '')),
     avatar,
+    earned: Number.isFinite(earned) && earned > 0 ? earned : undefined,
+    isActive: typeof raw.isActive === 'boolean' ? raw.isActive : undefined,
+    boostValue: Number.isFinite(boostValue) && boostValue > 0 ? boostValue : undefined,
+    boostValueDisplay: boostValueDisplay || undefined,
+    rarityMultiplierLabel: rarityMultiplierLabel || undefined,
+    boosterMultiplierLabel: boosterMultiplierLabel || undefined,
   }
 }
 
@@ -151,11 +175,26 @@ export function buildRealPassPayload(rawPasses: RealPass[]): RealPassPayload {
       byKey.set(dedupeKey, pass)
     } else {
       const next = { ...existing }
-      if (
-        pass.rarityLabel &&
-        rarityRank(pass.rarityLabel) > rarityRank(existing.rarityLabel ?? '')
-      ) {
+      const passRank = rarityRank(pass.rarityLabel ?? '')
+      const existingRank = rarityRank(existing.rarityLabel ?? '')
+      if (passRank > existingRank) {
         next.rarityLabel = pass.rarityLabel
+        next.rarityMultiplierLabel = pass.rarityMultiplierLabel
+        next.boosterMultiplierLabel = pass.boosterMultiplierLabel
+        next.boostValue = pass.boostValue
+        next.boostValueDisplay = pass.boostValueDisplay
+        next.earned = pass.earned
+        next.isActive = pass.isActive ?? next.isActive
+      } else if (passRank === existingRank) {
+        if ((pass.boostValue ?? 0) > (existing.boostValue ?? 0)) {
+          next.boostValue = pass.boostValue
+          next.boostValueDisplay = pass.boostValueDisplay
+        }
+        if (pass.boosterMultiplierLabel && !existing.boosterMultiplierLabel) {
+          next.boosterMultiplierLabel = pass.boosterMultiplierLabel
+        }
+        if ((pass.earned ?? 0) > (existing.earned ?? 0)) next.earned = pass.earned
+        if (pass.isActive === true) next.isActive = true
       }
       if (pass.avatar && !existing.avatar) next.avatar = pass.avatar
       byKey.set(dedupeKey, next)

@@ -159,6 +159,8 @@ describe('POST /api/import/real-passes', () => {
         rarityLabel: 'Iconic 1',
         playerName: 'Anthony Gordon',
         seasonLabel: '2025-26',
+        earned: 20905,
+        rarityMultiplierLabel: '150x',
       },
     ])
     expect(payload.teamPasses[0]?.passKind).toBe('team')

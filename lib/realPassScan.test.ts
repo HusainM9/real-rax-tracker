@@ -64,7 +64,18 @@ describe('normalizeRealPass', () => {
       playerName: 'Anthony Gordon',
       seasonLabel: '2025-26',
       avatar: undefined,
+      earned: 20905,
+      isActive: true,
+      boostValue: undefined,
+      boostValueDisplay: undefined,
+      rarityMultiplierLabel: '150x',
+      boosterMultiplierLabel: undefined,
     })
+  })
+
+  it('reads a one-day booster multiplier from boosterCardInfo', () => {
+    const pass = normalizeRealPass(realPass({ boosterCardInfo: { multiplier: '15x' } }))
+    expect(pass?.boosterMultiplierLabel).toBe('15x')
   })
 
   it('reads entity.avatar from the nested Real entity', () => {

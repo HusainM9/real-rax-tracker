@@ -356,6 +356,11 @@ export type RealPass = {
   serialNumber?: number
   isRefunded?: boolean
   isActive?: boolean
+  /** Play rating for this copy (unlocks rarity). Not an earnings multiplier. */
+  boostValue?: number | string | null
+  boostValueDisplay?: string | null
+  boosterCardId?: number | string | null
+  boosterCardInfo?: unknown
   boostInfo?: RealBoostInfo | null
   /** Nested entity — source of player face / team badge avatar keys. */
   entity?: RealPassEntity | null
