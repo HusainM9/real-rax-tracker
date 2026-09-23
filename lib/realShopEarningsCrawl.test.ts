@@ -117,6 +117,23 @@ describe('mapShopEarningsItemToCatalogPass', () => {
     })
   })
 
+  it.each([
+    ['nfl', 'NFL'],
+    ['ncaaf', 'CFB'],
+    ['soccer', 'FC'],
+  ])('stores Real %s season 2026 as catalog %s 2026-27', (realSport, catalogSport) => {
+    const pass = mapShopEarningsItemToCatalogPass(
+      { id: 26, value: '10', label: 'Current pass', sport: realSport },
+      { realSport, season: 2026, entityType: 'player' },
+    )
+    expect(pass).toMatchObject({
+      externalKey: `26|2026|${catalogSport}`,
+      sport: catalogSport,
+      seasonYear: 2026,
+      seasonLabel: '2026-27',
+    })
+  })
+
   it('maps UFC shop fighters as player passes on the All-time season', () => {
     const pass = mapShopEarningsItemToCatalogPass(
       {

@@ -103,6 +103,7 @@ async function loadSportCatalogSummaries(
   summaryLimitForSport: (sport: Sport) => number,
   signal: AbortSignal,
   onSportStart?: (sport: Sport, index: number, total: number) => void,
+  seasonYearForSport?: (sport: Sport) => number | undefined,
 ): Promise<{
   bySport: Map<Sport, Awaited<ReturnType<typeof fetchCatalogPassSummaries>>['results']>
   storageConfigured: boolean
@@ -121,7 +122,11 @@ async function loadSportCatalogSummaries(
         const sportIndex = waveStart + offset
         onSportStart?.(sport, sportIndex, sports.length)
         const result = await fetchCatalogPassSummaries(
-          { sport, limit: summaryLimitForSport(sport) },
+          {
+            sport,
+            seasonYear: seasonYearForSport?.(sport),
+            limit: summaryLimitForSport(sport),
+          },
           signal,
         )
         return { sport, result }
@@ -910,6 +915,9 @@ export default function PotentialPage() {
   const planBaselineDeepLinkHandledRef = useRef(false)
   const [baselineAdjustmentsOpen, setBaselineAdjustmentsOpen] = useState(false)
   const [rankSport, setRankSport] = useState<RankSportChoice>('FC')
+  const [rankSeasonYear, setRankSeasonYear] = useState('')
+  const [rankSeasonOptions, setRankSeasonOptions] = useState<CatalogSportSeasonOption[]>([])
+  const [rankSeasonsLoading, setRankSeasonsLoading] = useState(false)
   const [excludedRankSports, setExcludedRankSports] = useState<Sport[]>([])
   /** Rank OTD Net only — default on; turn off when max UFC already held. */
   const [includeRankUfc, setIncludeRankUfc] = useState(true)
@@ -1528,6 +1536,42 @@ export default function PotentialPage() {
   }
 
   const rankAllSports = rankSport === ALL_SPORTS_RANK
+  const selectedRankSeasonYear =
+    !rankAllSports && /^\d+$/.test(rankSeasonYear) ? Number(rankSeasonYear) : undefined
+  const selectedRankSeasonLabel =
+    rankSeasonOptions.find((option) => option.seasonYear === selectedRankSeasonYear)?.seasonLabel ??
+    ''
+
+  useEffect(() => {
+    setRankSeasonYear('')
+    if (rankAllSports) {
+      setRankSeasonOptions([])
+      setRankSeasonsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setRankSeasonsLoading(true)
+    fetchCatalogSeasonYears({ sport: rankSport as Sport }, controller.signal)
+      .then(({ seasonYears }) => {
+        if (controller.signal.aborted) return
+        setRankSeasonOptions(
+          seasonYears.map((option) => ({
+            sport: rankSport as Sport,
+            seasonYear: option.seasonYear,
+            seasonLabel: option.seasonLabel.trim() || String(option.seasonYear),
+          })),
+        )
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRankSeasonOptions([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRankSeasonsLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [rankAllSports, rankSport])
 
   const excludedSportSeasonKeys = useMemo(
     () => excludedSportSeasons.map((entry) => entry.key),
@@ -2459,7 +2503,7 @@ export default function PotentialPage() {
             ? 'all sports'
             : 'all sports except UFC'
           : rankSports.join(', ')
-        : rankSport
+        : `${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''}`
       setRankStatus(
         `Assumed ${label} at ${RECOMMENDATION_SIMULATED_RARITY} (${formatSignedRax(displayRaxValue(combinedNet))} combined net) — ranking only. Recalculated top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)} for ${sportLabel} · next ${bundle.picks.length} greedy pick${bundle.picks.length === 1 ? '' : 's'}.`,
       )
@@ -2551,9 +2595,10 @@ export default function PotentialPage() {
           setRankStatus(
             rankAllSports
               ? `Loading ${sport} catalog passes… (${sportIndex + 1}/${total})`
-              : `Loading ${sport} catalog passes…`,
+              : `Loading ${sport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''} catalog passes…`,
           )
         },
+        () => selectedRankSeasonYear,
       )
       if (!summariesConfigured) {
         setRankStatus('Shared catalog is not configured yet.')
@@ -2581,10 +2626,10 @@ export default function PotentialPage() {
           skippedOwnedIconic > 0
             ? rankAllSports
               ? `All eligible catalog passes across every sport are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
-              : `All eligible ${rankSport} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
+              : `All eligible ${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''} catalog passes are already in your collection at ${RECOMMENDATION_SIMULATED_RARITY} or higher.`
             : rankAllSports
               ? 'No player passes with earnings found across any sport.'
-              : `No player passes with earnings found for ${rankSport}.`,
+              : `No player passes with earnings found for ${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''}.`,
         )
         return
       }
@@ -2657,7 +2702,7 @@ export default function PotentialPage() {
             ? 'all sports'
             : 'all sports except UFC'
           : rankSports.join(', ')
-        : rankSport
+        : `${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''}`
       setRankStatus(
         `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · showing top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)}${
           excludedSportSeasons.length > 0
@@ -3295,7 +3340,7 @@ export default function PotentialPage() {
         <CatalogSearchPanel
           embedded
           sectionId="catalog-search-panel"
-          description="Analyze one pass, bundle several, or save to your plan."
+          description="Analyze one pass, bundle several, or save to your plan. Catalog imports support 2026–27 CFB, NFL, and FC passes."
           passKind="player"
           actionLabel="Analyze solo"
           bundleActionLabel="Add to bundle"
@@ -3423,7 +3468,7 @@ export default function PotentialPage() {
               <span>Season / card label</span>
               <input
                 value={form.season}
-                placeholder="2025-26"
+                placeholder="2026-27"
                 onChange={(event) => setForm((current) => ({ ...current, season: event.target.value }))}
               />
             </label>
@@ -3441,7 +3486,7 @@ export default function PotentialPage() {
             <textarea
               className="bulk-import-textarea"
               value={form.rawJson}
-              placeholder='{"rows":[{"day":"2025-08-22","earnings":26,"player_box_score_id":1976890479}]}'
+              placeholder='{"rows":[{"day":"2026-09-12","earnings":26,"player_box_score_id":1976890479}]}'
               onChange={(event) => setForm((current) => ({ ...current, rawJson: event.target.value }))}
             />
           </label>
@@ -3838,6 +3883,24 @@ export default function PotentialPage() {
               ...SPORTS.map((sport) => ({ value: sport, label: sport })),
             ]}
           />
+          {!rankAllSports ? (
+            <ThemedSelect
+              label="Season"
+              value={rankSeasonYear}
+              disabled={catalogAnalysisBusy || rankSeasonsLoading}
+              onChange={setRankSeasonYear}
+              options={[
+                {
+                  value: '',
+                  label: rankSeasonsLoading ? 'Loading seasons…' : 'All seasons',
+                },
+                ...rankSeasonOptions.map((option) => ({
+                  value: String(option.seasonYear),
+                  label: option.seasonLabel,
+                })),
+              ]}
+            />
+          ) : null}
           {rankAllSports ? (
             <div className="field inline-field season-multi-select-field">
               <SeasonMultiSelect

@@ -5,6 +5,7 @@ describe('seasonLabelFromPass', () => {
   it('uses start-year labels for CFB and end-year labels for CBB', () => {
     expect(seasonLabelFromPass(2025, 'ncaaf')).toBe('2025-26')
     expect(seasonLabelFromPass(2024, 'cfb')).toBe('2024-25')
+    expect(seasonLabelFromPass(2026, 'ncaaf')).toBe('2026-27')
     expect(seasonLabelFromPass(2026, 'ncaam')).toBe('2025-26')
   })
 
@@ -21,6 +22,8 @@ describe('seasonLabelFromPass', () => {
   it('uses start-year labels for FC', () => {
     expect(seasonLabelFromPass(2025, 'fc')).toBe('2025-26')
     expect(seasonLabelFromPass(2025, 'soccer')).toBe('2025-26')
+    expect(seasonLabelFromPass(2026, 'fc')).toBe('2026-27')
+    expect(seasonLabelFromPass(2026, 'soccer')).toBe('2026-27')
   })
 
   it('uses calendar year for UFC passes', () => {

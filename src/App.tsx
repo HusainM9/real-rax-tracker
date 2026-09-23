@@ -10,7 +10,6 @@ import CardsPage from './pages/CardsPage'
 import DashboardPage from './pages/DashboardPage'
 import EntryPage from './pages/EntryPage'
 import HelpPage from './pages/HelpPage'
-import GordonDailyEarningsPage from './pages/GordonDailyEarningsPage'
 import LoginPage from './pages/LoginPage'
 import AccountPage from './pages/AccountPage'
 import OtdPage from './pages/OtdPage'
@@ -70,7 +69,6 @@ export default function App() {
                   <Route path="/cards" element={<CardsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/sell" element={<SellPage />} />
-                  <Route path="/gordon/daily" element={<GordonDailyEarningsPage />} />
                   <Route path="/help" element={<HelpPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Route>

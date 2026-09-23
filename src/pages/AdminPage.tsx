@@ -146,6 +146,9 @@ const LIVE_SHOP_CRAWL_SPORTS = [
   { label: 'FC', value: 'soccer' },
 ] as const
 
+const CURRENT_SPLIT_SEASON_YEAR = '2026'
+const CURRENT_SPLIT_SEASON_SPORTS = ['nfl', 'ncaaf', 'soccer'] as const
+
 const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
   pass_no_earnings: 'No earnings',
@@ -1176,7 +1179,8 @@ export default function AdminPage() {
                 Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
                 Continue resumes without redoing finished pages. Use{' '}
                 <strong>Backfill faces · top {AVATAR_BACKFILL_TOP_N}</strong> for a fast avatars-only
-                pass (college players, teams, UFC) — enter seasons first.
+                pass (college players, teams, UFC) — enter seasons first. NFL, CFB, and FC encode
+                2026–27 as season year 2026.
               </p>
             </div>
           </div>
@@ -1194,6 +1198,21 @@ export default function AdminPage() {
             </label>
           </div>
           <div className="button-row admin-sport-toggles">
+            <button
+              className="button"
+              type="button"
+              disabled={shopCrawlBusy}
+              onClick={() =>
+                setShopCrawl((current) => ({
+                  ...current,
+                  seasons: CURRENT_SPLIT_SEASON_YEAR,
+                  sports: [...CURRENT_SPLIT_SEASON_SPORTS],
+                  includeUfc: false,
+                }))
+              }
+            >
+              2026–27 · CFB + NFL + FC
+            </button>
             {LIVE_SHOP_CRAWL_SPORTS.map((sport) => {
               const checked = shopCrawl.sports.includes(sport.value)
               return (

@@ -50,6 +50,21 @@ describe('passSeasonDateWindow', () => {
       end: '2025-06-30',
     })
   })
+
+  it('supports the 2026-27 windows for NFL, CFB, and FC', () => {
+    expect(passSeasonDateWindow(2026, 'NFL')).toEqual({
+      start: '2026-08-01',
+      end: '2027-04-30',
+    })
+    expect(passSeasonDateWindow(2026, 'CFB')).toEqual({
+      start: '2026-08-01',
+      end: '2027-06-30',
+    })
+    expect(passSeasonDateWindow(2026, 'FC')).toEqual({
+      start: '2026-08-01',
+      end: '2027-06-30',
+    })
+  })
 })
 
 describe('claimDayInPassSeason', () => {
@@ -86,6 +101,9 @@ describe('expectedSeasonLabelFromYear', () => {
     expect(expectedSeasonLabelFromYear(2024, 'NFL')).toBe('2024-25')
     expect(expectedSeasonLabelFromYear(2025, 'CFB')).toBe('2025-26')
     expect(expectedSeasonLabelFromYear(2025, 'FC')).toBe('2025-26')
+    expect(expectedSeasonLabelFromYear(2026, 'NFL')).toBe('2026-27')
+    expect(expectedSeasonLabelFromYear(2026, 'CFB')).toBe('2026-27')
+    expect(expectedSeasonLabelFromYear(2026, 'FC')).toBe('2026-27')
     expect(expectedSeasonLabelFromYear(2026, 'NBA')).toBe('2025-26')
     expect(expectedSeasonLabelFromYear(2026, 'NHL')).toBe('2025-26')
     expect(expectedSeasonLabelFromYear(2026, 'CBB')).toBe('2025-26')
