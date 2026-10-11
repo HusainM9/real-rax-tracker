@@ -10,6 +10,7 @@ import {
   crawlShopEarningsTotalChunk,
   mapShopEarningsItemToCatalogPass,
   mapShopItemEarningsToCatalog,
+  realShopQuerySeason,
   resolveShopCrawlMaxPages,
   resolveShopCrawlSports,
   toRealShopSportSlug,
@@ -30,6 +31,11 @@ describe('shop crawl defaults', () => {
     expect(DEFAULT_SHOP_CRAWL_DELAY_MS).toBe(300)
     expect(DEFAULT_SHOP_CRAWL_EARNINGS_CONCURRENCY).toBe(2)
     expect(DEFAULT_SHOP_CRAWL_BUDGET_MS).toBe(22_000)
+  })
+
+  it('converts canonical NHL end-years to Real shop start-years', () => {
+    expect(realShopQuerySeason({ realSport: 'nhl', season: 2024 })).toBe(2023)
+    expect(realShopQuerySeason({ realSport: 'nba', season: 2024 })).toBe(2024)
   })
 })
 
@@ -216,6 +222,62 @@ describe('mapShopItemEarningsToCatalog', () => {
 })
 
 describe('crawlShopEarningsTotalChunk pagination + earnings', () => {
+  it('queries Real with NHL start-year and stores the canonical end-year season', async () => {
+    const fetchPage = vi.fn(async (query): Promise<RealShopEarningsTotalPage> => {
+      expect(query.season).toBe(2023)
+      return {
+        items: [
+          {
+            id: 8480280,
+            value: '387',
+            label: 'Jeremy Swayman',
+            entityType: 'player',
+            sport: 'nhl',
+          },
+        ],
+      }
+    })
+    const fetchEarnings = vi.fn(async (query): Promise<RealPassEarnings> => {
+      expect(query.season).toBe(2023)
+      return {
+        rows: [{ day: '2024-05-17', earnings: 4 }],
+        info: { total: 387 },
+      }
+    })
+    const savePasses = vi.fn(async (passes) => passes.length)
+    const saveDailyEarnings = vi.fn(async (rows) => rows.length)
+
+    const result = await crawlShopEarningsTotalChunk(
+      {
+        sports: ['nhl'],
+        seasons: [2024],
+        entityTypes: ['player'],
+        maxPages: 1,
+        delayMs: 0,
+      },
+      {
+        fetchPage,
+        fetchEarnings,
+        savePasses,
+        saveDailyEarnings,
+        sleep: async () => undefined,
+      },
+    )
+
+    expect(savePasses).toHaveBeenCalledWith([
+      expect.objectContaining({
+        externalKey: '8480280|2024|NHL',
+        seasonYear: 2024,
+        seasonLabel: '2023-24',
+      }),
+    ])
+    expect(saveDailyEarnings).toHaveBeenCalledWith(
+      [expect.objectContaining({ externalKey: '8480280|2024|NHL', claimDay: '2024-05-17' })],
+      { replaceExternalKeys: ['8480280|2024|NHL'] },
+    )
+    expect(result.dailyRowsUpserted).toBe(1)
+  })
+
   it('stops a job when items are empty and advances the cursor', async () => {
     const fetchPage = vi.fn(async (): Promise<RealShopEarningsTotalPage> => ({ items: [] }))
     const fetchEarnings = vi.fn()

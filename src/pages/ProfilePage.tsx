@@ -43,6 +43,10 @@ export default function ProfilePage() {
             <p className="profile-title">{snapshot.title}</p>
             <p className="profile-blurb">{snapshot.blurb}</p>
           </div>
+          <Link className="profile-earnings-cta" to="/earnings">
+            <span>Daily RAX</span>
+            <strong>View earnings →</strong>
+          </Link>
         </div>
         <div className="profile-hero-stats">
           <StatPill label="Passes" value={String(snapshot.cardCount)} />

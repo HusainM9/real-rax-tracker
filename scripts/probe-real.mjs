@@ -1,7 +1,7 @@
 /**
  * Read-only live probe of Real's API for shape discovery.
  *
- * Usage: node scripts/probe-real.mjs <passes|earnings|params|pagination|seasons|shop|plays> [args]
+ * Usage: node scripts/probe-real.mjs <passes|earnings|daily|params|pagination|seasons|shop|plays> [args]
  *
  * shop args: [sport] [season] [entityType]  (defaults: ncaam 2026 player)
  * Also probes before=0/20, a second live season (mlb/soccer team), and field inventory.
@@ -216,6 +216,31 @@ async function phaseEarnings(cfg, args) {
   writeCache('earnings', results)
 }
 
+async function phaseDaily(cfg, args) {
+  const day = args[0] ?? new Date().toISOString().slice(0, 10)
+  const endpoints = [
+    `/userpassearnings/day/${day}?before=0`,
+  ]
+
+  for (const endpoint of endpoints) {
+    const result = await get(cfg, endpoint)
+    if (endpoint.startsWith('/userpassearnings')) writeCache(`daily-${day}`, result)
+    const { key, rows } = findArrayField(result.json)
+    console.log(`endpoint=${endpoint} status=${result.status}`)
+    console.log('top-level keys:', Object.keys(result.json ?? {}))
+    console.log('array:', key, 'length:', rows.length)
+    console.log('row keys:', Object.keys(rows[0] ?? {}))
+    if (endpoint.startsWith('/userpassearnings')) {
+      console.log('userPass keys:', Object.keys(rows[0]?.userPass ?? {}))
+      console.log('info row keys:', Object.keys(rows[0]?.infos?.[0] ?? {}))
+    } else {
+      console.log('feed info keys:', Object.keys(result.json?.info ?? {}))
+      console.log('additionalInfo keys:', Object.keys(rows[0]?.additionalInfo ?? {}))
+      console.log('display keys:', Object.keys(rows[0]?.display ?? {}))
+    }
+  }
+}
+
 async function phaseParams(cfg, args) {
   const [sport, season, entityType, entityId, cutoff = '2026-01-01', boxScoreId = '1'] = args
   const base = earningsPath(sport, season, entityType, entityId)
@@ -262,6 +287,125 @@ async function phasePagination(cfg) {
     const result = await get(cfg, `/userpasses/${GORDON_USER_ID}/passes`, variant.query)
     summarizePasses(`gordon passes ${variant.name}`, result)
   }
+}
+
+async function phaseToday(cfg, args) {
+  const userId = args[0] ?? GORDON_USER_ID
+  const sport = args[1] ?? 'nfl'
+  const season = args[2] ?? 2026
+  for (const filter of ['playstoday', 'playstomorrow']) {
+    const result = await get(cfg, `/userpasses/${userId}/passes`, {
+      filter,
+      entityType: 'player',
+      sport,
+      season,
+    })
+    const passes = Array.isArray(result.json?.passes) ? result.json.passes : []
+    console.log(JSON.stringify({
+      filter,
+      status: result.status,
+      count: passes.length,
+      playerCount: passes.filter((pass) => pass.entityType === 'player').length,
+      activeCount: passes.filter((pass) => pass.isActive === true).length,
+      boostedCount: passes.filter((pass) => pass.boostInfo?.isCardBoosted === true).length,
+      sample: passes.slice(0, 3).map((pass) => ({
+        keys: Object.keys(pass),
+        id: pass.id,
+        sport: pass.sport,
+        season: pass.season,
+        entityType: pass.entityType,
+        entityId: pass.entityId,
+        label: pass.label,
+        teamId: pass.teamId,
+        entity: pass.entity,
+        boostInfo: pass.boostInfo,
+        boosterCardInfo: pass.boosterCardInfo,
+      })),
+    }, null, 2))
+    writeCache(`${filter}-${userId}`, result)
+  }
+}
+
+async function phaseBox(cfg, args) {
+  const playerBoxScoreId = args[0]
+  if (!playerBoxScoreId) throw new Error('player box score id is required')
+  const result = await get(cfg, `/playerboxscores/${playerBoxScoreId}`, { version: 2 })
+  const light = await get(cfg, `/playerboxscores/${playerBoxScoreId}/light`)
+  const box = result.json?.playerBoxScore ?? {}
+  console.log(JSON.stringify({
+    status: result.status,
+    topLevelKeys: Object.keys(result.json ?? {}),
+    boxKeys: Object.keys(box),
+    id: box.id,
+    sport: box.sport,
+    day: box.day,
+    value: box.value,
+    statValues: box.statValues,
+    statValueDisplays: box.statValueDisplays,
+    advancedStatValueDisplays: box.advancedStatValueDisplays,
+    topStats: box.topStats,
+    advancedStats: result.json?.advancedStats,
+    lightStatus: light.status,
+    lightKeys: Object.keys(light.json?.playerBoxScore ?? {}),
+    lightStatValues: light.json?.playerBoxScore?.statValues,
+  }, null, 2))
+  writeCache(`playerbox-${playerBoxScoreId}`, result)
+}
+
+async function phaseBooster(cfg, args) {
+  const [userPassId, userId = GORDON_USER_ID, entityType = 'player', sport = 'nfl'] = args
+  if (!userPassId) throw new Error('user pass id is required')
+  const result = await get(cfg, `/userpassboostercards/${userPassId}/entity/${entityType}`, {
+    userId,
+    sport,
+    displayType: 'earnings',
+    version: 'stat',
+  })
+  console.log(JSON.stringify({
+    status: result.status,
+    boosterCardInfo: result.json?.boosterCardInfo,
+  }, null, 2))
+}
+
+async function phaseHome(cfg, args) {
+  const [sport = 'nfl', day = new Date().toISOString().slice(0, 10)] = args
+  const result = await get(cfg, `/home/${sport}/day/next`, { day })
+  const content = result.json?.content ?? {}
+  const games = [...(content.games ?? []), ...(content.replayGames ?? [])]
+  console.log(JSON.stringify({
+    status: result.status,
+    contentKeys: Object.keys(content),
+    games: games.map((game) => ({
+      id: game.id,
+      sport: game.sport,
+      day: game.day,
+      status: game.status,
+      homeTeamId: game.homeTeamId,
+      awayTeamId: game.awayTeamId,
+    })),
+  }, null, 2))
+  writeCache(`home-${sport}-${day}`, result)
+}
+
+async function phaseGameStats(cfg, args) {
+  const [sport, gameId] = args
+  if (!sport || !gameId) throw new Error('sport and game id are required')
+  const result = await get(cfg, `/games/${gameId}/sport/${sport}/stats`)
+  const rows = Array.isArray(result.json?.playerBoxScores) ? result.json.playerBoxScores : []
+  console.log(JSON.stringify({
+    status: result.status,
+    keys: Object.keys(result.json ?? {}),
+    count: rows.length,
+    playerBoxScoreKeys: Object.keys(rows[0] ?? {}),
+    sample: rows.slice(0, 3).map((row) => ({
+      id: row.id,
+      playerId: row.playerId,
+      value: row.value,
+      status: row.status,
+      statValues: row.statValues,
+    })),
+  }, null, 2))
+  writeCache(`game-stats-${sport}-${gameId}`, result)
 }
 
 function phaseSeasons() {
@@ -656,9 +800,15 @@ async function main() {
   const [phase, ...args] = process.argv.slice(2)
   if (phase === 'passes') await phasePasses(cfg)
   else if (phase === 'earnings') await phaseEarnings(cfg, args)
+  else if (phase === 'daily') await phaseDaily(cfg, args)
   else if (phase === 'params') await phaseParams(cfg, args)
   else if (phase === 'levels') await phaseLevels(cfg, args)
   else if (phase === 'pagination') await phasePagination(cfg)
+  else if (phase === 'today') await phaseToday(cfg, args)
+  else if (phase === 'box') await phaseBox(cfg, args)
+  else if (phase === 'booster') await phaseBooster(cfg, args)
+  else if (phase === 'home') await phaseHome(cfg, args)
+  else if (phase === 'game-stats') await phaseGameStats(cfg, args)
   else if (phase === 'seasons') phaseSeasons()
   else if (phase === 'shop') await phaseShop(cfg, args)
   else if (phase === 'plays') await phasePlays(cfg, args)

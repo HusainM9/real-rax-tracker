@@ -81,8 +81,16 @@ export type ShopCrawlEntityType = CatalogPassKind
 export type ShopCrawlJob = {
   /** Real path slug used in /userpassshop/... */
   realSport: string
+  /** Canonical catalog season year entered in Admin. */
   season: number
   entityType: ShopCrawlEntityType
+}
+
+/** Real's NHL shop and earnings paths use start-year while the catalog uses end-year. */
+export function realShopQuerySeason(job: Pick<ShopCrawlJob, 'realSport' | 'season'>): number {
+  return normalizeSportForSeasonWindow(job.realSport) === 'NHL'
+    ? job.season - 1
+    : job.season
 }
 
 export type ShopCrawlCursor = {
@@ -636,7 +644,7 @@ export async function crawlShopEarningsTotalChunk(
     try {
       page = await deps.fetchPage({
         sport: job.realSport,
-        season: job.season,
+        season: realShopQuerySeason(job),
         entityType: job.entityType,
         before,
       })
@@ -776,7 +784,7 @@ export async function crawlShopEarningsTotalChunk(
         try {
           earnings = await deps.fetchEarnings({
             sport: job.realSport,
-            season: job.season,
+            season: realShopQuerySeason(job),
             entityType: job.entityType,
             entityId: basePass.entityId,
           })

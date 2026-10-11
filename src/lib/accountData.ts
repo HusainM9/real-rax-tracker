@@ -42,31 +42,19 @@ async function parseError(response: Response): Promise<string> {
   return readResponseError(response, 'Account sync failed')
 }
 
-export async function loadAccountData(): Promise<AccountDataLoadResult> {
-  const response = await fetch('/api/account/data', {
-    credentials: 'include',
-  })
+export type AccountDataPayload = {
+  data?: unknown
+  dataBlob?: string
+  dataEncoding?: 'gzip-base64'
+  updatedAt?: string
+  cardCount?: number
+  performanceCount?: number
+  storageConfigured?: boolean
+}
 
-  if (response.status === 503) {
-    throw new Error('Account storage is not configured on this server.')
-  }
-  if (response.status === 401) {
-    throw new AccountAuthRequiredError()
-  }
-  if (!response.ok) {
-    throw new Error(await parseError(response))
-  }
-
-  const payload = await readResponseJson<{
-    data?: unknown
-    dataBlob?: string
-    dataEncoding?: 'gzip-base64'
-    updatedAt?: string
-    cardCount?: number
-    performanceCount?: number
-    storageConfigured?: boolean
-  }>(response)
-
+export async function decodeAccountDataPayload(
+  payload: AccountDataPayload,
+): Promise<AccountDataLoadResult> {
   let rawData: unknown = payload.data
   if (payload.dataEncoding === 'gzip-base64' && typeof payload.dataBlob === 'string') {
     rawData = await gunzipBase64ToJson(payload.dataBlob)
@@ -95,6 +83,25 @@ export async function loadAccountData(): Promise<AccountDataLoadResult> {
     },
     storageConfigured: payload.storageConfigured !== false,
   }
+}
+
+export async function loadAccountData(): Promise<AccountDataLoadResult> {
+  const response = await fetch('/api/account/data', {
+    credentials: 'include',
+  })
+
+  if (response.status === 503) {
+    throw new Error('Account storage is not configured on this server.')
+  }
+  if (response.status === 401) {
+    throw new AccountAuthRequiredError()
+  }
+  if (!response.ok) {
+    throw new Error(await parseError(response))
+  }
+
+  const payload = await readResponseJson<AccountDataPayload>(response)
+  return decodeAccountDataPayload(payload)
 }
 
 export async function saveAccountData(

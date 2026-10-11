@@ -34,6 +34,10 @@ async function readAccountSession(): Promise<{
   username: string | null
   devBypass: boolean
 }> {
+  if (import.meta.env.DEV) {
+    return { ok: true, username: 'dev', devBypass: true }
+  }
+
   try {
     const response = await fetch('/api/account/session', { credentials: 'include' })
     if (response.ok) {

@@ -99,6 +99,9 @@ describe('importFromUsername with the Real provider', () => {
       if (url === REAL_PASSES_ENDPOINT) {
         return Response.json(routePayload, { status: 200 })
       }
+      if (url === '/api/catalog/avatars') {
+        return Response.json({ avatars: [], storageConfigured: true }, { status: 200 })
+      }
       if (url === REAL_EARNINGS_ENDPOINT) {
         const body = JSON.parse(String(init?.body ?? '{}')) as {
           passes: Array<{ externalKey: string; name: string }>
@@ -131,7 +134,7 @@ describe('importFromUsername with the Real provider', () => {
     const { data, result } = await importFromUsername(createEmptyData(), 'gordon')
 
     expect(calls[0]).toBe(REAL_PASSES_ENDPOINT)
-    expect(calls.slice(1).every((url) => url === REAL_EARNINGS_ENDPOINT)).toBe(true)
+    expect(calls.slice(1)).toEqual(['/api/catalog/avatars', REAL_EARNINGS_ENDPOINT])
     expect(result.passesFetched).toBe(2)
     expect(result.passesSkipped).toBe(1)
     expect(result.rowsImported).toBe(0)

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
@@ -5,25 +6,27 @@ import RequireAccount from './components/RequireAccount'
 import { AccountProvider } from './context/AccountAuthContext'
 import { AuthProvider } from './context/AuthContext'
 import { RaxDataProvider } from './context/RaxDataContext'
-import CalendarPage from './pages/CalendarPage'
-import CardsPage from './pages/CardsPage'
-import DashboardPage from './pages/DashboardPage'
-import EntryPage from './pages/EntryPage'
-import HelpPage from './pages/HelpPage'
-import LoginPage from './pages/LoginPage'
-import AccountPage from './pages/AccountPage'
-import OtdPage from './pages/OtdPage'
-import OverlapsPage from './pages/OverlapsPage'
-import PotentialPage from './pages/PotentialPage'
-import PlanPage from './pages/PlanPage'
-import PlanPacksPage from './pages/PlanPacksPage'
-import ProfilePage from './pages/ProfilePage'
-import SellPage from './pages/SellPage'
-import AdminLoginPage from './pages/AdminLoginPage'
-import AdminPage from './pages/AdminPage'
 import RequireAdmin from './components/RequireAdmin'
 import { AdminProvider } from './context/AdminAuthContext'
 import './App.css'
+
+const AccountPage = lazy(() => import('./pages/AccountPage'))
+const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+const CalendarPage = lazy(() => import('./pages/CalendarPage'))
+const CardsPage = lazy(() => import('./pages/CardsPage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const EntryPage = lazy(() => import('./pages/EntryPage'))
+const EarningsPage = lazy(() => import('./pages/EarningsPage'))
+const HelpPage = lazy(() => import('./pages/HelpPage'))
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const OtdPage = lazy(() => import('./pages/OtdPage'))
+const OverlapsPage = lazy(() => import('./pages/OverlapsPage'))
+const PlanPacksPage = lazy(() => import('./pages/PlanPacksPage'))
+const PlanPage = lazy(() => import('./pages/PlanPage'))
+const PotentialPage = lazy(() => import('./pages/PotentialPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+const SellPage = lazy(() => import('./pages/SellPage'))
 
 function AccountScope() {
   return (
@@ -37,7 +40,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <Suspense fallback={<main className="page-shell">Loading…</main>}>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<RequireAuth />}>
             {/* Admin only needs site password + admin password — not a user account */}
@@ -58,6 +62,7 @@ export default function App() {
                 >
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/entry" element={<EntryPage />} />
+                  <Route path="/earnings" element={<EarningsPage />} />
                   <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="/otd" element={<OtdPage />} />
                   <Route path="/overlap" element={<OverlapsPage />} />
@@ -75,7 +80,8 @@ export default function App() {
               </Route>
             </Route>
           </Route>
-        </Routes>
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   )

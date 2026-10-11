@@ -333,6 +333,8 @@ export type RealBoostInfo = {
   required?: number
   progressDisplay?: string
   progressQualifier?: string
+  /** True when a one-game booster card is attached to this pass. */
+  isCardBoosted?: boolean
 }
 
 /** Nested player/team entity on a Real pass (avatar key → media.realapp.com CDN). */
@@ -348,8 +350,10 @@ export type RealPass = {
   entityType?: string
   entityId?: number | string
   sport?: string
+  sportLabel?: string
   season?: number | string
   label?: string
+  entityAvatar?: string
   seasonDisplay?: string
   /** Lifetime RAX aggregate, not per-day. */
   earned?: number
@@ -360,7 +364,11 @@ export type RealPass = {
   boostValue?: number | string | null
   boostValueDisplay?: string | null
   boosterCardId?: number | string | null
-  boosterCardInfo?: unknown
+  boosterCardInfo?: {
+    rarity?: string | number
+    statBoostKey?: string
+    [key: string]: unknown
+  } | null
   boostInfo?: RealBoostInfo | null
   /** Nested entity — source of player face / team badge avatar keys. */
   entity?: RealPassEntity | null
@@ -379,6 +387,8 @@ export type RealPassQuery = {
   entityType?: string
   season?: number
   sport?: string
+  /** Public collection filter used by Real's web app (`playstoday`, `playstomorrow`). */
+  filter?: string
 }
 
 export function normalizeRealUsernameInput(username: string): string {
@@ -489,9 +499,131 @@ export async function listPasses(query: RealPassQuery, context: RealApiContext):
       entityType: query.entityType,
       season: query.season,
       sport: query.sport,
+      filter: query.filter,
     },
   )
   return Array.isArray(data.passes) ? (data.passes as RealPass[]) : []
+}
+
+export type RealHomeGame = {
+  id?: string | number
+  sport?: string
+  day?: string
+  status?: string
+  homeTeamId?: string | number
+  awayTeamId?: string | number
+  [key: string]: unknown
+}
+
+export async function getRealHomeDayGames(
+  sport: string,
+  day: string,
+  context: RealApiContext,
+): Promise<RealHomeGame[]> {
+  const data = await realGetJson<{ content?: { games?: unknown; replayGames?: unknown } }>(
+    `/home/${encodeURIComponent(sport)}/day/next`,
+    context,
+    { day },
+  )
+  const games = Array.isArray(data.content?.games) ? data.content.games : []
+  const replayGames = Array.isArray(data.content?.replayGames) ? data.content.replayGames : []
+  return [...games, ...replayGames] as RealHomeGame[]
+}
+
+export type RealStatValue = {
+  type?: string | number
+  value?: unknown
+  label?: string
+}
+
+export type RealPlayerBoxScore = {
+  id?: string | number
+  playerId?: string | number
+  teamId?: string | number
+  gameId?: string | number
+  day?: string
+  value?: unknown
+  played?: boolean
+  didNotPlay?: boolean
+  statValues?: RealStatValue[]
+  [key: string]: unknown
+}
+
+export async function getRealGamePlayerBoxScores(
+  sport: string,
+  gameId: string | number,
+  context: RealApiContext,
+): Promise<RealPlayerBoxScore[]> {
+  const data = await realGetJson<{ playerBoxScores?: unknown }>(
+    `/games/${encodeURIComponent(String(gameId))}/sport/${encodeURIComponent(sport)}/stats`,
+    context,
+  )
+  return Array.isArray(data.playerBoxScores)
+    ? (data.playerBoxScores as RealPlayerBoxScore[])
+    : []
+}
+
+export type RealPlayerBoxScoreDetail = {
+  playerBoxScore: RealPlayerBoxScore | null
+  advancedStats: {
+    raxEarnings?: unknown
+    earningsConfirmed?: boolean
+    [key: string]: unknown
+  } | null
+}
+
+export async function getRealPlayerBoxScore(
+  playerBoxScoreId: string | number,
+  context: RealApiContext,
+): Promise<RealPlayerBoxScoreDetail> {
+  const data = await realGetJson<{ playerBoxScore?: unknown; advancedStats?: unknown }>(
+    `/playerboxscores/${encodeURIComponent(String(playerBoxScoreId))}`,
+    context,
+    { version: 2 },
+  )
+  return {
+    playerBoxScore:
+      data.playerBoxScore && typeof data.playerBoxScore === 'object'
+        ? (data.playerBoxScore as RealPlayerBoxScore)
+        : null,
+    advancedStats:
+      data.advancedStats && typeof data.advancedStats === 'object'
+        ? (data.advancedStats as RealPlayerBoxScoreDetail['advancedStats'])
+        : null,
+  }
+}
+
+export type RealBoosterStatInfo = {
+  statBoostKey?: string
+  info?: Array<{ label?: string; boostValue?: unknown }>
+}
+
+export type RealBoosterRarityGroup = {
+  rarity?: string | number
+  key?: string | number
+  multiplierDisplay?: string
+  statBoostKeyInfo?: RealBoosterStatInfo[]
+}
+
+export async function getRealBoosterCardInfo(
+  input: { userPassId: string | number; userId: string; entityType: string; sport: string },
+  context: RealApiContext,
+): Promise<RealBoosterRarityGroup[]> {
+  const data = await realGetJson<{
+    boosterCardInfo?: { rarityGroups?: unknown }
+  }>(
+    `/userpassboostercards/${encodeURIComponent(String(input.userPassId))}/entity/${encodeURIComponent(input.entityType)}`,
+    context,
+    {
+      userId: input.userId,
+      sport: input.sport,
+      displayType: 'earnings',
+      version: 'stat',
+    },
+  )
+  return Array.isArray(data.boosterCardInfo?.rarityGroups)
+    ? (data.boosterCardInfo.rarityGroups as RealBoosterRarityGroup[])
+    : []
 }
 
 /** One row from Real's shop `earningstotal` section (base lifetime RAX, ranked). */
