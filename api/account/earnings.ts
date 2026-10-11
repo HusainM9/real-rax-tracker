@@ -1,3 +1,5 @@
+import { handleAccountEarnings } from '../../lib/accountEarningsHandler'
+
 type NodeRequest = {
   method?: string
   url?: string
@@ -42,7 +44,6 @@ export default async function handler(
   response?: NodeResponse,
 ): Promise<Response | void> {
   try {
-    const { handleAccountEarnings } = await import('../../lib/accountEarningsHandler')
     if (!response) return handleAccountEarnings(request as Request)
 
     const result = await handleAccountEarnings(toWebRequest(request as NodeRequest))
