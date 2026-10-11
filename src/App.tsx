@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
 import RequireAccount from './components/RequireAccount'
+import RequireEarnings from './components/RequireEarnings'
 import { AccountProvider } from './context/AccountAuthContext'
 import { AuthProvider } from './context/AuthContext'
 import { RaxDataProvider } from './context/RaxDataContext'
@@ -17,7 +18,6 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const CardsPage = lazy(() => import('./pages/CardsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const EntryPage = lazy(() => import('./pages/EntryPage'))
-const EarningsAccessPage = lazy(() => import('./pages/EarningsAccessPage'))
 const EarningsPage = lazy(() => import('./pages/EarningsPage'))
 const HelpPage = lazy(() => import('./pages/HelpPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -44,7 +44,7 @@ export default function App() {
         <Suspense fallback={<main className="page-shell">Loading…</main>}>
           <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/earnings/access" element={<EarningsAccessPage />} />
+          <Route path="/earnings/access" element={<Navigate to="/earnings" replace />} />
           <Route element={<AccountScope />}>
             <Route
               element={
@@ -53,7 +53,7 @@ export default function App() {
                 </RaxDataProvider>
               }
             >
-              <Route path="/earnings" element={<EarningsPage />} />
+              <Route path="/earnings" element={<RequireEarnings><EarningsPage /></RequireEarnings>} />
             </Route>
           </Route>
           <Route element={<RequireAuth />}>

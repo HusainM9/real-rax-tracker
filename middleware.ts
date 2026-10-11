@@ -78,12 +78,15 @@ export default async function middleware(request: Request) {
     return next()
   }
 
-  if (pathname === '/earnings/access' || pathname.startsWith('/api/earnings/')) {
+  if (
+    pathname === '/earnings' ||
+    pathname === '/earnings/access' ||
+    pathname.startsWith('/api/earnings/')
+  ) {
     return next()
   }
 
   if (
-    pathname === '/earnings' ||
     pathname === '/api/account/earnings' ||
     pathname === '/api/account/earnings-tracking'
   ) {
@@ -92,9 +95,6 @@ export default async function middleware(request: Request) {
     if (pathname.startsWith('/api/')) {
       return Response.json({ error: 'Earnings access required.' }, { status: 401 })
     }
-    const accessUrl = new URL('/earnings/access', request.url)
-    accessUrl.searchParams.set('next', pathname)
-    return Response.redirect(accessUrl)
   }
 
   // Cron handlers authenticate Vercel's request with CRON_SECRET themselves.

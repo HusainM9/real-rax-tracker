@@ -4,6 +4,7 @@ import {
   createEarningsSessionToken,
   earningsPasswordMatches,
   getEarningsCookieName,
+  hasEarningsSession,
   verifyEarningsSessionToken,
 } from './earningsAuth'
 
@@ -30,5 +31,10 @@ describe('earningsAuth', () => {
     const header = buildEarningsCookieHeader('token')
     expect(header).toContain(`${getEarningsCookieName()}=token`)
     expect(header).toContain('HttpOnly')
+  })
+
+  it('does not bypass earnings access without its signed cookie', async () => {
+    process.env.AUTH_SESSION_SECRET = 'session-secret'
+    await expect(hasEarningsSession(new Request('http://localhost/earnings'))).resolves.toBe(false)
   })
 })

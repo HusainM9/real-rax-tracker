@@ -5,7 +5,7 @@ import {
   signPayload,
 } from './authCookie'
 
-const COOKIE_NAME = 'rax_earnings_session'
+const COOKIE_NAME = 'rax_earnings_access'
 const DEFAULT_PASSWORD = 'mate'
 
 function configuredPassword(): string {
@@ -44,7 +44,6 @@ export async function verifyEarningsSessionToken(
 }
 
 export async function hasEarningsSession(request: Request): Promise<boolean> {
-  if (process.env.NODE_ENV === 'development') return true
   return verifyEarningsSessionToken(readCookie(request, COOKIE_NAME))
 }
 
