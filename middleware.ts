@@ -14,6 +14,10 @@ import {
   getAdminCookieName,
   verifyAdminSessionToken,
 } from './lib/adminAuth'
+import {
+  getEarningsCookieName,
+  verifyEarningsSessionToken,
+} from './lib/earningsAuth'
 
 export const config = {
   matcher: ['/((?!robots\\.txt).*)'],
@@ -67,14 +71,36 @@ async function hasValidAdminSession(request: Request): Promise<boolean> {
 }
 
 export default async function middleware(request: Request) {
-  if (!authConfigured()) {
-    return next()
-  }
-
   const { pathname } = new URL(request.url)
   const method = request.method.toUpperCase()
 
   if (pathname.startsWith('/assets/')) {
+    return next()
+  }
+
+  if (pathname === '/earnings/access' || pathname.startsWith('/api/earnings/')) {
+    return next()
+  }
+
+  if (
+    pathname === '/earnings' ||
+    pathname === '/api/account/earnings' ||
+    pathname === '/api/account/earnings-tracking'
+  ) {
+    const token = readCookie(request, getEarningsCookieName())
+    if (await verifyEarningsSessionToken(token)) return next()
+    if (pathname.startsWith('/api/')) {
+      return Response.json({ error: 'Earnings access required.' }, { status: 401 })
+    }
+    const accessUrl = new URL('/earnings/access', request.url)
+    accessUrl.searchParams.set('next', pathname)
+    return Response.redirect(accessUrl)
+  }
+
+  // Cron handlers authenticate Vercel's request with CRON_SECRET themselves.
+  if (pathname.startsWith('/api/cron/')) return next()
+
+  if (!authConfigured()) {
     return next()
   }
 
@@ -138,22 +164,6 @@ export default async function middleware(request: Request) {
       return Response.redirect(loginUrl)
     }
     return next()
-  }
-
-  // Earnings uses the independently linked account list from the page and only needs the
-  // shared site password. It must not depend on a primary tracker account session.
-  if (
-    pathname === '/earnings' ||
-    pathname === '/api/account/earnings' ||
-    pathname === '/api/account/earnings-tracking'
-  ) {
-    if (appSession) return next()
-    if (pathname.startsWith('/api/')) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('next', pathname)
-    return Response.redirect(loginUrl)
   }
 
   if (!appSession) {

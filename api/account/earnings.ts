@@ -1,8 +1,8 @@
-import { requireAppSession } from '../admin/_helpers'
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
 } from '../../lib/publicDailyEarnings'
+import { requireEarningsSession } from '../../lib/earningsAuth'
 import {
   readPublicEarningsSnapshot,
   savePublicEarningsSnapshot,
@@ -28,7 +28,7 @@ function errorResponse(error: unknown): Response {
 async function webHandler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
-  const denied = await requireAppSession(request)
+  const denied = await requireEarningsSession(request)
   if (denied) return denied
 
   let body: { username?: unknown; day?: unknown }

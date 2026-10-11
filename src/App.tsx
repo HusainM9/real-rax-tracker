@@ -17,6 +17,7 @@ const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const CardsPage = lazy(() => import('./pages/CardsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const EntryPage = lazy(() => import('./pages/EntryPage'))
+const EarningsAccessPage = lazy(() => import('./pages/EarningsAccessPage'))
 const EarningsPage = lazy(() => import('./pages/EarningsPage'))
 const HelpPage = lazy(() => import('./pages/HelpPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -43,6 +44,18 @@ export default function App() {
         <Suspense fallback={<main className="page-shell">Loading…</main>}>
           <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/earnings/access" element={<EarningsAccessPage />} />
+          <Route element={<AccountScope />}>
+            <Route
+              element={
+                <RaxDataProvider>
+                  <Layout />
+                </RaxDataProvider>
+              }
+            >
+              <Route path="/earnings" element={<EarningsPage />} />
+            </Route>
+          </Route>
           <Route element={<RequireAuth />}>
             {/* Admin only needs site password + admin password — not a user account */}
             <Route path="/admin/login" element={<AdminProvider><AdminLoginPage /></AdminProvider>} />
@@ -62,7 +75,6 @@ export default function App() {
                 >
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/entry" element={<EntryPage />} />
-                  <Route path="/earnings" element={<EarningsPage />} />
                   <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="/otd" element={<OtdPage />} />
                   <Route path="/overlap" element={<OverlapsPage />} />

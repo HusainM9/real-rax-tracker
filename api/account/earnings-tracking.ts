@@ -1,15 +1,15 @@
-import { requireAppSession } from '../admin/_helpers'
 import {
   listPublicEarningsSnapshots,
   syncTrackedEarningsUsernames,
 } from '../../lib/publicEarningsStore'
+import { requireEarningsSession } from '../../lib/earningsAuth'
 import { normalizeRealUsernameInput } from '../../lib/realApi'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
-  const denied = await requireAppSession(request)
+  const denied = await requireEarningsSession(request)
   if (denied) return denied
 
   let body: { usernames?: unknown }
