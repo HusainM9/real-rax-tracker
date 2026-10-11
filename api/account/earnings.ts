@@ -25,7 +25,7 @@ function errorResponse(error: unknown): Response {
   )
 }
 
-async function webHandler(request: Request): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   const denied = await requireEarningsSession(request)
@@ -76,5 +76,3 @@ async function webHandler(request: Request): Promise<Response> {
     return errorResponse(error)
   }
 }
-
-export default { fetch: webHandler }

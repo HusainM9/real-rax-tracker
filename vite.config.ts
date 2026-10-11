@@ -42,9 +42,18 @@ function localApiPlugin(): Plugin {
           type WebHandler = (request: Request) => Promise<Response> | Response
           const module = (await server.ssrLoadModule(apiFile)) as {
             default?: WebHandler | { fetch?: WebHandler }
+            GET?: WebHandler
+            POST?: WebHandler
+            PUT?: WebHandler
+            PATCH?: WebHandler
+            DELETE?: WebHandler
           }
-          const handler =
-            typeof module.default === 'function' ? module.default : module.default?.fetch
+          const methodHandler = module[(req.method?.toUpperCase() || 'GET') as keyof typeof module]
+          const handler = typeof methodHandler === 'function'
+            ? methodHandler
+            : typeof module.default === 'function'
+              ? module.default
+              : module.default?.fetch
           if (typeof handler !== 'function') {
             next()
             return

@@ -1,1 +1,1 @@
-export { default } from './snapshot-earnings'
+export { GET, POST } from './snapshot-earnings'

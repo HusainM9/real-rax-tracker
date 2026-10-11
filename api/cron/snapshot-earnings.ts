@@ -46,7 +46,7 @@ function isAuthorized(request: Request): boolean {
   return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`)
 }
 
-async function webHandler(request: Request): Promise<Response> {
+async function handleSnapshot(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
@@ -85,4 +85,10 @@ async function webHandler(request: Request): Promise<Response> {
   return Response.json({ ok: errors.length === 0, day, completed, errors }, { status: errors.length ? 207 : 200 })
 }
 
-export default { fetch: webHandler }
+export function GET(request: Request): Promise<Response> {
+  return handleSnapshot(request)
+}
+
+export function POST(request: Request): Promise<Response> {
+  return handleSnapshot(request)
+}
