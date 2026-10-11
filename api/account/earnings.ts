@@ -1,87 +1,63 @@
-import {
-  nodeApiHandler,
-  type NodeRequest,
-  type NodeResponse,
-} from '../../lib/nodeApiHandler'
-
-function errorResponse(error: unknown): Response {
-  const message = error instanceof Error ? error.message : 'Could not load Real earnings.'
-  const kind = error instanceof Error && 'kind' in error ? String(error.kind) : ''
-  if (kind) {
-    const status = kind === 'rate_limited' ? 429 : kind === 'not_found' ? 404 : 502
-    return Response.json({ error: message, code: `real_${kind}` }, { status })
-  }
-  return Response.json({ error: message }, { status: 500 })
+type NodeRequest = {
+  method?: string
+  url?: string
+  headers: Record<string, string | string[] | undefined>
+  body?: unknown
 }
 
-async function webHandler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
-
-  const [earningsAuth, publicDailyEarnings, publicEarningsStore, realApi] = await Promise.all([
-    import('../../lib/earningsAuth'),
-    import('../../lib/publicDailyEarnings'),
-    import('../../lib/publicEarningsStore'),
-    import('../../lib/realApi'),
-  ])
-
-  const denied = await earningsAuth.requireEarningsSession(request)
-  if (denied) return denied
-
-  let body: { username?: unknown; day?: unknown }
-  try {
-    body = (await request.json()) as typeof body
-  } catch {
-    return Response.json({ error: 'Invalid request body.' }, { status: 400 })
-  }
-
-  const username = realApi.normalizeRealUsernameInput(
-    typeof body.username === 'string' ? body.username : '',
-  )
-  const day = typeof body.day === 'string' ? body.day.trim() : ''
-  if (!username) return Response.json({ error: 'Real username is required.' }, { status: 400 })
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-    return Response.json({ error: 'Day must use YYYY-MM-DD format.' }, { status: 400 })
-  }
-
-  try {
-    const saved = await publicEarningsStore.readPublicEarningsSnapshot(username, day).catch(() => null)
-    if (saved) return Response.json(saved)
-
-    if (day !== publicDailyEarnings.currentRealEarningsDay()) {
-      return Response.json(
-        {
-          error: `No tracked earnings are stored for @${username} on ${day}.`,
-          code: 'public_earnings_snapshot_missing',
-        },
-        { status: 404 },
-      )
-    }
-
-    const realConfig = realApi.resolveRealApiConfig()
-    if (!realConfig) {
-      return Response.json(
-        { error: 'The Real API transport session is not configured.' },
-        { status: 503 },
-      )
-    }
-    const context: import('../../lib/realApi').RealApiContext = {
-      config: realConfig,
-      signal: request.signal,
-    }
-    const reconstructed = await publicDailyEarnings.reconstructPublicDailyEarnings(username, day, context)
-    await publicEarningsStore.savePublicEarningsSnapshot(reconstructed).catch(() => undefined)
-    return Response.json(reconstructed)
-  } catch (error) {
-    return errorResponse(error)
-  }
+type NodeResponse = {
+  statusCode: number
+  headersSent?: boolean
+  setHeader(name: string, value: string): void
+  end(body?: string | Uint8Array): void
 }
 
-export const localWebHandler = webHandler
-const handleNodeRequest = nodeApiHandler(webHandler)
+function requestBody(request: NodeRequest): BodyInit | undefined {
+  const method = request.method?.toUpperCase() || 'GET'
+  if (method === 'GET' || method === 'HEAD' || request.body == null) return undefined
+  if (typeof request.body === 'string') return request.body
+  if (request.body instanceof Uint8Array) return new Uint8Array(request.body)
+  return JSON.stringify(request.body)
+}
+
+function toWebRequest(request: NodeRequest): Request {
+  const headers = new Headers()
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (Array.isArray(value)) value.forEach((item) => headers.append(name, item))
+    else if (value !== undefined) headers.set(name, value)
+  }
+  const protocol = headers.get('x-forwarded-proto') || 'https'
+  const host = headers.get('host') || 'localhost'
+  const rawUrl = request.url || '/'
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `${protocol}://${host}${rawUrl}`
+  const body = requestBody(request)
+  if (body && !headers.has('content-type') && typeof request.body === 'object') {
+    headers.set('content-type', 'application/json')
+  }
+  return new Request(url, { method: request.method || 'GET', headers, body })
+}
 
 export default async function handler(
-  request: NodeRequest,
-  response: NodeResponse,
-): Promise<void> {
-  await handleNodeRequest(request, response)
+  request: Request | NodeRequest,
+  response?: NodeResponse,
+): Promise<Response | void> {
+  try {
+    const { handleAccountEarnings } = await import('../../lib/accountEarningsHandler')
+    if (!response) return handleAccountEarnings(request as Request)
+
+    const result = await handleAccountEarnings(toWebRequest(request as NodeRequest))
+    response.statusCode = result.status
+    result.headers.forEach((value, name) => response.setHeader(name, value))
+    response.end(new Uint8Array(await result.arrayBuffer()))
+  } catch (error) {
+    if (!response) throw error
+    console.error('Earnings API failed', error)
+    if (!response.headersSent) {
+      response.statusCode = 500
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+    }
+    response.end(JSON.stringify({
+      error: error instanceof Error ? error.message : 'Unexpected server error.',
+    }))
+  }
 }

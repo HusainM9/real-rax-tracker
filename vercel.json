@@ -1,7 +1,6 @@
 {
   "rewrites": [{ "source": "/((?!assets/|api/).*)", "destination": "/index.html" }],
   "functions": {
-    "api/account/earnings.ts": { "maxDuration": 300 },
     "api/cron/snapshot-earnings*.ts": { "maxDuration": 300 }
   },
   "crons": [
