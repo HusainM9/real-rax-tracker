@@ -1,4 +1,4 @@
-import { requireAccountSession } from '../admin/_helpers'
+import { requireAppSession } from '../admin/_helpers'
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
@@ -28,11 +28,8 @@ function errorResponse(error: unknown): Response {
 async function webHandler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
-  const session =
-    process.env.NODE_ENV === 'development'
-      ? { username: 'dev' }
-      : await requireAccountSession(request)
-  if (session instanceof Response) return session
+  const denied = await requireAppSession(request)
+  if (denied) return denied
 
   let body: { username?: unknown; day?: unknown }
   try {
@@ -42,7 +39,7 @@ async function webHandler(request: Request): Promise<Response> {
   }
 
   const username = normalizeRealUsernameInput(
-    typeof body.username === 'string' ? body.username : session.username,
+    typeof body.username === 'string' ? body.username : '',
   )
   const day = typeof body.day === 'string' ? body.day.trim() : ''
   if (!username) return Response.json({ error: 'Real username is required.' }, { status: 400 })

@@ -1,4 +1,4 @@
-import { requireAccountSession } from '../admin/_helpers'
+import { requireAppSession } from '../admin/_helpers'
 import {
   listPublicEarningsSnapshots,
   syncTrackedEarningsUsernames,
@@ -9,11 +9,8 @@ export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
-  const session =
-    process.env.NODE_ENV === 'development'
-      ? { username: 'dev' }
-      : await requireAccountSession(request)
-  if (session instanceof Response) return session
+  const denied = await requireAppSession(request)
+  if (denied) return denied
 
   let body: { usernames?: unknown }
   try {

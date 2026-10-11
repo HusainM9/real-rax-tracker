@@ -49,22 +49,6 @@ function isAdminEventPost(pathname: string, method: string): boolean {
   return pathname === '/api/admin/events' && method === 'POST'
 }
 
-function assetRefererAllowsLoginBundle(request: Request): boolean {
-  const referer = request.headers.get('referer')
-  if (!referer) return false
-
-  try {
-    const refUrl = new URL(referer)
-    const reqUrl = new URL(request.url)
-    return (
-      refUrl.origin === reqUrl.origin &&
-      (refUrl.pathname === '/login' || refUrl.pathname === '/account')
-    )
-  } catch {
-    return false
-  }
-}
-
 async function hasValidSession(request: Request): Promise<boolean> {
   const token = readCookie(request, getSessionCookieName())
   return verifySessionToken(token)
@@ -91,13 +75,7 @@ export default async function middleware(request: Request) {
   const method = request.method.toUpperCase()
 
   if (pathname.startsWith('/assets/')) {
-    if (
-      (await hasValidSession(request)) ||
-      assetRefererAllowsLoginBundle(request)
-    ) {
-      return next()
-    }
-    return new Response('Unauthorized', { status: 401 })
+    return next()
   }
 
   if (isPublicPath(pathname)) {
@@ -160,6 +138,22 @@ export default async function middleware(request: Request) {
       return Response.redirect(loginUrl)
     }
     return next()
+  }
+
+  // Earnings uses the independently linked account list from the page and only needs the
+  // shared site password. It must not depend on a primary tracker account session.
+  if (
+    pathname === '/earnings' ||
+    pathname === '/api/account/earnings' ||
+    pathname === '/api/account/earnings-tracking'
+  ) {
+    if (appSession) return next()
+    if (pathname.startsWith('/api/')) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('next', pathname)
+    return Response.redirect(loginUrl)
   }
 
   if (!appSession) {
