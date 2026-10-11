@@ -14,7 +14,9 @@ import {
   type RealApiContext,
 } from '../../lib/realApi'
 
-export const config = { runtime: 'edge', maxDuration: 60 }
+// Public collection scans can be large on a cold invocation. Node Fluid Compute allows the
+// request to finish instead of hitting the Edge runtime's first-response timeout.
+export const config = { maxDuration: 300 }
 
 function errorResponse(error: unknown): Response {
   if (error instanceof RealApiError) {

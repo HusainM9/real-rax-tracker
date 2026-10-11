@@ -6,9 +6,24 @@ import { fetchAccountDailyEarnings, syncLinkedEarningsTracking, type DailyEarnin
 import { highestAverageWeekday, highestEarningDay, rankEarningPasses, readEarningsHistory, saveEarningsHistoryEntries, saveEarningsHistoryEntry, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
 
-function localDay(): string {
-  const now = new Date()
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+function currentRealEarningsDay(now = new Date()): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  )
+  const offset = Number(parts.hour) < 7 ? -1 : 0
+  return new Date(
+    Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + offset),
+  ).toISOString().slice(0, 10)
 }
 
 function normalizeUsername(value: string): string {
@@ -109,7 +124,7 @@ export default function EarningsPage() {
   const [selectedUsername, setSelectedUsername] = useState(import.meta.env.DEV ? DEMO_USERNAME : accounts[0]?.username ?? '')
   const isDemo = import.meta.env.DEV && selectedUsername === DEMO_USERNAME
   const isAllAccounts = selectedUsername === ALL_ACCOUNTS
-  const [day, setDay] = useState(import.meta.env.DEV ? DEMO_RESULT.day : localDay)
+  const [day, setDay] = useState(import.meta.env.DEV ? DEMO_RESULT.day : currentRealEarningsDay)
   const [result, setResult] = useState<DailyEarningsResult | null>(isDemo ? DEMO_RESULT : null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -175,12 +190,11 @@ export default function EarningsPage() {
         const scoped = isAllAccounts
           ? snapshots
           : snapshots.filter((snapshot) => snapshot.username.toLowerCase() === selectedUsername.toLowerCase())
-        const latestDay = scoped.map((snapshot) => snapshot.day).sort().at(-1)
-        if (latestDay) {
-          setDay(latestDay)
+        const currentSnapshots = scoped.filter((snapshot) => snapshot.day === day)
+        if (currentSnapshots.length > 0) {
           setResult(combineDailyResults(
-            scoped.filter((snapshot) => snapshot.day === latestDay),
-            latestDay,
+            currentSnapshots,
+            day,
             isAllAccounts,
           ))
         }
@@ -191,7 +205,7 @@ export default function EarningsPage() {
       }
     })
     return () => controller.abort()
-  }, [isAllAccounts, isDemo, linkedAccounts, selectedUsername])
+  }, [day, isAllAccounts, isDemo, linkedAccounts, selectedUsername])
 
   useEffect(() => {
     if (isDemo) {
@@ -207,7 +221,15 @@ export default function EarningsPage() {
 
   useEffect(() => {
     if (!isDemo) setResult(null)
-  }, [isDemo, selectedUsername])
+  }, [day, isDemo, selectedUsername])
+
+  useEffect(() => {
+    if (isDemo) return
+    const updateDay = () => setDay(currentRealEarningsDay())
+    updateDay()
+    const timer = window.setInterval(updateDay, 60_000)
+    return () => window.clearInterval(timer)
+  }, [isDemo])
 
   async function loadEarnings() {
     if (isDemo) return
@@ -215,7 +237,12 @@ export default function EarningsPage() {
     if (targets.length === 0 || !selectedUsername) { setError('Add a linked Real username first.'); return }
     setLoading(true); setError('')
     try {
-      const loadedAccounts = await Promise.all(targets.map((username) => fetchAccountDailyEarnings(username, day)))
+      const loadedAccounts: DailyEarningsResult[] = []
+      // Keep account scans sequential. Running several cold scans together overwhelms Real's
+      // public API and was the source of the deployed Refresh All timeouts.
+      for (const username of targets) {
+        loadedAccounts.push(await fetchAccountDailyEarnings(username, day))
+      }
       let nextHistory = readEarningsHistory()
       for (const loaded of loadedAccounts) {
         nextHistory = saveEarningsHistoryEntry(historyEntry(loaded))
@@ -234,10 +261,10 @@ export default function EarningsPage() {
         <div className="earnings-hero-copy">
           <p className="eyebrow">Earnings report</p>
           <h1>Daily player-card earnings</h1>
-          <p>Active-season RAX by account and date. On This Day claims are tracked separately.</p>
+          <p>Active-season RAX for the current Real earnings day. On This Day claims are tracked separately.</p>
           {isDemo ? <span className="earnings-demo-badge">Development preview data</span> : null}
         </div>
-        <div className="earnings-hero-total"><span>{result?.dayDisplay ?? 'Selected day'}</span><strong>{formatRax(result?.dailyTotal ?? 0)}</strong><small>RAX earned</small></div>
+        <div className="earnings-hero-total"><span>{result?.dayDisplay ?? 'Current day'}</span><strong>{formatRax(result?.dailyTotal ?? 0)}</strong><small>RAX earned</small></div>
         <Link className="earnings-back-link" to="/profile">← Profile</Link>
       </section>
 
@@ -248,8 +275,7 @@ export default function EarningsPage() {
             {accounts.map((account) => <button className={`earnings-account-tab${selectedUsername === account.username ? ' is-active' : ''}`} type="button" key={account.id} onClick={() => setSelectedUsername(account.username)}><span>{account.username === ALL_ACCOUNTS ? 'Σ' : account.name.slice(0, 1).toUpperCase()}</span><strong>{account.name}</strong>{account.username !== ALL_ACCOUNTS ? <small>@{account.username}</small> : <small>{linkedAccounts.length} linked</small>}</button>)}
           </div>
         </div>
-        <label className="earnings-date-control"><span>Report date</span><input type="date" value={day} onChange={(event) => setDay(event.target.value)} /></label>
-        <button className="button primary" type="button" disabled={loading || !day || isDemo} onClick={() => void loadEarnings()}>{isDemo ? 'Preview report' : loading ? 'Loading…' : 'Refresh earnings'}</button>
+        <button className="button primary" type="button" disabled={loading || !day || isDemo} onClick={() => void loadEarnings()}>{isDemo ? 'Preview report' : loading ? 'Loading…' : isAllAccounts ? 'Refresh all accounts' : 'Refresh earnings'}</button>
       </section>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Calculated from public active passes, boosters, and Real box scores. Linked accounts are refreshed automatically each morning.</p> : null}
@@ -257,7 +283,7 @@ export default function EarningsPage() {
       {result ? <>
         <section className="earnings-summary-grid">
           <div className="panel earnings-summary-card earnings-summary-primary"><span>Daily earnings</span><strong>{formatRax(result.dailyTotal)} RAX</strong><small>{result.dayDisplay}</small></div>
-          <div className="panel earnings-summary-card"><span>This week</span><strong>{formatRax(weeklyTotal)} RAX</strong><small>Monday through selected day</small></div>
+          <div className="panel earnings-summary-card"><span>This week</span><strong>{formatRax(weeklyTotal)} RAX</strong><small>Monday through today</small></div>
           <div className="panel earnings-summary-card"><span>This month</span><strong>{formatRax(monthlyTotal)} RAX</strong><small>{selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</small></div>
           <div className="panel earnings-summary-card"><span>Highest earned day</span><strong>{formatRax(highestDay?.dailyTotal ?? 0)} RAX</strong><small>{highestDay?.day ?? 'No tracked days yet'}</small></div>
           <div className="panel earnings-summary-card"><span>Best average weekday</span><strong>{bestWeekday?.weekday ?? '—'}</strong><small>{bestWeekday ? `${formatRax(bestWeekday.average)} RAX average across ${bestWeekday.days} day${bestWeekday.days === 1 ? '' : 's'}` : 'No tracked days yet'}</small></div>

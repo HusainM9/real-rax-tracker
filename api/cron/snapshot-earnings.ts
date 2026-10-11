@@ -8,7 +8,7 @@ import {
 } from '../../lib/publicEarningsStore'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
 
-export const config = { runtime: 'edge', maxDuration: 60 }
+export const config = { maxDuration: 300 }
 
 function easternParts(now: Date): Record<string, string> {
   return Object.fromEntries(
