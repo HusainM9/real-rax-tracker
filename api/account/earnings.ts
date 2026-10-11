@@ -3,6 +3,7 @@ import {
   reconstructPublicDailyEarnings,
 } from '../../lib/publicDailyEarnings'
 import { requireEarningsSession } from '../../lib/earningsAuth'
+import { nodeApiHandler } from '../../lib/nodeApiHandler'
 import {
   readPublicEarningsSnapshot,
   savePublicEarningsSnapshot,
@@ -76,3 +77,5 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse(error)
   }
 }
+
+export default nodeApiHandler(POST)

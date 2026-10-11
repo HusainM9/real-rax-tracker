@@ -85,7 +85,6 @@ export default async function middleware(request: Request) {
   if (
     pathname === '/earnings' ||
     pathname === '/api/account/earnings' ||
-    pathname === '/api/account/earnings-health' ||
     pathname === '/api/account/earnings-tracking'
   ) {
     const token = readCookie(request, getEarningsCookieName())

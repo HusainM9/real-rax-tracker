@@ -7,6 +7,7 @@ import {
   savePublicEarningsSnapshot,
 } from '../../lib/publicEarningsStore'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
+import { nodeApiHandler } from '../../lib/nodeApiHandler'
 
 function easternParts(now: Date): Record<string, string> {
   return Object.fromEntries(
@@ -92,3 +93,5 @@ export function GET(request: Request): Promise<Response> {
 export function POST(request: Request): Promise<Response> {
   return handleSnapshot(request)
 }
+
+export default nodeApiHandler(handleSnapshot)
