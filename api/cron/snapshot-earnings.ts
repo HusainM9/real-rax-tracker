@@ -1,17 +1,17 @@
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
-} from '../../lib/publicDailyEarnings'
+} from '../../lib/publicDailyEarnings.js'
 import {
   listTrackedEarningsUsernames,
   savePublicEarningsSnapshot,
-} from '../../lib/publicEarningsStore'
-import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
+} from '../../lib/publicEarningsStore.js'
+import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi.js'
 import {
   nodeApiHandler,
   type NodeRequest,
   type NodeResponse,
-} from '../../lib/nodeApiHandler'
+} from '../../lib/nodeApiHandler.js'
 
 function easternParts(now: Date): Record<string, string> {
   return Object.fromEntries(
@@ -90,12 +90,12 @@ async function handleSnapshot(request: Request): Promise<Response> {
   return Response.json({ ok: errors.length === 0, day, completed, errors }, { status: errors.length ? 207 : 200 })
 }
 
-export const localWebHandler = handleSnapshot
 const handleNodeRequest = nodeApiHandler(handleSnapshot)
 
 export default async function handler(
-  request: NodeRequest,
-  response: NodeResponse,
-): Promise<void> {
-  await handleNodeRequest(request, response)
+  request: Request | NodeRequest,
+  response?: NodeResponse,
+): Promise<Response | void> {
+  if (!response) return handleSnapshot(request as Request)
+  await handleNodeRequest(request as NodeRequest, response)
 }

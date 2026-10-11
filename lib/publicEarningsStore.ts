@@ -1,7 +1,7 @@
 import { kv } from '@vercel/kv'
-import { adminStorageConfigured } from './adminEventStore'
-import { normalizeRealUsernameInput } from './realApi'
-import type { PublicDailyEarningsResult } from './publicDailyEarnings'
+import { adminStorageConfigured } from './adminEventStore.js'
+import { normalizeRealUsernameInput } from './realApi.js'
+import type { PublicDailyEarningsResult } from './publicDailyEarnings.js'
 
 const TRACKED_USERS_KEY = 'rax:public-earnings:usernames'
 const SNAPSHOT_PREFIX = 'rax:public-earnings:snapshot:'

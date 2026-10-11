@@ -8,7 +8,7 @@ import {
   type AdminEventInput,
   type AdminEventType,
   type AdminUserSummary,
-} from './adminEventTypes'
+} from './adminEventTypes.js'
 
 const EVENTS_KEY = 'rax:events'
 const USERNAMES_KEY = 'rax:usernames'
