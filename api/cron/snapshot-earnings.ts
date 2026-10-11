@@ -7,6 +7,7 @@ import {
   savePublicEarningsSnapshot,
 } from '../../lib/publicEarningsStore'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
+import { nodeCompatibleWebHandler } from '../../lib/nodeWebHandler'
 
 export const config = { maxDuration: 300 }
 
@@ -48,7 +49,7 @@ function isAuthorized(request: Request): boolean {
   return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`)
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function webHandler(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
@@ -86,3 +87,5 @@ export default async function handler(request: Request): Promise<Response> {
 
   return Response.json({ ok: errors.length === 0, day, completed, errors }, { status: errors.length ? 207 : 200 })
 }
+
+export default nodeCompatibleWebHandler(webHandler)

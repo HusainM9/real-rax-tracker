@@ -13,6 +13,7 @@ import {
   resolveRealApiConfig,
   type RealApiContext,
 } from '../../lib/realApi'
+import { nodeCompatibleWebHandler } from '../../lib/nodeWebHandler'
 
 // Public collection scans can be large on a cold invocation. Node Fluid Compute allows the
 // request to finish instead of hitting the Edge runtime's first-response timeout.
@@ -29,7 +30,7 @@ function errorResponse(error: unknown): Response {
   )
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function webHandler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   const session =
@@ -83,3 +84,5 @@ export default async function handler(request: Request): Promise<Response> {
     return errorResponse(error)
   }
 }
+
+export default nodeCompatibleWebHandler(webHandler)
