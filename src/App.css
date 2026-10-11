@@ -3882,6 +3882,28 @@ button.calendar-day {
 .earnings-account-tab:hover { border-color: rgba(228, 160, 36, 0.3); }
 .earnings-account-tab.is-active { background: linear-gradient(145deg, rgba(228, 160, 36, 0.22), rgba(228, 160, 36, 0.07)); border-color: rgba(228, 160, 36, 0.48); box-shadow: inset 0 0 0 1px rgba(228, 160, 36, 0.08); }
 .earnings-account-tab.is-active > span { background: var(--accent); color: #171008; }
+.earnings-refresh-log { display: grid; gap: 0.85rem; padding: 1rem 1.1rem; }
+.earnings-refresh-log-heading { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }
+.earnings-refresh-log-heading > div { display: grid; gap: 0.18rem; }
+.earnings-refresh-log-heading > div > span { color: var(--muted); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.earnings-refresh-log-heading > div > strong { font-size: 0.95rem; }
+.earnings-refresh-log-heading > span { color: var(--muted); font-size: 0.75rem; }
+.earnings-refresh-live { color: var(--accent-soft) !important; }
+.earnings-refresh-live::before { animation: earnings-pulse 1.2s ease-in-out infinite; background: var(--accent); border-radius: 50%; content: ''; display: inline-block; height: 0.45rem; margin-right: 0.4rem; width: 0.45rem; }
+.earnings-refresh-progress { background: rgba(255,255,255,0.06); border-radius: 999px; height: 0.3rem; overflow: hidden; }
+.earnings-refresh-progress > span { background: linear-gradient(90deg, var(--accent), var(--accent-soft)); border-radius: inherit; display: block; height: 100%; transition: width 220ms ease; }
+.earnings-refresh-events { display: grid; gap: 0.45rem; list-style: none; margin: 0; padding: 0; }
+.earnings-refresh-events li { align-items: center; display: grid; gap: 0.7rem; grid-template-columns: auto minmax(0, 1fr); padding: 0.5rem 0.15rem; }
+.earnings-refresh-events li + li { border-top: 1px solid var(--line); }
+.earnings-refresh-events li > div { display: flex; flex-wrap: wrap; gap: 0.3rem 0.7rem; justify-content: space-between; min-width: 0; }
+.earnings-refresh-events strong { font-size: 0.84rem; }
+.earnings-refresh-events small { color: var(--muted); font-size: 0.78rem; }
+.earnings-refresh-status { background: var(--muted); border-radius: 50%; height: 0.58rem; width: 0.58rem; }
+.earnings-refresh-events .is-fetching .earnings-refresh-status,
+.earnings-refresh-events .is-retrying .earnings-refresh-status { animation: earnings-pulse 1.2s ease-in-out infinite; background: var(--accent); box-shadow: 0 0 0 0.22rem rgba(228, 160, 36, 0.12); }
+.earnings-refresh-events .is-complete .earnings-refresh-status { background: #52d7a1; }
+.earnings-refresh-events .is-failed .earnings-refresh-status { background: var(--bad); }
+@keyframes earnings-pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
 .earnings-summary-card span {
   color: var(--muted);
   font-size: 0.82rem;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
-import { fetchAccountDailyEarnings, syncLinkedEarningsTracking, type DailyEarningsResult } from '../lib/dailyEarnings'
+import { DailyEarningsRequestError, fetchAccountDailyEarnings, syncLinkedEarningsTracking, type DailyEarningsResult } from '../lib/dailyEarnings'
 import { highestAverageWeekday, highestEarningDay, rankEarningPasses, readEarningsHistory, saveEarningsHistoryEntries, saveEarningsHistoryEntry, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
 
@@ -38,6 +38,23 @@ function percentChange(current: number, previous: number): string {
 
 const DEMO_USERNAME = 'demo-collector'
 const ALL_ACCOUNTS = '__all-linked-accounts__'
+const ACCOUNT_RATE_LIMIT_RETRY_MS = 5_000
+
+type RefreshLogEntry = {
+  username: string
+  status: 'queued' | 'fetching' | 'retrying' | 'complete' | 'failed'
+  message: string
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function isRateLimited(error: unknown): boolean {
+  return error instanceof DailyEarningsRequestError && (
+    error.status === 429 || error.code === 'real_rate_limited'
+  )
+}
 const DEMO_HISTORY: EarningsHistoryEntry[] = Array.from({ length: 30 }, (_, index) => {
   const date = new Date('2026-10-11T12:00:00')
   date.setDate(date.getDate() - (29 - index))
@@ -128,6 +145,7 @@ export default function EarningsPage() {
   const [result, setResult] = useState<DailyEarningsResult | null>(isDemo ? DEMO_RESULT : null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [refreshLog, setRefreshLog] = useState<RefreshLogEntry[]>([])
   const [history, setHistory] = useState<EarningsHistoryEntry[]>(() => isDemo ? DEMO_HISTORY : readEarningsHistory())
 
   const accountHistory = useMemo(() => {
@@ -236,22 +254,70 @@ export default function EarningsPage() {
     const targets = isAllAccounts ? linkedAccounts.map((account) => account.username) : [selectedUsername]
     if (targets.length === 0 || !selectedUsername) { setError('Add a linked Real username first.'); return }
     setLoading(true); setError('')
+    setRefreshLog(targets.map((username) => ({
+      username,
+      status: 'queued',
+      message: 'Waiting to start',
+    })))
+    const updateLog = (username: string, patch: Partial<RefreshLogEntry>) => {
+      setRefreshLog((entries) => entries.map((entry) => (
+        entry.username === username ? { ...entry, ...patch } : entry
+      )))
+    }
+    const loadedAccounts: DailyEarningsResult[] = []
+    const failures: string[] = []
+    let nextHistory = readEarningsHistory()
     try {
-      const loadedAccounts: DailyEarningsResult[] = []
-      // Keep account scans sequential. Running several cold scans together overwhelms Real's
-      // public API and was the source of the deployed Refresh All timeouts.
-      for (const username of targets) {
-        loadedAccounts.push(await fetchAccountDailyEarnings(username, day))
-      }
-      let nextHistory = readEarningsHistory()
-      for (const loaded of loadedAccounts) {
+      // Keep account scans sequential. Shared public game data is cached server-side, so later
+      // accounts are faster without multiplying Real API traffic and triggering more 429s.
+      for (let index = 0; index < targets.length; index += 1) {
+        const username = targets[index]!
+        const startedAt = performance.now()
+        updateLog(username, {
+          status: 'fetching',
+          message: `Fetching account ${index + 1} of ${targets.length}…`,
+        })
+
+        let loaded: DailyEarningsResult | null = null
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            loaded = await fetchAccountDailyEarnings(username, day)
+            break
+          } catch (loadError) {
+            if (attempt === 0 && isRateLimited(loadError)) {
+              updateLog(username, {
+                status: 'retrying',
+                message: 'Real rate limited the scan. Cooling down for 5 seconds, then retrying…',
+              })
+              await wait(ACCOUNT_RATE_LIMIT_RETRY_MS)
+              updateLog(username, {
+                status: 'fetching',
+                message: `Retrying account ${index + 1} of ${targets.length}…`,
+              })
+              continue
+            }
+            const message = loadError instanceof Error ? loadError.message : 'Could not load earnings.'
+            failures.push(`@${username}: ${message}`)
+            updateLog(username, { status: 'failed', message })
+            break
+          }
+        }
+
+        if (!loaded) continue
+        loadedAccounts.push(loaded)
         nextHistory = saveEarningsHistoryEntry(historyEntry(loaded))
+        setHistory(nextHistory)
+        setResult(combineDailyResults(loadedAccounts, day, isAllAccounts))
+        const seconds = Math.max(1, Math.round((performance.now() - startedAt) / 1000))
+        updateLog(username, {
+          status: 'complete',
+          message: `${formatRax(loaded.dailyTotal)} RAX from ${loaded.earnings.length} pass${loaded.earnings.length === 1 ? '' : 'es'} · ${seconds}s`,
+        })
       }
-      setHistory(nextHistory)
-      setResult(combineDailyResults(loadedAccounts, day, isAllAccounts))
-    } catch (loadError) {
-      setResult(null)
-      setError(loadError instanceof Error ? loadError.message : 'Could not load earnings.')
+      if (failures.length > 0) {
+        setError(`${failures.length} account${failures.length === 1 ? '' : 's'} could not be refreshed. Completed accounts were kept.`)
+      }
+      if (loadedAccounts.length === 0 && failures.length === 0) setResult(null)
     } finally { setLoading(false) }
   }
 
@@ -277,6 +343,28 @@ export default function EarningsPage() {
         </div>
         <button className="button primary" type="button" disabled={loading || !day || isDemo} onClick={() => void loadEarnings()}>{isDemo ? 'Preview report' : loading ? 'Loading…' : isAllAccounts ? 'Refresh all accounts' : 'Refresh earnings'}</button>
       </section>
+      {refreshLog.length > 0 ? (
+        <section className="panel earnings-refresh-log" aria-live="polite">
+          <div className="earnings-refresh-log-heading">
+            <div>
+              <span>Refresh activity</span>
+              <strong>{refreshLog.filter((entry) => entry.status === 'complete').length} of {refreshLog.length} accounts complete</strong>
+            </div>
+            {loading ? <span className="earnings-refresh-live">Running</span> : <span>Finished</span>}
+          </div>
+          <div className="earnings-refresh-progress" aria-hidden="true">
+            <span style={{ width: `${(refreshLog.filter((entry) => entry.status === 'complete' || entry.status === 'failed').length / refreshLog.length) * 100}%` }} />
+          </div>
+          <ol className="earnings-refresh-events">
+            {refreshLog.map((entry) => (
+              <li className={`is-${entry.status}`} key={entry.username}>
+                <span className="earnings-refresh-status" aria-hidden="true" />
+                <div><strong>@{entry.username}</strong><small>{entry.message}</small></div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Calculated from public active passes, boosters, and Real box scores. Linked accounts are refreshed automatically each morning.</p> : null}
 

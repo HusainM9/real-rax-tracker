@@ -31,6 +31,18 @@ export type EarningsTrackingResult = {
   snapshots: DailyEarningsResult[]
 }
 
+export class DailyEarningsRequestError extends Error {
+  readonly status: number
+  readonly code: string
+
+  constructor(message: string, status: number, code = '') {
+    super(message)
+    this.name = 'DailyEarningsRequestError'
+    this.status = status
+    this.code = code
+  }
+}
+
 export async function fetchAccountDailyEarnings(
   username: string,
   day: string,
@@ -43,8 +55,14 @@ export async function fetchAccountDailyEarnings(
     body: JSON.stringify({ username, day, before: 0 }),
     signal,
   })
-  const data = await readResponseJson<DailyEarningsResult & { error?: string }>(response)
-  if (!response.ok) throw new Error(data.error || `Earnings request failed (${response.status}).`)
+  const data = await readResponseJson<DailyEarningsResult & { error?: string; code?: string }>(response)
+  if (!response.ok) {
+    throw new DailyEarningsRequestError(
+      data.error || `Earnings request failed (${response.status}).`,
+      response.status,
+      data.code,
+    )
+  }
   return data
 }
 

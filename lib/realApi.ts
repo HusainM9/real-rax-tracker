@@ -13,6 +13,14 @@ const DEFAULT_CONCURRENCY = 2
 const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_RETRY_BASE_MS = 750
 const DEFAULT_RETRY_MAX_MS = 20_000
+/**
+ * Public game data is identical for every linked account. A warm serverless instance can reuse
+ * it while a Refresh All run moves through its accounts, avoiding the largest source of duplicate
+ * Real requests and 429s. Keep this short so in-progress games still update promptly.
+ */
+const SHARED_PUBLIC_CACHE_TTL_MS = 3 * 60_000
+const SHARED_PUBLIC_CACHE_MAX_ENTRIES = 500
+const sharedPublicGetCache = new Map<string, { expiresAt: number; value: unknown }>()
 
 /** Recovered from Real's public web bundle: Hashids('realwebapp', 16).encode(Date.now()). */
 const REQUEST_TOKEN_SALT = 'realwebapp'
@@ -219,6 +227,42 @@ function buildUrl(
   return url.toString()
 }
 
+function shouldCacheSharedPublicPath(path: string): boolean {
+  return (
+    path.startsWith('/home/') ||
+    path.startsWith('/games/') ||
+    path.startsWith('/playerboxscores/')
+  )
+}
+
+function readSharedPublicCache<T>(url: string): T | undefined {
+  const cached = sharedPublicGetCache.get(url)
+  if (!cached) return undefined
+  if (cached.expiresAt <= Date.now()) {
+    sharedPublicGetCache.delete(url)
+    return undefined
+  }
+  return cached.value as T
+}
+
+function writeSharedPublicCache(url: string, value: unknown): void {
+  if (sharedPublicGetCache.size >= SHARED_PUBLIC_CACHE_MAX_ENTRIES) {
+    const now = Date.now()
+    for (const [key, cached] of sharedPublicGetCache) {
+      if (cached.expiresAt <= now) sharedPublicGetCache.delete(key)
+    }
+    while (sharedPublicGetCache.size >= SHARED_PUBLIC_CACHE_MAX_ENTRIES) {
+      const oldest = sharedPublicGetCache.keys().next().value as string | undefined
+      if (!oldest) break
+      sharedPublicGetCache.delete(oldest)
+    }
+  }
+  sharedPublicGetCache.set(url, {
+    expiresAt: Date.now() + SHARED_PUBLIC_CACHE_TTL_MS,
+    value,
+  })
+}
+
 /**
  * Low-level authenticated GET against Real. Exported so new endpoints (for example
  * /userpassearnings/{sport}/season/{season}/entity/{entityType}/{entityId} for the
@@ -234,6 +278,11 @@ export async function realGetJson<T>(
 ): Promise<T> {
   const { config } = context
   const url = buildUrl(config, path, query)
+  const cacheSharedResponse = shouldCacheSharedPublicPath(path)
+  if (cacheSharedResponse) {
+    const cached = readSharedPublicCache<T>(url)
+    if (cached !== undefined) return cached
+  }
   const maxAttempts = Math.max(1, config.maxRetries + 1)
   let lastRateLimitError: RealApiError | null = null
   let pendingDelayMs: number | null = null
@@ -249,7 +298,8 @@ export async function realGetJson<T>(
       const delay =
         pendingDelayMs ?? realApiRetryDelayMs(attempt - 1, config.retryBaseMs, config.retryMaxMs)
       pendingDelayMs = null
-      await sleep(delay, context.signal)
+      // A zero-delay jitter retry immediately repeats the same burst and tends to extend 429s.
+      await sleep(Math.max(500, delay), context.signal)
     }
 
     const timeout = abortableSignal(config.timeoutMs, context.signal)
@@ -305,7 +355,9 @@ export async function realGetJson<T>(
 
     const text = await response.text()
     try {
-      return JSON.parse(text) as T
+      const parsed = JSON.parse(text) as T
+      if (cacheSharedResponse) writeSharedPublicCache(url, parsed)
+      return parsed
     } catch {
       throw new RealApiError('invalid_response', 'Real API returned a non-JSON response.')
     }

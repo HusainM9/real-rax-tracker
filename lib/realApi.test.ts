@@ -126,6 +126,18 @@ describe('realGetJson rate-limit retries', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('reuses public game responses across linked-account scans', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ content: { games: [{ id: 7 }] } })) as unknown as typeof fetch
+    const context = { config: testConfig() }
+    const path = `/home/nba/day/next-cache-test-${Date.now()}`
+
+    const first = await realGetJson(path, context, { day: '2026-10-12' })
+    const second = await realGetJson(path, context, { day: '2026-10-12' })
+
+    expect(second).toEqual(first)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('aborts hung fetches and returns timeout (does not wait forever)', async () => {
     vi.useFakeTimers()
     globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {

@@ -202,9 +202,10 @@ export async function reconstructPublicDailyEarnings(
   day: string,
   context: RealApiContext,
 ): Promise<PublicDailyEarningsResult> {
-  // Collection calls stay conservative, while independent public game/box-score reads can use
-  // a slightly wider pool so large collections finish within a serverless invocation.
-  const detailConcurrency = Math.min(4, Math.max(1, context.config.concurrency * 2))
+  // Box-score detail calls dominate cold scans. One extra worker materially shortens the scan,
+  // while the transport's 429 backoff keeps this below the bursty four-worker pool that Real
+  // frequently rate-limited.
+  const detailConcurrency = Math.min(3, Math.max(1, context.config.concurrency + 1))
   const username = normalizeRealUsernameInput(usernameInput)
   const user = await getUserByUsername(username, context)
   const allPasses = await listPasses({ userId: user.id }, context)
