@@ -12,7 +12,7 @@ import {
   type RealPass,
   type RealPlayerBoxScore,
   type RealStatValue,
-} from './realApi'
+} from './realApi.js'
 
 export type PublicDailyEarningsInfo = {
   id: string

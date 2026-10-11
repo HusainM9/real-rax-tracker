@@ -1,12 +1,12 @@
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
-} from './publicDailyEarnings'
+} from './publicDailyEarnings.js'
 import {
   normalizeRealUsernameInput,
   resolveRealApiConfig,
   type RealApiContext,
-} from './realApi'
+} from './realApi.js'
 
 function errorResponse(error: unknown): Response {
   const message = error instanceof Error ? error.message : 'Could not load Real earnings.'

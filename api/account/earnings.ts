@@ -1,4 +1,4 @@
-import { handleAccountEarnings } from '../../lib/accountEarningsHandler'
+import { handleAccountEarnings } from '../../lib/accountEarningsHandler.js'
 
 type NodeRequest = {
   method?: string

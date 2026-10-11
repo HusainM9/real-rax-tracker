@@ -1,5 +1,5 @@
 import Hashids from 'hashids'
-import { getRealAppToolsRows } from './realAppToolsPaste'
+import { getRealAppToolsRows } from './realAppToolsPaste.js'
 
 const DEFAULT_BASE_URL = 'https://web.realapp.com'
 const DEFAULT_DEVICE_TYPE = 'desktop_web'
