@@ -7,7 +7,11 @@ import {
   savePublicEarningsSnapshot,
 } from '../../lib/publicEarningsStore'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
-import { nodeApiHandler } from '../../lib/nodeApiHandler'
+import {
+  nodeApiHandler,
+  type NodeRequest,
+  type NodeResponse,
+} from '../../lib/nodeApiHandler'
 
 function easternParts(now: Date): Record<string, string> {
   return Object.fromEntries(
@@ -87,4 +91,11 @@ async function handleSnapshot(request: Request): Promise<Response> {
 }
 
 export const localWebHandler = handleSnapshot
-export default nodeApiHandler(handleSnapshot)
+const handleNodeRequest = nodeApiHandler(handleSnapshot)
+
+export default async function handler(
+  request: NodeRequest,
+  response: NodeResponse,
+): Promise<void> {
+  await handleNodeRequest(request, response)
+}

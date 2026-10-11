@@ -1,11 +1,11 @@
-type NodeRequest = {
+export type NodeRequest = {
   method?: string
   url?: string
   headers: Record<string, string | string[] | undefined>
   body?: unknown
 }
 
-type NodeResponse = {
+export type NodeResponse = {
   statusCode: number
   headersSent?: boolean
   setHeader(name: string, value: string): void

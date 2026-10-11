@@ -3,7 +3,11 @@ import {
   reconstructPublicDailyEarnings,
 } from '../../lib/publicDailyEarnings'
 import { requireEarningsSession } from '../../lib/earningsAuth'
-import { nodeApiHandler } from '../../lib/nodeApiHandler'
+import {
+  nodeApiHandler,
+  type NodeRequest,
+  type NodeResponse,
+} from '../../lib/nodeApiHandler'
 import {
   readPublicEarningsSnapshot,
   savePublicEarningsSnapshot,
@@ -79,4 +83,11 @@ async function webHandler(request: Request): Promise<Response> {
 }
 
 export const localWebHandler = webHandler
-export default nodeApiHandler(webHandler)
+const handleNodeRequest = nodeApiHandler(webHandler)
+
+export default async function handler(
+  request: NodeRequest,
+  response: NodeResponse,
+): Promise<void> {
+  await handleNodeRequest(request, response)
+}
