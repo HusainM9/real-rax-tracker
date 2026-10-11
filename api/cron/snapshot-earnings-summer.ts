@@ -1,1 +1,1 @@
-export { config, default } from './snapshot-earnings'
+export { default } from './snapshot-earnings'

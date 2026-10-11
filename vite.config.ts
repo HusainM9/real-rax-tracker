@@ -39,10 +39,13 @@ function localApiPlugin(): Plugin {
             }
           }
 
+          type WebHandler = (request: Request) => Promise<Response> | Response
           const module = (await server.ssrLoadModule(apiFile)) as {
-            default?: (request: Request) => Promise<Response> | Response
+            default?: WebHandler | { fetch?: WebHandler }
           }
-          if (typeof module.default !== 'function') {
+          const handler =
+            typeof module.default === 'function' ? module.default : module.default?.fetch
+          if (typeof handler !== 'function') {
             next()
             return
           }
@@ -53,7 +56,7 @@ function localApiPlugin(): Plugin {
             body: body ? Readable.toWeb(Readable.from(body)) : undefined,
             duplex: body ? 'half' : undefined,
           } as RequestInit)
-          const response = await module.default(request)
+          const response = await handler(request)
 
           res.statusCode = response.status
           response.headers.forEach((value, key) => res.setHeader(key, value))

@@ -7,9 +7,6 @@ import {
   savePublicEarningsSnapshot,
 } from '../../lib/publicEarningsStore'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
-import { nodeCompatibleWebHandler } from '../../lib/nodeWebHandler'
-
-export const config = { maxDuration: 300 }
 
 function easternParts(now: Date): Record<string, string> {
   return Object.fromEntries(
@@ -88,4 +85,4 @@ async function webHandler(request: Request): Promise<Response> {
   return Response.json({ ok: errors.length === 0, day, completed, errors }, { status: errors.length ? 207 : 200 })
 }
 
-export default nodeCompatibleWebHandler(webHandler)
+export default { fetch: webHandler }

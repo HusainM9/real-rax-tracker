@@ -13,11 +13,6 @@ import {
   resolveRealApiConfig,
   type RealApiContext,
 } from '../../lib/realApi'
-import { nodeCompatibleWebHandler } from '../../lib/nodeWebHandler'
-
-// Public collection scans can be large on a cold invocation. Node Fluid Compute allows the
-// request to finish instead of hitting the Edge runtime's first-response timeout.
-export const config = { maxDuration: 300 }
 
 function errorResponse(error: unknown): Response {
   if (error instanceof RealApiError) {
@@ -85,4 +80,4 @@ async function webHandler(request: Request): Promise<Response> {
   }
 }
 
-export default nodeCompatibleWebHandler(webHandler)
+export default { fetch: webHandler }
