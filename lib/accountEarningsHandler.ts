@@ -1,12 +1,7 @@
-import { requireEarningsSession } from './earningsAuth'
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
 } from './publicDailyEarnings'
-import {
-  readPublicEarningsSnapshot,
-  savePublicEarningsSnapshot,
-} from './publicEarningsStore'
 import {
   normalizeRealUsernameInput,
   resolveRealApiConfig,
@@ -26,9 +21,6 @@ function errorResponse(error: unknown): Response {
 export async function handleAccountEarnings(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
-  const denied = await requireEarningsSession(request)
-  if (denied) return denied
-
   let body: { username?: unknown; day?: unknown }
   try {
     body = (await request.json()) as typeof body
@@ -46,9 +38,6 @@ export async function handleAccountEarnings(request: Request): Promise<Response>
   }
 
   try {
-    const saved = await readPublicEarningsSnapshot(username, day).catch(() => null)
-    if (saved) return Response.json(saved)
-
     if (day !== currentRealEarningsDay()) {
       return Response.json(
         {
@@ -68,7 +57,6 @@ export async function handleAccountEarnings(request: Request): Promise<Response>
     }
     const context: RealApiContext = { config: realConfig, signal: request.signal }
     const reconstructed = await reconstructPublicDailyEarnings(username, day, context)
-    await savePublicEarningsSnapshot(reconstructed).catch(() => undefined)
     return Response.json(reconstructed)
   } catch (error) {
     return errorResponse(error)
