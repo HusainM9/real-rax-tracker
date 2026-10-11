@@ -86,12 +86,5 @@ async function handleSnapshot(request: Request): Promise<Response> {
   return Response.json({ ok: errors.length === 0, day, completed, errors }, { status: errors.length ? 207 : 200 })
 }
 
-export function GET(request: Request): Promise<Response> {
-  return handleSnapshot(request)
-}
-
-export function POST(request: Request): Promise<Response> {
-  return handleSnapshot(request)
-}
-
+export const localWebHandler = handleSnapshot
 export default nodeApiHandler(handleSnapshot)

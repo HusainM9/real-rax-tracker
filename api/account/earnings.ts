@@ -26,7 +26,7 @@ function errorResponse(error: unknown): Response {
   )
 }
 
-export async function POST(request: Request): Promise<Response> {
+async function webHandler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   const denied = await requireEarningsSession(request)
@@ -78,4 +78,5 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-export default nodeApiHandler(POST)
+export const localWebHandler = webHandler
+export default nodeApiHandler(webHandler)

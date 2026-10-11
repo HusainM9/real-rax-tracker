@@ -1,1 +1,1 @@
-export { GET, POST, default } from './snapshot-earnings'
+export { localWebHandler, default } from './snapshot-earnings'

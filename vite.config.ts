@@ -47,13 +47,16 @@ function localApiPlugin(): Plugin {
             PUT?: WebHandler
             PATCH?: WebHandler
             DELETE?: WebHandler
+            localWebHandler?: WebHandler
           }
           const methodHandler = module[(req.method?.toUpperCase() || 'GET') as keyof typeof module]
-          const handler = typeof methodHandler === 'function'
-            ? methodHandler
-            : typeof module.default === 'function'
-              ? module.default
-              : module.default?.fetch
+          const handler = typeof module.localWebHandler === 'function'
+            ? module.localWebHandler
+            : typeof methodHandler === 'function'
+              ? methodHandler
+              : typeof module.default === 'function'
+                ? module.default
+                : module.default?.fetch
           if (typeof handler !== 'function') {
             next()
             return
