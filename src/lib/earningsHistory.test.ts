@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   highestAverageWeekday,
   highestEarningDay,
   rankEarningPasses,
+  readEarningsHistory,
+  replaceEarningsHistoryForUsernames,
+  saveEarningsHistoryEntries,
   type EarningsHistoryEntry,
 } from './earningsHistory'
+
+beforeEach(() => localStorage.clear())
 
 const history: EarningsHistoryEntry[] = [
   {
@@ -55,6 +60,21 @@ describe('earnings report statistics', () => {
     expect(rankEarningPasses(history)).toEqual([
       { username: 'alpha', label: 'Player One', sport: 'NFL', total: 410, best: 300, days: 3 },
       { username: 'alpha', label: 'Player Two', sport: 'NBA', total: 230, best: 200, days: 2 },
+    ])
+  })
+
+  it('replaces live local rows with authoritative scheduled snapshots', () => {
+    saveEarningsHistoryEntries([
+      history[0]!,
+      { ...history[1]!, username: 'beta' },
+    ])
+
+    const scheduled = { ...history[2]!, dailyTotal: 325 }
+    replaceEarningsHistoryForUsernames([scheduled], ['alpha'])
+
+    expect(readEarningsHistory()).toEqual([
+      { ...history[1]!, username: 'beta' },
+      scheduled,
     ])
   })
 })

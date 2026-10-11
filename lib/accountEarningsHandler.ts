@@ -21,7 +21,7 @@ function errorResponse(error: unknown): Response {
 export async function handleAccountEarnings(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
-  let body: { username?: unknown; day?: unknown }
+  let body: { username?: unknown; day?: unknown; refreshId?: unknown }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -32,6 +32,9 @@ export async function handleAccountEarnings(request: Request): Promise<Response>
     typeof body.username === 'string' ? body.username : '',
   )
   const day = typeof body.day === 'string' ? body.day.trim() : ''
+  const refreshId = typeof body.refreshId === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(body.refreshId)
+    ? body.refreshId
+    : ''
   if (!username) return Response.json({ error: 'Real username is required.' }, { status: 400 })
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
     return Response.json({ error: 'Day must use YYYY-MM-DD format.' }, { status: 400 })
@@ -55,7 +58,11 @@ export async function handleAccountEarnings(request: Request): Promise<Response>
         { status: 503 },
       )
     }
-    const context: RealApiContext = { config: realConfig, signal: request.signal }
+    const context: RealApiContext = {
+      config: realConfig,
+      signal: request.signal,
+      publicCacheNamespace: refreshId ? `manual:${refreshId}` : undefined,
+    }
     const reconstructed = await reconstructPublicDailyEarnings(username, day, context)
     return Response.json(reconstructed)
   } catch (error) {

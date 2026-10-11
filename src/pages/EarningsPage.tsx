@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import { DailyEarningsRequestError, fetchAccountDailyEarnings, syncLinkedEarningsTracking, type DailyEarningsResult } from '../lib/dailyEarnings'
-import { highestAverageWeekday, highestEarningDay, rankEarningPasses, readEarningsHistory, saveEarningsHistoryEntries, saveEarningsHistoryEntry, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
+import { highestAverageWeekday, highestEarningDay, rankEarningPasses, readEarningsHistory, replaceEarningsHistoryForUsernames, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
 
 function currentRealEarningsDay(now = new Date()): string {
@@ -203,8 +203,11 @@ export default function EarningsPage() {
       linkedAccounts.map((account) => account.username),
       controller.signal,
     ).then(({ snapshots }) => {
-      if (!isDemo && snapshots.length > 0) {
-        setHistory(saveEarningsHistoryEntries(snapshots.map(historyEntry)))
+      if (!isDemo) {
+        setHistory(replaceEarningsHistoryForUsernames(
+          snapshots.map(historyEntry),
+          linkedAccounts.map((account) => account.username),
+        ))
         const scoped = isAllAccounts
           ? snapshots
           : snapshots.filter((snapshot) => snapshot.username.toLowerCase() === selectedUsername.toLowerCase())
@@ -266,7 +269,7 @@ export default function EarningsPage() {
     }
     const loadedAccounts: DailyEarningsResult[] = []
     const failures: string[] = []
-    let nextHistory = readEarningsHistory()
+    const refreshId = crypto.randomUUID().replace(/-/g, '')
     try {
       // Keep account scans sequential. Shared public game data is cached server-side, so later
       // accounts are faster without multiplying Real API traffic and triggering more 429s.
@@ -281,7 +284,7 @@ export default function EarningsPage() {
         let loaded: DailyEarningsResult | null = null
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
-            loaded = await fetchAccountDailyEarnings(username, day)
+            loaded = await fetchAccountDailyEarnings(username, day, { refreshId })
             break
           } catch (loadError) {
             if (attempt === 0 && isRateLimited(loadError)) {
@@ -305,8 +308,6 @@ export default function EarningsPage() {
 
         if (!loaded) continue
         loadedAccounts.push(loaded)
-        nextHistory = saveEarningsHistoryEntry(historyEntry(loaded))
-        setHistory(nextHistory)
         setResult(combineDailyResults(loadedAccounts, day, isAllAccounts))
         const seconds = Math.max(1, Math.round((performance.now() - startedAt) / 1000))
         updateLog(username, {
@@ -366,7 +367,7 @@ export default function EarningsPage() {
         </section>
       ) : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Calculated from public active passes, boosters, and Real box scores. Linked accounts are refreshed automatically each morning.</p> : null}
+      {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Live preview from public active passes, boosters, and Real box scores. Reports use the final snapshot captured at 6:30 AM Eastern.</p> : null}
 
       {result ? <>
         <section className="earnings-summary-grid">

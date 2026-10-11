@@ -46,14 +46,14 @@ export class DailyEarningsRequestError extends Error {
 export async function fetchAccountDailyEarnings(
   username: string,
   day: string,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; refreshId?: string } = {},
 ): Promise<DailyEarningsResult> {
   const response = await fetch('/api/account/earnings', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, day, before: 0 }),
-    signal,
+    body: JSON.stringify({ username, day, before: 0, refreshId: options.refreshId }),
+    signal: options.signal,
   })
   const data = await readResponseJson<DailyEarningsResult & { error?: string; code?: string }>(response)
   if (!response.ok) {

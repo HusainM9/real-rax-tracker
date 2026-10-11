@@ -38,11 +38,11 @@ export function previousEasternDay(now = new Date()): string {
   return date.toISOString().slice(0, 10)
 }
 
-function isEasternSnapshotTime(now: Date): boolean {
+export function isEasternSnapshotTime(now: Date): boolean {
   const parts = easternParts(now)
-  // Vercel may start a cron a few minutes late. The whole 6 AM hour is still before Real's
-  // roughly 7 AM reset; the UTC schedule prevents more than one matching run.
-  return parts.hour === '06'
+  // The jobs are scheduled for 6:30. Permit Vercel to start late, but never save an early,
+  // in-progress value from the first half of the hour.
+  return parts.hour === '06' && Number(parts.minute) >= 30
 }
 
 function isAuthorized(request: Request): boolean {
@@ -70,12 +70,18 @@ async function handleSnapshot(request: Request): Promise<Response> {
   }
   const usernames = await listTrackedEarningsUsernames()
   const day = url.searchParams.get('day') ?? currentRealEarningsDay(now)
+  const publicCacheNamespace = `snapshot:${day}:${now.toISOString()}`
   const completed: Array<{ username: string; total: number }> = []
   const errors: Array<{ username: string; error: string }> = []
 
   for (const username of usernames) {
     try {
-      const context: RealApiContext = { config: realConfig, signal: request.signal }
+      const context: RealApiContext = {
+        config: realConfig,
+        signal: request.signal,
+        publicCacheNamespace,
+        forceFreshBoxScores: true,
+      }
       const result = await reconstructPublicDailyEarnings(username, day, context)
       await savePublicEarningsSnapshot(result)
       completed.push({ username: result.username, total: result.dailyTotal })

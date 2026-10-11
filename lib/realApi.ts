@@ -186,6 +186,14 @@ export function buildRealHeaders(config: RealApiConfig, now = Date.now()): Recor
 export type RealApiContext = {
   config: RealApiConfig
   signal?: AbortSignal
+  /**
+   * Isolates short-lived public game-data reuse to one explicit scan. Omitting this value makes
+   * every public request live, so a manual scan can never leak stale in-progress values into a
+   * later scan or the scheduled final snapshot.
+   */
+  publicCacheNamespace?: string
+  /** Forces exact player detail reads even when the performance fingerprint is unchanged. */
+  forceFreshBoxScores?: boolean
 }
 
 function abortableSignal(
@@ -278,9 +286,11 @@ export async function realGetJson<T>(
 ): Promise<T> {
   const { config } = context
   const url = buildUrl(config, path, query)
-  const cacheSharedResponse = shouldCacheSharedPublicPath(path)
-  if (cacheSharedResponse) {
-    const cached = readSharedPublicCache<T>(url)
+  const cacheKey = context.publicCacheNamespace && shouldCacheSharedPublicPath(path)
+    ? `${context.publicCacheNamespace}:${url}`
+    : ''
+  if (cacheKey) {
+    const cached = readSharedPublicCache<T>(cacheKey)
     if (cached !== undefined) return cached
   }
   const maxAttempts = Math.max(1, config.maxRetries + 1)
@@ -356,7 +366,7 @@ export async function realGetJson<T>(
     const text = await response.text()
     try {
       const parsed = JSON.parse(text) as T
-      if (cacheSharedResponse) writeSharedPublicCache(url, parsed)
+      if (cacheKey) writeSharedPublicCache(cacheKey, parsed)
       return parsed
     } catch {
       throw new RealApiError('invalid_response', 'Real API returned a non-JSON response.')

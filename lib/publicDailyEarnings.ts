@@ -13,6 +13,18 @@ import {
   type RealPlayerBoxScore,
   type RealStatValue,
 } from './realApi.js'
+import {
+  publicBoxScoreFingerprint,
+  readPublicBoxScoreCache,
+  writePublicBoxScoreCache,
+  type PublicBoxScoreCacheEntry,
+} from './publicBoxScoreCache.js'
+import {
+  publicGameStatsKey,
+  readPublicGameStatsCache,
+  writePublicGameStatsCache,
+  type PublicGameStatsCacheEntry,
+} from './publicGameStatsCache.js'
 
 export type PublicDailyEarningsInfo = {
   id: string
@@ -206,6 +218,8 @@ export async function reconstructPublicDailyEarnings(
   // while the transport's 429 backoff keeps this below the bursty four-worker pool that Real
   // frequently rate-limited.
   const detailConcurrency = Math.min(3, Math.max(1, context.config.concurrency + 1))
+  const discoveryConcurrency = Math.min(4, Math.max(2, context.config.concurrency * 2))
+  const gameConcurrency = Math.min(6, Math.max(3, context.config.concurrency * 3))
   const username = normalizeRealUsernameInput(usernameInput)
   const user = await getUserByUsername(username, context)
   const allPasses = await listPasses({ userId: user.id }, context)
@@ -225,7 +239,7 @@ export async function reconstructPublicDailyEarnings(
   }
 
   const pairs = [...activePairs.values()]
-  const todayPages = await mapLimit(pairs, context.config.concurrency, (pair) =>
+  const todayPages = await mapLimit(pairs, discoveryConcurrency, (pair) =>
     listPasses(
       {
         userId: user.id,
@@ -251,7 +265,7 @@ export async function reconstructPublicDailyEarnings(
   }
 
   const sports = [...passesBySport.keys()]
-  const homePages = await mapLimit(sports, context.config.concurrency, async (sport) => ({
+  const homePages = await mapLimit(sports, discoveryConcurrency, async (sport) => ({
     sport,
     games: await getRealHomeDayGames(sport, day, context),
   }))
@@ -266,15 +280,44 @@ export async function reconstructPublicDailyEarnings(
             teamIds.has(String(game.awayTeamId ?? '')),
         )
       : games
-    return selected.flatMap((game) =>
-      game.id == null ? [] : [{ sport, gameId: game.id }],
-    )
+    return selected.flatMap((game) => {
+      const status = String(game.status ?? '').toLowerCase()
+      if (game.id == null || status === 'scheduled') return []
+      return [{ sport, gameId: game.id, status }]
+    })
   })
 
-  const gameRows = await mapLimit(relevantGames, detailConcurrency, async (game) => ({
+  const finalGames = relevantGames.filter((game) => game.status === 'final')
+  const cachedFinalGames = context.forceFreshBoxScores
+    ? new Map<string, PublicGameStatsCacheEntry>()
+    : await readPublicGameStatsCache(
+        finalGames.map((game) => publicGameStatsKey(game.sport, game.gameId)),
+      )
+  const gamesToFetch = relevantGames.filter((game) => (
+    !cachedFinalGames.has(publicGameStatsKey(game.sport, game.gameId))
+  ))
+  const fetchedGameRows = await mapLimit(gamesToFetch, gameConcurrency, async (game) => ({
     ...game,
     rows: await getRealGamePlayerBoxScores(game.sport, game.gameId, context),
   }))
+  await writePublicGameStatsCache(
+    fetchedGameRows.flatMap((game): PublicGameStatsCacheEntry[] => (
+      game.status === 'final'
+        ? [{
+            key: publicGameStatsKey(game.sport, game.gameId),
+            rows: game.rows,
+            cachedAt: new Date().toISOString(),
+          }]
+        : []
+    )),
+  )
+  const gameRows = [
+    ...fetchedGameRows,
+    ...finalGames.flatMap((game) => {
+      const cached = cachedFinalGames.get(publicGameStatsKey(game.sport, game.gameId))
+      return cached ? [{ ...game, rows: cached.rows }] : []
+    }),
+  ]
   const ownedPlayerIds = new Set(passes.map((pass) => String(pass.entityId ?? '')))
   const relevantBoxes = new Map<string, RealPlayerBoxScore>()
   for (const page of gameRows) {
@@ -284,27 +327,71 @@ export async function reconstructPublicDailyEarnings(
     }
   }
 
+  const cachedBoxes = context.forceFreshBoxScores
+    ? new Map<string, PublicBoxScoreCacheEntry>()
+    : await readPublicBoxScoreCache([...relevantBoxes.keys()])
+  const detailInputs = [...relevantBoxes.entries()].flatMap(([id, summary]) => {
+    const fingerprint = publicBoxScoreFingerprint(summary)
+    const cached = cachedBoxes.get(id)
+    return cached?.fingerprint === fingerprint ? [] : [[id, summary, fingerprint] as const]
+  })
+  // A small incremental refresh can safely use a wider pool. Cold scans and the forced 6:30
+  // refresh keep the conservative limit that avoids sustained Real API rate limiting.
+  const incrementalDetailConcurrency = detailInputs.length <= 24
+    ? Math.min(6, Math.max(detailConcurrency, context.config.concurrency * 3))
+    : detailConcurrency
   const boxDetails = await mapLimit(
-    [...relevantBoxes.entries()],
-    detailConcurrency,
-    async ([id, summary]) => ({ id, summary, detail: await getRealPlayerBoxScore(id, context) }),
+    detailInputs,
+    incrementalDetailConcurrency,
+    async ([id, summary, fingerprint]) => ({
+      id,
+      summary,
+      fingerprint,
+      detail: await getRealPlayerBoxScore(id, context),
+    }),
   )
   const performancesByPlayer = new Map<
     string,
     Array<{ baseEarnings: number; statValues?: RealStatValue[] }>
   >()
-  for (const { summary, detail } of boxDetails) {
-    const box = detail.playerBoxScore ?? summary
-    if (box.day && box.day !== day) continue
-    if (box.didNotPlay === true || box.played === false) continue
-    const baseEarnings = numeric(detail.advancedStats?.raxEarnings)
+
+  const appendPerformance = (
+    summary: RealPlayerBoxScore,
+    baseEarnings: number,
+    detailBox?: RealPlayerBoxScore | null,
+  ) => {
+    const box = detailBox ?? summary
+    if (box.day && box.day !== day) return
+    if (box.didNotPlay === true || box.played === false) return
     const playerId = String(box.playerId ?? summary.playerId ?? '')
-    if (!playerId || baseEarnings <= 0) continue
+    if (!playerId || baseEarnings <= 0) return
     performancesByPlayer.set(playerId, [
       ...(performancesByPlayer.get(playerId) ?? []),
       { baseEarnings, statValues: box.statValues ?? summary.statValues },
     ])
   }
+
+  for (const [id, summary] of relevantBoxes) {
+    const fingerprint = publicBoxScoreFingerprint(summary)
+    const cached = cachedBoxes.get(id)
+    if (cached?.fingerprint === fingerprint) {
+      appendPerformance(summary, cached.baseEarnings)
+    }
+  }
+
+  const cacheWrites: PublicBoxScoreCacheEntry[] = []
+  for (const { id, summary, fingerprint, detail } of boxDetails) {
+    const box = detail.playerBoxScore ?? summary
+    const baseEarnings = numeric(detail.advancedStats?.raxEarnings)
+    appendPerformance(summary, baseEarnings, box)
+    cacheWrites.push({
+      id,
+      fingerprint,
+      baseEarnings,
+      cachedAt: new Date().toISOString(),
+    })
+  }
+  await writePublicBoxScoreCache(cacheWrites)
 
   const boostedBySport = new Map<string, RealPass>()
   for (const pass of passes) {
