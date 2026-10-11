@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
-import { DailyEarningsRequestError, fetchAccountDailyEarnings, syncLinkedEarningsTracking, type DailyEarningsResult } from '../lib/dailyEarnings'
+import { cacheDailyEarningsResult, DailyEarningsRequestError, fetchAccountDailyEarnings, readCachedDailyEarningsResults, syncLinkedEarningsTracking, type DailyEarningsResult, type DailyEarningsResultCache } from '../lib/dailyEarnings'
 import { highestAverageWeekday, highestEarningDay, rankEarningPasses, readEarningsHistory, replaceEarningsHistoryForUsernames, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
 
@@ -142,11 +142,19 @@ export default function EarningsPage() {
   const isDemo = import.meta.env.DEV && selectedUsername === DEMO_USERNAME
   const isAllAccounts = selectedUsername === ALL_ACCOUNTS
   const [day, setDay] = useState(import.meta.env.DEV ? DEMO_RESULT.day : currentRealEarningsDay)
-  const [result, setResult] = useState<DailyEarningsResult | null>(isDemo ? DEMO_RESULT : null)
+  const [accountResults, setAccountResults] = useState<DailyEarningsResultCache>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [refreshLog, setRefreshLog] = useState<RefreshLogEntry[]>([])
   const [history, setHistory] = useState<EarningsHistoryEntry[]>(() => isDemo ? DEMO_HISTORY : readEarningsHistory())
+  const result = useMemo(() => {
+    if (isDemo) return DEMO_RESULT
+    const usernames = isAllAccounts
+      ? linkedAccounts.map((account) => account.username)
+      : [selectedUsername]
+    const loadedAccounts = readCachedDailyEarningsResults(accountResults, usernames, day)
+    return combineDailyResults(loadedAccounts, day, isAllAccounts)
+  }, [accountResults, day, isAllAccounts, isDemo, linkedAccounts, selectedUsername])
 
   const accountHistory = useMemo(() => {
     if (!isAllAccounts) {
@@ -208,17 +216,15 @@ export default function EarningsPage() {
           snapshots.map(historyEntry),
           linkedAccounts.map((account) => account.username),
         ))
-        const scoped = isAllAccounts
-          ? snapshots
-          : snapshots.filter((snapshot) => snapshot.username.toLowerCase() === selectedUsername.toLowerCase())
-        const currentSnapshots = scoped.filter((snapshot) => snapshot.day === day)
-        if (currentSnapshots.length > 0) {
-          setResult(combineDailyResults(
-            currentSnapshots,
-            day,
-            isAllAccounts,
-          ))
-        }
+        setAccountResults((current) => {
+          const next = { ...current }
+          for (const snapshot of snapshots) {
+            if (snapshot.day !== day) continue
+            const key = snapshot.username.toLowerCase()
+            if (current[key]?.day !== day) next[key] = snapshot
+          }
+          return next
+        })
       }
     }).catch((trackingError) => {
       if (!(trackingError instanceof DOMException && trackingError.name === 'AbortError')) {
@@ -226,23 +232,17 @@ export default function EarningsPage() {
       }
     })
     return () => controller.abort()
-  }, [day, isAllAccounts, isDemo, linkedAccounts, selectedUsername])
+  }, [day, isDemo, linkedAccounts])
 
   useEffect(() => {
     if (isDemo) {
       setDay(DEMO_RESULT.day)
-      setResult(DEMO_RESULT)
       setHistory(DEMO_HISTORY)
       setError('')
     } else {
-      setResult(null)
       setHistory(readEarningsHistory())
     }
   }, [isDemo])
-
-  useEffect(() => {
-    if (!isDemo) setResult(null)
-  }, [day, isDemo, selectedUsername])
 
   useEffect(() => {
     if (isDemo) return
@@ -267,7 +267,6 @@ export default function EarningsPage() {
         entry.username === username ? { ...entry, ...patch } : entry
       )))
     }
-    const loadedAccounts: DailyEarningsResult[] = []
     const failures: string[] = []
     const refreshId = crypto.randomUUID().replace(/-/g, '')
     try {
@@ -307,8 +306,7 @@ export default function EarningsPage() {
         }
 
         if (!loaded) continue
-        loadedAccounts.push(loaded)
-        setResult(combineDailyResults(loadedAccounts, day, isAllAccounts))
+        setAccountResults((current) => cacheDailyEarningsResult(current, loaded))
         const seconds = Math.max(1, Math.round((performance.now() - startedAt) / 1000))
         updateLog(username, {
           status: 'complete',
@@ -318,7 +316,6 @@ export default function EarningsPage() {
       if (failures.length > 0) {
         setError(`${failures.length} account${failures.length === 1 ? '' : 's'} could not be refreshed. Completed accounts were kept.`)
       }
-      if (loadedAccounts.length === 0 && failures.length === 0) setResult(null)
     } finally { setLoading(false) }
   }
 

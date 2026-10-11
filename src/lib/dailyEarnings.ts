@@ -26,6 +26,30 @@ export type DailyEarningsResult = {
   dailyTotal: number
 }
 
+export type DailyEarningsResultCache = Record<string, DailyEarningsResult>
+
+function earningsCacheKey(username: string): string {
+  return username.replace(/^@/, '').trim().toLowerCase()
+}
+
+export function cacheDailyEarningsResult(
+  current: DailyEarningsResultCache,
+  result: DailyEarningsResult,
+): DailyEarningsResultCache {
+  return { ...current, [earningsCacheKey(result.username)]: result }
+}
+
+export function readCachedDailyEarningsResults(
+  cache: DailyEarningsResultCache,
+  usernames: string[],
+  day: string,
+): DailyEarningsResult[] {
+  return usernames.flatMap((username) => {
+    const result = cache[earningsCacheKey(username)]
+    return result?.day === day ? [result] : []
+  })
+}
+
 export type EarningsTrackingResult = {
   tracked: string[]
   snapshots: DailyEarningsResult[]
