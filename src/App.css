@@ -5594,11 +5594,146 @@ button.linkish {
 .marketplace-rule-menu button:hover { background: rgba(255, 255, 255, 0.055); }
 .marketplace-rule-menu button.danger { color: #ffaba1; }
 
+.marketplace-rule-copy { min-width: 0; }
+
+.marketplace-rule-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.marketplace-rule-expand {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  color: #aaa;
+  background: transparent;
+  cursor: pointer;
+}
+
+.marketplace-rule-expand:hover,
+.marketplace-rule-expand[aria-expanded='true'] {
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f2f2f0;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.marketplace-rule-expand > span {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1;
+  transform: translateY(-0.03rem);
+  transition: transform 160ms ease;
+}
+
+.marketplace-rule-expand[aria-expanded='true'] > span { transform: rotate(90deg); }
+
+.marketplace-rule-details-wrap {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.marketplace-rule-details {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.15rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.marketplace-rule-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1rem;
+}
+
+.marketplace-rule-detail-grid > div,
+.marketplace-rule-player-setting {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.marketplace-rule-detail-grid span,
+.marketplace-rule-player-setting > span {
+  color: #858581;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.marketplace-rule-detail-grid strong {
+  overflow-wrap: anywhere;
+  color: #dededb;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.marketplace-rule-player-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.marketplace-rule-player-heading > div { display: flex; align-items: baseline; gap: 0.5rem; }
+.marketplace-rule-player-heading strong { color: #f0f0ed; font-size: 0.86rem; }
+.marketplace-rule-player-heading span,
+.marketplace-rule-player-heading small { color: #858581; font-size: 0.7rem; }
+
+.marketplace-rule-player-list {
+  display: grid;
+  max-height: 20rem;
+  overflow: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.marketplace-rule-player-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.3fr) minmax(7.5rem, 1fr) minmax(8rem, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.marketplace-rule-player-name { display: grid; gap: 0.15rem; min-width: 0; }
+.marketplace-rule-player-name strong { overflow-wrap: anywhere; color: #ededeb; font-size: 0.82rem; }
+.marketplace-rule-player-name span { color: #858581; font-size: 0.7rem; }
+.marketplace-rule-player-setting strong { overflow-wrap: anywhere; color: #c7c7c3; font-size: 0.75rem; font-weight: 650; }
+
+.marketplace-rule-player-setting em {
+  justify-self: start;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  color: #79ddc3;
+  background: rgba(69, 211, 175, 0.09);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.marketplace-rule-no-players { margin: 0; color: #999995; font-size: 0.78rem; }
+
 @media (max-width: 640px) {
   .marketplace-health { flex-wrap: wrap; }
   .marketplace-health-action { margin-left: 1.35rem; }
   .marketplace-alerts-page .marketplace-create-bar { align-items: stretch; }
   .marketplace-rule-menu > div { position: fixed; inset: auto 1rem 1rem; width: auto; }
+  .marketplace-rule-detail-grid { grid-template-columns: 1fr; }
+  .marketplace-rule-player-heading { align-items: start; flex-direction: column; gap: 0.25rem; }
+  .marketplace-rule-player-row { grid-template-columns: 1fr; gap: 0.55rem; }
 }
 
 /* Marketplace alerts — neutral single-column layout */

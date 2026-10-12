@@ -21,6 +21,7 @@ import {
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
 import { marketplacePageScanKey, startMarketplacePageScanner } from '../lib/marketplacePageScanner'
+import { marketplaceRuleTrackingDetails } from '../lib/marketplaceRuleDetails'
 import {
   applyMarketplacePlayerSelection,
   filterMarketplacePlayers,
@@ -90,6 +91,55 @@ function ruleSummary(rule: MarketplaceAlertRule): string {
   return parts.join(' · ')
 }
 
+function RuleTrackingPanel({ rule }: { rule: MarketplaceAlertRule }) {
+  const details = marketplaceRuleTrackingDetails(rule)
+  const formatRatio = (value: number | null) => value == null
+    ? 'No maximum'
+    : `${value.toLocaleString()} RAX/rating`
+
+  return (
+    <div className="marketplace-rule-details">
+      <div className="marketplace-rule-detail-grid">
+        <div><span>Default price limit</span><strong>{formatRatio(details.defaultMaxRaxPerRating)}</strong></div>
+        <div><span>Default rarities</span><strong>{details.defaultRarities}</strong></div>
+        <div><span>Bulk rating</span><strong>{details.ratingRange}</strong></div>
+        <div><span>Bid requirement</span><strong>{details.noBids ? 'No bids only' : 'Any bid count'}</strong></div>
+        <div><span>Minimum listing price</span><strong>{details.minimumPrice == null ? 'No minimum' : `${details.minimumPrice.toLocaleString()} RAX`}</strong></div>
+        <div><span>Price basis</span><strong>{details.priceBasis}</strong></div>
+      </div>
+
+      <div className="marketplace-rule-player-heading">
+        <div><strong>Tracked players</strong><span>{details.players.length} selected</span></div>
+        <small>Custom settings override the alert defaults above.</small>
+      </div>
+      {details.players.length === 0 ? (
+        <p className="marketplace-rule-no-players">All owned players returned by the selected Real account.</p>
+      ) : (
+        <div className="marketplace-rule-player-list">
+          {details.players.map((player) => (
+            <div key={player.entityId} className="marketplace-rule-player-row">
+              <div className="marketplace-rule-player-name">
+                <strong>{player.name}</strong>
+                {player.ownedRarity ? <span>Owned: {player.ownedRarity}</span> : null}
+              </div>
+              <div className="marketplace-rule-player-setting">
+                <span>RAX/rating</span>
+                <strong>{formatRatio(player.maxRaxPerRating)}</strong>
+                {player.hasCustomPrice ? <em>Custom</em> : null}
+              </div>
+              <div className="marketplace-rule-player-setting">
+                <span>Rarities</span>
+                <strong>{player.rarities}</strong>
+                {player.hasCustomRarities ? <em>Custom</em> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function formatAge(iso: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000))
   if (minutes < 1) return 'just now'
@@ -134,6 +184,7 @@ export default function MarketplaceAlertsPage() {
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
   const [playersLoadedAt, setPlayersLoadedAt] = useState<string | null>(null)
+  const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([])
   const activeScanKey = marketplacePageScanKey(rules)
   const [realUsername, setRealUsername] = useState(
     () => (data.settings.savedUsername || accountUsername || '').replace(/^@/, '').trim(),
@@ -532,7 +583,48 @@ export default function MarketplaceAlertsPage() {
         <aside className="marketplace-side-stack">
           <section className="panel marketplace-rules-panel">
             <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every five minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
-            {rules.length === 0 ? <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div> : <div className="marketplace-rule-list">{rules.map((rule) => <article key={rule.id} className={`marketplace-rule-card${rule.enabled ? '' : ' disabled'}`}><div><span className="marketplace-rule-sport">{rule.enabled ? 'ACTIVE' : 'PAUSED'} · {rule.sport.toUpperCase()} {rule.season}</span><h3>{rule.name}</h3><p>{ruleSummary(rule)}</p></div><details className="marketplace-rule-menu"><summary aria-label={`Options for ${rule.name}`}>•••</summary><div><button type="button" onClick={() => editRule(rule)}>Edit alert</button><button type="button" onClick={() => void persist(rules.map((entry) => entry.id === rule.id ? { ...entry, enabled: !entry.enabled, updatedAt: new Date().toISOString() } : entry), `${rule.name} ${rule.enabled ? 'paused' : 'enabled'}.`)}>{rule.enabled ? 'Pause alert' : 'Enable alert'}</button><button type="button" className="danger" onClick={() => void persist(rules.filter((entry) => entry.id !== rule.id), `${rule.name} removed.`)}>Remove</button></div></details></article>)}</div>}
+            {rules.length === 0 ? (
+              <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div>
+            ) : (
+              <div className="marketplace-rule-list">
+                {rules.map((rule) => {
+                  const expanded = expandedRuleIds.includes(rule.id)
+                  const detailsId = `marketplace-rule-details-${rule.id}`
+                  return (
+                    <article key={rule.id} className={`marketplace-rule-card${rule.enabled ? '' : ' disabled'}${expanded ? ' expanded' : ''}`}>
+                      <div className="marketplace-rule-copy">
+                        <span className="marketplace-rule-sport">{rule.enabled ? 'ACTIVE' : 'PAUSED'} · {rule.sport.toUpperCase()} {rule.season}</span>
+                        <h3>{rule.name}</h3>
+                        <p>{ruleSummary(rule)}</p>
+                      </div>
+                      <div className="marketplace-rule-controls">
+                        <details className="marketplace-rule-menu">
+                          <summary aria-label={`Options for ${rule.name}`}>•••</summary>
+                          <div>
+                            <button type="button" onClick={() => editRule(rule)}>Edit alert</button>
+                            <button type="button" onClick={() => void persist(rules.map((entry) => entry.id === rule.id ? { ...entry, enabled: !entry.enabled, updatedAt: new Date().toISOString() } : entry), `${rule.name} ${rule.enabled ? 'paused' : 'enabled'}.`)}>{rule.enabled ? 'Pause alert' : 'Enable alert'}</button>
+                            <button type="button" className="danger" onClick={() => void persist(rules.filter((entry) => entry.id !== rule.id), `${rule.name} removed.`)}>Remove</button>
+                          </div>
+                        </details>
+                        <button
+                          type="button"
+                          className="marketplace-rule-expand"
+                          aria-label={`${expanded ? 'Hide' : 'Show'} tracking details for ${rule.name}`}
+                          aria-expanded={expanded}
+                          aria-controls={detailsId}
+                          onClick={() => setExpandedRuleIds((current) => expanded
+                            ? current.filter((id) => id !== rule.id)
+                            : [...current, rule.id])}
+                        >
+                          <span aria-hidden="true">›</span>
+                        </button>
+                      </div>
+                      {expanded ? <div id={detailsId} className="marketplace-rule-details-wrap"><RuleTrackingPanel rule={rule} /></div> : null}
+                    </article>
+                  )
+                })}
+              </div>
+            )}
           </section>
           <section className="panel marketplace-scan-log-panel">
             <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>Page-open fallback checks the Real marketplace every five minutes.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Page open · 5 min'}</span></div>
