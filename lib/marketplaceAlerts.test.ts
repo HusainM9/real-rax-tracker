@@ -5,6 +5,7 @@ import {
   marketplaceApiSport,
   marketplaceApiListingTypes,
   marketplaceListingMatchesRule,
+  marketplaceMaximumBulkAuctionPrice,
   marketplaceListingPrice,
   marketplaceListingRarity,
   marketplaceListingRating,
@@ -243,7 +244,8 @@ describe('marketplace listing matching', () => {
     }
     const bulkRule = { ...rule, itemType: 'bulk' as const, priceMax: null, pricePerRatingMax: 250 }
     expect(marketplaceListingMatchesRule(bulkRule, rated)).toBe(true)
-    expect(marketplaceListingMatchesRule({ ...bulkRule, pricePerRatingMax: 249.99 }, rated)).toBe(false)
+    expect(marketplaceListingMatchesRule({ ...bulkRule, pricePerRatingMax: 249 }, rated)).toBe(true)
+    expect(marketplaceListingMatchesRule({ ...bulkRule, pricePerRatingMax: 248.99 }, rated)).toBe(false)
     expect(marketplaceListingMatchesRule(
       bulkRule,
       { ...rated, card: { ...rated.card, boostInfo: { rarityLabel: 'Rare', progress: 0 } } },
@@ -349,7 +351,16 @@ describe('marketplace listing matching', () => {
     expect(createMarketplaceNotification(bulkRule, bulk)).toMatchObject({
       rating: 105.2,
       pricePerRating: 40,
+      maxPricePerRating: 40,
+      maxAuctionPrice: 4300,
     })
+  })
+
+  it('rounds the tolerated maximum down to a valid bulk-auction price step', () => {
+    expect(marketplaceMaximumBulkAuctionPrice(89.7, 35)).toBe(3200)
+    expect(marketplaceMaximumBulkAuctionPrice(100, 40)).toBe(4100)
+    expect(marketplaceMaximumBulkAuctionPrice(null, 35)).toBeNull()
+    expect(marketplaceMaximumBulkAuctionPrice(89.7, null)).toBeNull()
   })
 })
 
@@ -366,6 +377,7 @@ describe('marketplace prices and notifications', () => {
       id: 'rule-1:1457616609', ruleId: 'rule-1', ruleName: 'Cheap QB',
       listingId: '1457616609', playerName: 'Trevor Lawrence', sport: 'nfl', season: 2026,
       price: 2000, rating: null, pricePerRating: null,
+      maxPricePerRating: null, maxAuctionPrice: null,
       numBids: 0, rarity: 'Rare', serialNumber: 1707,
       endsAt: '2026-10-12T10:00:00.000Z', foundAt: '2026-10-12T09:50:00.000Z',
     })

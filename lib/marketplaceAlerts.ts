@@ -1,6 +1,8 @@
 import Hashids from 'hashids'
 
 export const MARKETPLACE_RARITIES = ['Rare', 'Epic', 'Legendary', 'Mystic', 'Iconic'] as const
+export const MARKETPLACE_PRICE_PER_RATING_ALLOWANCE = 1
+export const MARKETPLACE_BULK_PRICE_INCREMENT = 100
 
 export const MARKETPLACE_RARITY_API_VALUES = {
   Rare: 3,
@@ -117,11 +119,24 @@ export type MarketplaceAlertNotification = {
   price: number
   rating?: number | null
   pricePerRating?: number | null
+  /** Configured rule limit before the standard +1 RAX/rating allowance. */
+  maxPricePerRating?: number | null
+  /** Highest valid bulk-auction price after applying the allowance. */
+  maxAuctionPrice?: number | null
   numBids: number
   rarity: string
   serialNumber: number | null
   endsAt: string | null
   foundAt: string
+}
+
+export function marketplaceMaximumBulkAuctionPrice(
+  rating: number | null,
+  maxPricePerRating: number | null,
+): number | null {
+  if (rating === null || rating <= 0 || maxPricePerRating === null) return null
+  const rawMaximum = rating * (maxPricePerRating + MARKETPLACE_PRICE_PER_RATING_ALLOWANCE)
+  return Math.floor(rawMaximum / MARKETPLACE_BULK_PRICE_INCREMENT) * MARKETPLACE_BULK_PRICE_INCREMENT
 }
 
 const MARKETPLACE_ROUTING_HASH = new Hashids('routing', 11)
@@ -372,7 +387,11 @@ export function marketplaceListingMatchesRule(
   const pricePerRatingMax = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
   const rating = marketplaceListingRating(listing)
   if (pricePerRatingMax !== null) {
-    if (rating === null || rating <= 0 || price / rating > pricePerRatingMax) return false
+    if (
+      rating === null ||
+      rating <= 0 ||
+      price / rating > pricePerRatingMax + MARKETPLACE_PRICE_PER_RATING_ALLOWANCE
+    ) return false
   }
   const serial = finiteNumber(listing.mintNumber ?? listing.card?.serialNumber, 1)
   if (rule.maxSerial !== null && (serial === null || serial > rule.maxSerial)) return false
@@ -393,6 +412,8 @@ export function createMarketplaceNotification(
   const listingId = String(listing.id)
   const price = marketplaceListingPrice(listing)
   const rating = marketplaceListingRating(listing)
+  const player = matchingRulePlayer(rule, listing)
+  const maxPricePerRating = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
   return {
     id: `${rule.id}:${listingId}`,
     ruleId: rule.id,
@@ -404,6 +425,8 @@ export function createMarketplaceNotification(
     price,
     rating,
     pricePerRating: rating && rating > 0 ? price / rating : null,
+    maxPricePerRating,
+    maxAuctionPrice: marketplaceMaximumBulkAuctionPrice(rating, maxPricePerRating),
     numBids: Math.max(0, Number(listing.numBids ?? 0)),
     rarity: marketplaceListingRarity(listing),
     serialNumber: finiteNumber(listing.mintNumber ?? listing.card?.serialNumber, 1),

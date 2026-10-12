@@ -23,7 +23,11 @@ function describeNotification(notification: MarketplaceAlertNotification): strin
   ].filter(Boolean)
   const auctionUrl = marketplaceListingUrl(notification.listingId)
   const summary = `• ${notification.playerName} — ${details.join(' · ')} (${notification.ruleName})`
-  return auctionUrl ? `${summary}\n  ${auctionUrl}` : summary
+  const maximum = notification.maxAuctionPrice != null && notification.maxPricePerRating != null
+    ? `\n  Max auction: ${notification.maxAuctionPrice.toLocaleString('en-US')} RAX ` +
+      `(${notification.maxPricePerRating.toLocaleString('en-US')} + 1 allowance per rating)`
+    : ''
+  return auctionUrl ? `${summary}${maximum}\n  ${auctionUrl}` : `${summary}${maximum}`
 }
 
 export function formatMarketplaceNotificationMessage(

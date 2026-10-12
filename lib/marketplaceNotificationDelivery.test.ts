@@ -63,6 +63,24 @@ describe('marketplace notification delivery', () => {
     )
   })
 
+  it('shows the tolerated maximum auction price for a decimal bulk rating', () => {
+    const message = formatMarketplaceNotificationMessage('husain', [{
+      ...notification,
+      playerName: 'Bijan Robinson',
+      price: 3000,
+      rating: 89.7,
+      pricePerRating: 3000 / 89.7,
+      maxPricePerRating: 35,
+      maxAuctionPrice: 3200,
+      serialNumber: null,
+      ruleName: 'NFL owned players',
+    }])
+    expect(message).toContain(
+      'Bijan Robinson — Bulk rating auction · 3,000 RAX · 89.7 rating · 33.44 RAX/rating',
+    )
+    expect(message).toContain('Max auction: 3,200 RAX (35 + 1 allowance per rating)')
+  })
+
   it('includes a one-click Real auction link for a live numeric listing', () => {
     expect(formatMarketplaceNotificationMessage('husain', [{
       ...notification,
