@@ -71,6 +71,7 @@ The app has three access layers:
 | `/` | Dashboard and summary |
 | `/entry` | Import passes and edit cards or earnings |
 | `/earnings` | View daily active-season player-card earnings and account totals |
+| `/marketplace` | Create marketplace listing alerts and review matched listings |
 | `/calendar` | Calendar view of claimable and overlapping RAX |
 | `/otd` | Browse OTD opportunities |
 | `/overlaps` | Analyze overlap days and unclaimable RAX |
@@ -92,6 +93,8 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 - `KV_REST_API_URL`, `KV_REST_API_TOKEN`, and optional `TRACKER_SYNC_SECRET` for accounts and sync
 - `REAL_*` server variables for Real pass and earnings import
 - `CRON_SECRET` for bearer-token protection on scheduled 5:30 AM Eastern public earnings snapshots. When omitted, the endpoint accepts only Vercel's native `vercel-cron/1.0` invocation marker and still enforces the narrow snapshot-time window.
+- `MARKETPLACE_SCAN_SECRET` for the hosted marketplace monitor (falls back to `CRON_SECRET`)
+- One optional marketplace delivery channel: private Discord DMs with `MARKETPLACE_DISCORD_BOT_TOKEN` plus `MARKETPLACE_DISCORD_USER_ID`; a Discord channel webhook with `MARKETPLACE_DISCORD_WEBHOOK_URL`; or Telegram with `MARKETPLACE_TELEGRAM_BOT_TOKEN` plus `MARKETPLACE_TELEGRAM_CHAT_ID`. Discord DMs take precedence when multiple channels are configured.
 - `VITE_REAL_IMPORT_ENABLED` for the corresponding browser UI switch
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for the shared catalog
 - `ADMIN_PASSWORD` for operator access
@@ -99,6 +102,12 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 `REAL_AUTH_INFO`, `REAL_SESSION_TOKEN`, and `REAL_DEVICE_UUID` are live credentials. Keep them in local or Vercel environment settings only.
 
 The Earnings page reconstructs daily totals from Real's public active-pass, booster, and box-score data. The complete linked-account list is synchronized to server storage and refreshed every morning before Real's reset. Three once-daily Vercel cron jobs cover the EST and EDT offsets plus an imprecise Hobby-plan fallback. The endpoint's `America/New_York` guard prefers 5:30 AM, permits a fallback during the 6 AM hour, and never overwrites an account/day snapshot that was already saved successfully. If Real continues returning `429` after its request-level backoff, the snapshot job makes one bounded account-level retry, stops before the serverless deadline, and defers all unsaved accounts to the later cron invocation. The response lists completed, retried, rate-limited, and deferred accounts for diagnostics.
+
+Marketplace alerts use Real's authenticated listing feed and the shared catalog for sport-aware player and team selection. Rules, deduplicated matches, pending deliveries, and the last scan result are stored in KV per tracker account. The page can scan on demand and refreshes its saved feed once per minute without making another Real request. Discord DM delivery opens a private channel with the configured user and sends from the installed bot; the bot token remains server-side and never enters the browser bundle.
+
+For unattended monitoring, create an Upstash QStash schedule that sends `POST` to `https://YOUR_DEPLOYMENT/api/cron/marketplace-alerts` with cron expression `*/5 * * * *`. Set `Upstash-Forward-Authorization` to `Bearer YOUR_MARKETPLACE_SCAN_SECRET`; QStash removes the prefix and forwards it as the endpoint's `Authorization` header. Five-minute scans use 288 QStash messages per day. The endpoint scans every account that has at least one saved marketplace rule, deduplicates matches, and retries undelivered Discord or Telegram alerts on the next run. Do not add this schedule to `vercel.json` on a Vercel Hobby project; Hobby cron frequency is too limited for auction monitoring.
+
+`Serial number` and `Bulk rating` are separate rule choices and feeds: serial-number rules request `listingType=userpassserial`, while bulk-rating rules request `listingType=userpassfull`. An `All` rule scans both pass feeds plus the card feed.
 
 ## Shared catalog
 

@@ -1,7 +1,8 @@
 {
   "rewrites": [{ "source": "/((?!assets/|api/).*)", "destination": "/index.html" }],
   "functions": {
-    "api/cron/snapshot-earnings*.ts": { "maxDuration": 300 }
+    "api/cron/snapshot-earnings*.ts": { "maxDuration": 300 },
+    "api/cron/marketplace-alerts.ts": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/cron/snapshot-earnings-summer", "schedule": "30 9 * * *" },
