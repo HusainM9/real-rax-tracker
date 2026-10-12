@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MARKETPLACE_RARITY_API_VALUES,
   createMarketplaceNotification,
+  marketplaceApiSport,
   marketplaceApiListingTypes,
   marketplaceListingMatchesRule,
   marketplaceListingPrice,
@@ -12,6 +13,16 @@ import {
   type MarketplaceAlertRule,
   type MarketplaceListing,
 } from './marketplaceAlerts'
+
+describe('marketplace sport routing', () => {
+  it('uses the sport slugs accepted by Real marketplace feeds', () => {
+    expect(marketplaceApiSport('CFB')).toBe('ncaaf')
+    expect(marketplaceApiSport('cbb')).toBe('ncaam')
+    expect(marketplaceApiSport('FC')).toBe('soccer')
+    expect(marketplaceApiSport('WNBA')).toBe('wnba')
+    expect(marketplaceApiSport('NFL')).toBe('nfl')
+  })
+})
 
 describe('marketplace listing links', () => {
   it('builds the official Real deep link from a numeric listing id', () => {
@@ -134,6 +145,14 @@ describe('marketplace listing matching', () => {
     expect(marketplaceListingMatchesRule(rule, { ...listing, sport: 'nba' })).toBe(false)
     expect(marketplaceListingMatchesRule(rule, { ...listing, season: 2025 })).toBe(false)
     expect(marketplaceListingMatchesRule(rule, { ...listing, sport: 'NFL' })).toBe(true)
+    expect(marketplaceListingMatchesRule(
+      { ...rule, sport: 'cfb' },
+      { ...listing, sport: 'ncaaf' },
+    )).toBe(true)
+    expect(marketplaceListingMatchesRule(
+      { ...rule, sport: 'fc' },
+      { ...listing, sport: 'soccer' },
+    )).toBe(true)
   })
 
   it('handles player, team, owned, and all entity scopes', () => {

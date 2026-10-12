@@ -18,6 +18,15 @@ export type MarketplaceApiListingType = 'card' | 'userpassfull' | 'userpassseria
 export type MarketplaceListingMode = 'all' | 'auction' | 'buyNow'
 export type MarketplacePrestigeMode = 'all' | 'standard' | 'prestiged'
 
+/** Convert tracker/UI sport labels to the slugs accepted by Real's marketplace API. */
+export function marketplaceApiSport(value: string): string {
+  const sport = value.trim().toLowerCase()
+  if (sport === 'cfb' || sport === 'ncaafootball' || sport === 'ncaa-football') return 'ncaaf'
+  if (sport === 'cbb' || sport === 'ncaab' || sport === 'ncaabasketball') return 'ncaam'
+  if (sport === 'fc') return 'soccer'
+  return sport
+}
+
 export type MarketplaceAlertPlayer = {
   entityId: number
   name: string
@@ -328,7 +337,10 @@ export function marketplaceListingMatchesRule(
   listing: MarketplaceListing,
 ): boolean {
   if (!rule.enabled || listing.status !== 'open') return false
-  if (listing.sport?.toLowerCase() !== rule.sport || Number(listing.season) !== rule.season) return false
+  if (
+    marketplaceApiSport(listing.sport ?? '') !== marketplaceApiSport(rule.sport) ||
+    Number(listing.season) !== rule.season
+  ) return false
   if (!listingMatchesEntity(rule, listing)) return false
 
   const listingType = listing.listingType?.toLowerCase() ?? ''

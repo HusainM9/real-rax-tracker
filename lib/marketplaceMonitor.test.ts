@@ -114,6 +114,23 @@ describe('marketplace monitor', () => {
     )
   })
 
+  it('routes tracker sport labels to verified Real marketplace slugs', async () => {
+    await scanMarketplaceAlerts({
+      owner: 'husain',
+      rules: [
+        { ...baseRule, id: 'cfb', sport: 'cfb', rarities: ['Rare'] },
+        { ...baseRule, id: 'cbb', sport: 'cbb', rarities: ['Rare'] },
+        { ...baseRule, id: 'fc', sport: 'fc', rarities: ['Rare'] },
+        { ...baseRule, id: 'wnba', sport: 'wnba', rarities: ['Rare'] },
+      ],
+      context,
+    })
+
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].sport)).toEqual([
+      'ncaaf', 'ncaam', 'soccer', 'wnba',
+    ])
+  })
+
   it('scans only the bulk-rating feed for an old all-types rule', async () => {
     const result = await scanMarketplaceAlerts({
       owner: 'husain', rules: [{ ...baseRule, itemType: 'all' }], context,

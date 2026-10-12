@@ -1,6 +1,7 @@
 import {
   MARKETPLACE_RARITY_API_VALUES,
   createMarketplaceNotification,
+  marketplaceApiSport,
   marketplaceListingMatchesRule,
   marketplaceRuleRarities,
   type MarketplaceAlertNotification,
@@ -32,6 +33,7 @@ function groupRules(rules: MarketplaceAlertRule[]): ScanGroup[] {
     const bulkRule: MarketplaceAlertRule = rule.itemType === 'bulk'
       ? rule
       : { ...rule, itemType: 'bulk' }
+    const apiSport = marketplaceApiSport(bulkRule.sport)
     // Explicit player IDs are portable across linked accounts and do not depend on
     // whichever Real session happens to be configured on the server.
     const filterCustomType = (bulkRule.players?.length ?? 0) > 0
@@ -43,11 +45,11 @@ function groupRules(rules: MarketplaceAlertRule[]): ScanGroup[] {
         : 'all'
     for (const rarity of marketplaceRuleRarities(bulkRule)) {
       const rarityValue = MARKETPLACE_RARITY_API_VALUES[rarity]
-      const key = [bulkRule.sport, bulkRule.season, filterCustomType, rarityValue].join('|')
+      const key = [apiSport, bulkRule.season, filterCustomType, rarityValue].join('|')
       const existing = groups.get(key)
       if (existing) existing.rules.push(bulkRule)
       else groups.set(key, {
-        sport: bulkRule.sport,
+        sport: apiSport,
         season: bulkRule.season,
         filterCustomType,
         rarity: rarityValue,
