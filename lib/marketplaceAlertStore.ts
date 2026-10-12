@@ -13,8 +13,12 @@ const SEEN_PREFIX = 'rax:marketplace-alerts:seen:'
 const PENDING_PREFIX = 'rax:marketplace-alerts:pending:'
 const PENDING_IDS_PREFIX = 'rax:marketplace-alerts:pending-ids:'
 const SCAN_STATUS_PREFIX = 'rax:marketplace-alerts:scan-status:'
+const SCAN_LOG_PREFIX = 'rax:marketplace-alerts:scan-log:'
+const IGNORED_LISTING_PREFIX = 'rax:marketplace-alerts:ignored-listing:'
 const MAX_NOTIFICATIONS = 200
+const MAX_SCAN_LOG_ENTRIES = 40
 const SEEN_TTL_SECONDS = 14 * 24 * 60 * 60
+const IGNORED_LISTING_TTL_SECONDS = 30 * 24 * 60 * 60
 
 export type MarketplaceScanStatus = {
   startedAt: string
@@ -25,6 +29,11 @@ export type MarketplaceScanStatus = {
   delivered: number
   deliveryChannel: string | null
   error: string | null
+}
+
+export type MarketplaceScanLogEntry = MarketplaceScanStatus & {
+  id: string
+  source: 'automatic' | 'manual'
 }
 
 function ownerKey(owner: string): string {
@@ -53,6 +62,23 @@ function pendingIdsKey(owner: string): string {
 
 function scanStatusKey(owner: string): string {
   return `${SCAN_STATUS_PREFIX}${ownerKey(owner)}`
+}
+
+function scanLogKey(owner: string): string {
+  return `${SCAN_LOG_PREFIX}${ownerKey(owner)}`
+}
+
+function ignoredListingKey(owner: string, listingId: string): string {
+  return `${IGNORED_LISTING_PREFIX}${ownerKey(owner)}:${listingId.trim()}`
+}
+
+function parseNotification(entry: unknown): MarketplaceAlertNotification | null {
+  try {
+    const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry
+    return parsed && typeof parsed === 'object' ? parsed as MarketplaceAlertNotification : null
+  } catch {
+    return null
+  }
 }
 
 export function marketplaceAlertStorageConfigured(): boolean {
@@ -94,12 +120,8 @@ export async function readMarketplaceNotifications(
   if (!marketplaceAlertStorageConfigured()) return []
   const raw = await kv.lrange<string>(notificationsKey(owner), 0, Math.max(0, limit - 1))
   return raw.flatMap((entry) => {
-    try {
-      const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry
-      return parsed && typeof parsed === 'object' ? [parsed as MarketplaceAlertNotification] : []
-    } catch {
-      return []
-    }
+    const parsed = parseNotification(entry)
+    return parsed ? [parsed] : []
   })
 }
 
@@ -113,9 +135,38 @@ export async function readMarketplaceScanStatus(
 export async function saveMarketplaceScanStatus(
   owner: string,
   status: MarketplaceScanStatus,
+  source: MarketplaceScanLogEntry['source'] = 'automatic',
 ): Promise<void> {
   if (!marketplaceAlertStorageConfigured()) return
-  await kv.set(scanStatusKey(owner), status)
+  const entry: MarketplaceScanLogEntry = {
+    ...status,
+    id: `${status.startedAt}:${source}`,
+    source,
+  }
+  await Promise.all([
+    kv.set(scanStatusKey(owner), status),
+    kv.lpush(scanLogKey(owner), JSON.stringify(entry)),
+  ])
+  await kv.ltrim(scanLogKey(owner), 0, MAX_SCAN_LOG_ENTRIES - 1)
+}
+
+export async function readMarketplaceScanLog(
+  owner: string,
+  limit = 20,
+): Promise<MarketplaceScanLogEntry[]> {
+  if (!marketplaceAlertStorageConfigured()) return []
+  const raw = await kv.lrange<string>(scanLogKey(owner), 0, Math.max(0, limit - 1))
+  return raw.flatMap((value) => {
+    try {
+      const entry = typeof value === 'string' ? JSON.parse(value) : value
+      if (!entry || typeof entry !== 'object') return []
+      const candidate = entry as MarketplaceScanLogEntry
+      if ((candidate.source !== 'automatic' && candidate.source !== 'manual') || !candidate.startedAt) return []
+      return [candidate]
+    } catch {
+      return []
+    }
+  })
 }
 
 export async function readPendingMarketplaceNotifications(
@@ -158,7 +209,10 @@ export async function saveNewMarketplaceNotifications(
 ): Promise<MarketplaceAlertNotification[]> {
   if (!marketplaceAlertStorageConfigured()) return notifications
   const saved: MarketplaceAlertNotification[] = []
+  const visible: MarketplaceAlertNotification[] = []
   for (const notification of notifications) {
+    if (await kv.get(ignoredListingKey(owner, notification.listingId))) continue
+    visible.push(notification)
     const key = seenKey(owner, notification.id)
     const claimed = await kv.set(key, '1', { ex: SEEN_TTL_SECONDS, nx: true })
     if (!claimed) continue
@@ -170,10 +224,41 @@ export async function saveNewMarketplaceNotifications(
 
   // The page is a snapshot of the latest scan, not an activity history. Keep
   // seen/pending keys separately so replacing this list does not re-notify old matches.
-  const current = notifications.slice(0, MAX_NOTIFICATIONS)
+  const current = visible.slice(0, MAX_NOTIFICATIONS)
   await kv.del(notificationsKey(owner))
   for (const notification of [...current].reverse()) {
     await kv.lpush(notificationsKey(owner), JSON.stringify(notification))
   }
   return saved
+}
+
+export async function ignoreMarketplaceListing(
+  owner: string,
+  listingId: string,
+): Promise<MarketplaceAlertNotification[]> {
+  const normalizedListingId = listingId.trim().slice(0, 120)
+  if (!normalizedListingId || !marketplaceAlertStorageConfigured()) {
+    return readMarketplaceNotifications(owner)
+  }
+
+  await kv.set(ignoredListingKey(owner, normalizedListingId), '1', {
+    ex: IGNORED_LISTING_TTL_SECONDS,
+  })
+
+  const notifications = await readMarketplaceNotifications(owner, MAX_NOTIFICATIONS)
+  const remaining = notifications.filter((item) => item.listingId !== normalizedListingId)
+  await kv.del(notificationsKey(owner))
+  for (const notification of [...remaining].reverse()) {
+    await kv.lpush(notificationsKey(owner), JSON.stringify(notification))
+  }
+
+  const pendingIds = await kv.smembers(pendingIdsKey(owner))
+  for (const id of pendingIds) {
+    const pending = parseNotification(await kv.get<MarketplaceAlertNotification | string>(pendingKey(owner, id)))
+    if (pending?.listingId !== normalizedListingId) continue
+    await kv.srem(pendingIdsKey(owner), id)
+    await kv.del(pendingKey(owner, id))
+  }
+
+  return remaining
 }

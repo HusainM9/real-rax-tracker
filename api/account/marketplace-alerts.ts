@@ -1,7 +1,9 @@
 import {
+  ignoreMarketplaceListing,
   marketplaceAlertStorageConfigured,
   readMarketplaceAlertRules,
   readMarketplaceNotifications,
+  readMarketplaceScanLog,
   readMarketplaceScanStatus,
   saveMarketplaceAlertRules,
 } from '../../lib/marketplaceAlertStore'
@@ -12,7 +14,7 @@ import { requireAccountSession } from '../admin/_helpers'
 export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'PUT') {
+  if (request.method !== 'GET' && request.method !== 'PUT' && request.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
   const accessError = await requireEarningsSession(request, 'Marketplace')
@@ -26,16 +28,18 @@ export default async function handler(request: Request): Promise<Response> {
       rules: [],
       notifications: [],
       scanStatus: null,
+      scanLog: [],
     }, { status: 503 })
   }
 
   if (request.method === 'GET') {
-    const [rules, notifications, scanStatus] = await Promise.all([
+    const [rules, notifications, scanStatus, scanLog] = await Promise.all([
       readMarketplaceAlertRules(session.username),
       readMarketplaceNotifications(session.username),
       readMarketplaceScanStatus(session.username),
+      readMarketplaceScanLog(session.username),
     ])
-    return Response.json({ ok: true, storageConfigured: true, rules, notifications, scanStatus })
+    return Response.json({ ok: true, storageConfigured: true, rules, notifications, scanStatus, scanLog })
   }
 
   if (request.method === 'PUT') {
@@ -52,6 +56,23 @@ export default async function handler(request: Request): Promise<Response> {
       : []
     const saved = await saveMarketplaceAlertRules(session.username, rules)
     return Response.json({ ok: true, storageConfigured: true, rules: saved })
+  }
+
+  if (request.method === 'POST') {
+    let body: { ignoreListingId?: unknown }
+    try {
+      body = await request.json() as typeof body
+    } catch {
+      return Response.json({ error: 'Invalid request body.' }, { status: 400 })
+    }
+    const listingId = typeof body.ignoreListingId === 'string'
+      ? body.ignoreListingId.trim()
+      : ''
+    if (!listingId) {
+      return Response.json({ error: 'A listing ID is required.' }, { status: 400 })
+    }
+    const notifications = await ignoreMarketplaceListing(session.username, listingId)
+    return Response.json({ ok: true, notifications, ignoredListingId: listingId })
   }
 
   return new Response('Method Not Allowed', { status: 405 })

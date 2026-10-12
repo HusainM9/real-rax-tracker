@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolveRealApiConfig: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
   readMarketplaceNotifications: vi.fn(),
+  saveMarketplaceScanStatus: vi.fn(),
   scanMarketplaceAlerts: vi.fn(),
 }))
 
@@ -16,6 +17,7 @@ vi.mock('../../lib/realApi', () => ({ resolveRealApiConfig: mocks.resolveRealApi
 vi.mock('../../lib/marketplaceAlertStore', () => ({
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
   readMarketplaceNotifications: mocks.readMarketplaceNotifications,
+  saveMarketplaceScanStatus: mocks.saveMarketplaceScanStatus,
 }))
 vi.mock('../../lib/marketplaceMonitor', () => ({ scanMarketplaceAlerts: mocks.scanMarketplaceAlerts }))
 
@@ -34,6 +36,7 @@ beforeEach(() => {
   mocks.scanMarketplaceAlerts.mockReset().mockResolvedValue({
     notifications: [fresh], checkedListings: 10, requests: 2,
   })
+  mocks.saveMarketplaceScanStatus.mockReset().mockResolvedValue(undefined)
 })
 
 describe('account marketplace scan endpoint', () => {
@@ -70,16 +73,25 @@ describe('account marketplace scan endpoint', () => {
     const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
     const body = await response.json()
     expect(response.status).toBe(200)
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       ok: true,
       checkedListings: 10,
       requests: 2,
       newNotifications: [fresh],
       notifications: [fresh, older],
+      scanStatus: {
+        checkedListings: 10,
+        requests: 2,
+        newMatches: 1,
+        error: null,
+      },
     })
     expect(mocks.scanMarketplaceAlerts).toHaveBeenCalledWith(expect.objectContaining({
       owner: 'husain', rules: [rule],
     }))
+    expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
+      'husain', expect.objectContaining({ checkedListings: 10, newMatches: 1 }), 'manual',
+    )
   })
 
   it('returns a bounded upstream error response', async () => {
@@ -87,5 +99,8 @@ describe('account marketplace scan endpoint', () => {
     const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
     expect(response.status).toBe(502)
     expect(await response.json()).toEqual({ error: 'Real request failed' })
+    expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
+      'husain', expect.objectContaining({ error: 'Real request failed' }), 'manual',
+    )
   })
 })

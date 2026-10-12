@@ -7,11 +7,12 @@ import {
   type MarketplaceAlertRule,
   type MarketplaceRarity,
 } from '../../lib/marketplaceAlerts'
-import type { MarketplaceScanStatus } from '../../lib/marketplaceAlertStore'
+import type { MarketplaceScanLogEntry, MarketplaceScanStatus } from '../../lib/marketplaceAlertStore'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
 import {
+  ignoreMarketplaceAlertListing,
   loadMarketplaceAlerts,
   saveMarketplaceAlerts,
   scanMarketplaceAlertsNow,
@@ -96,11 +97,17 @@ function formatAge(iso: string): string {
 
 function scanStatusSummary(scanStatus: MarketplaceScanStatus | null): string {
   if (!scanStatus) return 'The hosted five-minute monitor has not run yet.'
-  if (scanStatus.error) return `Last background scan failed ${formatAge(scanStatus.finishedAt)}: ${scanStatus.error}`
+  if (scanStatus.error) return `Last scan failed ${formatAge(scanStatus.finishedAt)}: ${scanStatus.error}`
   const delivery = scanStatus.deliveryChannel
     ? ` · ${scanStatus.delivered} sent by ${scanStatus.deliveryChannel}`
     : ''
-  return `Last background scan ${formatAge(scanStatus.finishedAt)} · ${scanStatus.checkedListings} listings · ${scanStatus.newMatches} new${delivery}`
+  return `Last scan ${formatAge(scanStatus.finishedAt)} · ${scanStatus.checkedListings} listings · ${scanStatus.newMatches} new${delivery}`
+}
+
+function formatScanTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
+  })
 }
 
 export default function MarketplaceAlertsPage() {
@@ -110,9 +117,11 @@ export default function MarketplaceAlertsPage() {
   const [rules, setRules] = useState<MarketplaceAlertRule[]>([])
   const [notifications, setNotifications] = useState<MarketplaceAlertNotification[]>([])
   const [scanStatus, setScanStatus] = useState<MarketplaceScanStatus | null>(null)
+  const [scanLog, setScanLog] = useState<MarketplaceScanLogEntry[]>([])
   const [status, setStatus] = useState('Loading alerts…')
   const [busy, setBusy] = useState(false)
   const [playersBusy, setPlayersBusy] = useState(false)
+  const [ignoringListingId, setIgnoringListingId] = useState<string | null>(null)
   const [availablePlayers, setAvailablePlayers] = useState<MarketplaceAlertPlayer[]>([])
   const [playerPickerOpen, setPlayerPickerOpen] = useState(false)
   const [pickerSelectedIds, setPickerSelectedIds] = useState<number[]>([])
@@ -164,6 +173,7 @@ export default function MarketplaceAlertsPage() {
         setRules(payload.rules)
         setNotifications(payload.notifications)
         setScanStatus(payload.scanStatus)
+        setScanLog(payload.scanLog)
         setStatus(payload.rules.length ? 'Monitoring rules loaded.' : 'Create your first alert rule.')
       })
       .catch((error) => active && setStatus(error instanceof Error ? error.message : 'Could not load alerts.'))
@@ -286,6 +296,16 @@ export default function MarketplaceAlertsPage() {
     try {
       const result = await scanMarketplaceAlertsNow(rules)
       setNotifications(result.notifications)
+      setScanStatus(result.scanStatus)
+      const logEntry: MarketplaceScanLogEntry = {
+        ...result.scanStatus,
+        id: `${result.scanStatus.startedAt}:manual`,
+        source: 'manual',
+      }
+      setScanLog((current) => [
+        logEntry,
+        ...current.filter((entry) => entry.id !== logEntry.id),
+      ].slice(0, 40))
       setStatus(`Checked ${result.checkedListings} listings across ${result.requests} feed${result.requests === 1 ? '' : 's'} · ${result.newNotifications.length} new match${result.newNotifications.length === 1 ? '' : 'es'}.`)
       if ('Notification' in window && Notification.permission === 'granted') {
         for (const item of result.newNotifications.slice(0, 3)) {
@@ -307,6 +327,7 @@ export default function MarketplaceAlertsPage() {
       void loadMarketplaceAlerts().then((payload) => {
         setNotifications(payload.notifications)
         setScanStatus(payload.scanStatus)
+        setScanLog(payload.scanLog)
       }).catch(() => undefined)
     }, 60_000)
     return () => window.clearInterval(timer)
@@ -319,6 +340,20 @@ export default function MarketplaceAlertsPage() {
     }
     const permission = await Notification.requestPermission()
     setStatus(permission === 'granted' ? 'Browser notifications enabled.' : 'Browser notifications were not enabled.')
+  }
+
+  const ignoreListing = async (item: MarketplaceAlertNotification) => {
+    if (ignoringListingId) return
+    setIgnoringListingId(item.listingId)
+    try {
+      const remaining = await ignoreMarketplaceAlertListing(item.listingId)
+      setNotifications(remaining)
+      setStatus(`${item.playerName} listing ignored. It will not trigger another alert.`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not ignore this listing.')
+    } finally {
+      setIgnoringListingId(null)
+    }
   }
 
   const advancedFilterCount = [
@@ -476,6 +511,23 @@ export default function MarketplaceAlertsPage() {
             <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every five minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
             {rules.length === 0 ? <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div> : <div className="marketplace-rule-list">{rules.map((rule) => <article key={rule.id} className={`marketplace-rule-card${rule.enabled ? '' : ' disabled'}`}><div><span className="marketplace-rule-sport">{rule.enabled ? 'ACTIVE' : 'PAUSED'} · {rule.sport.toUpperCase()} {rule.season}</span><h3>{rule.name}</h3><p>{ruleSummary(rule)}</p></div><details className="marketplace-rule-menu"><summary aria-label={`Options for ${rule.name}`}>•••</summary><div><button type="button" onClick={() => editRule(rule)}>Edit alert</button><button type="button" onClick={() => void persist(rules.map((entry) => entry.id === rule.id ? { ...entry, enabled: !entry.enabled, updatedAt: new Date().toISOString() } : entry), `${rule.name} ${rule.enabled ? 'paused' : 'enabled'}.`)}>{rule.enabled ? 'Pause alert' : 'Enable alert'}</button><button type="button" className="danger" onClick={() => void persist(rules.filter((entry) => entry.id !== rule.id), `${rule.name} removed.`)}>Remove</button></div></details></article>)}</div>}
           </section>
+          <section className="panel marketplace-scan-log-panel">
+            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>Live checks of the Real marketplace.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Every 5 min'}</span></div>
+            {busy ? <div className="marketplace-scan-live"><i aria-hidden="true" /><span>Requesting the latest bulk-rating feeds…</span></div> : null}
+            {scanLog.length === 0 ? (
+              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The first automatic check will appear here.</span></div>
+            ) : (
+              <ol className="marketplace-scan-log">
+                {scanLog.slice(0, 8).map((entry) => (
+                  <li key={entry.id} className={entry.error ? 'failed' : ''}>
+                    <span className="marketplace-scan-log-dot" aria-hidden="true" />
+                    <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}`}</span></div>
+                    <time dateTime={entry.finishedAt}><b>{entry.source === 'automatic' ? 'Auto' : 'Manual'}</b>{formatScanTime(entry.finishedAt)}</time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
         </aside>
       </section>
 
@@ -507,6 +559,7 @@ export default function MarketplaceAlertsPage() {
                         View auction <span aria-hidden="true">↗</span>
                       </a>
                     ) : <span className="marketplace-auction-link unavailable">Demo listing</span>}
+                    <button className="marketplace-ignore-listing" type="button" disabled={ignoringListingId !== null} onClick={() => void ignoreListing(item)}>{ignoringListingId === item.listingId ? 'Ignoring…' : 'Ignore listing'}</button>
                   </div>
                 </article>
               )

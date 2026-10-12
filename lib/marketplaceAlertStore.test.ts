@@ -49,11 +49,13 @@ vi.mock('@vercel/kv', () => ({
 vi.mock('./adminEventStore.js', () => ({ adminStorageConfigured: () => true }))
 
 import {
+  ignoreMarketplaceListing,
   listMarketplaceAlertOwners,
   markMarketplaceNotificationsDelivered,
   readMarketplaceAlertRules,
   readMarketplaceNotifications,
   readMarketplaceScanStatus,
+  readMarketplaceScanLog,
   readPendingMarketplaceNotifications,
   saveMarketplaceAlertRules,
   saveMarketplaceScanStatus,
@@ -145,5 +147,39 @@ describe('marketplace alert storage', () => {
     expect(await readMarketplaceScanStatus('husain')).toBeNull()
     await saveMarketplaceScanStatus('husain', status)
     expect(await readMarketplaceScanStatus('HUSAIN')).toEqual(status)
+    expect(await readMarketplaceScanLog('HUSAIN')).toEqual([{
+      ...status,
+      id: `${status.startedAt}:automatic`,
+      source: 'automatic',
+    }])
+  })
+
+  it('retains manual and automatic scan history newest first', async () => {
+    const first = {
+      startedAt: '2026-10-12T09:50:00.000Z', finishedAt: '2026-10-12T09:50:01.000Z',
+      checkedListings: 30, requests: 3, newMatches: 2, delivered: 2,
+      deliveryChannel: 'discord', error: null,
+    }
+    const second = { ...first, startedAt: '2026-10-12T09:55:00.000Z', finishedAt: '2026-10-12T09:55:01.000Z' }
+    await saveMarketplaceScanStatus('husain', first)
+    await saveMarketplaceScanStatus('husain', second, 'manual')
+
+    expect((await readMarketplaceScanLog('husain')).map((entry) => entry.source)).toEqual([
+      'manual', 'automatic',
+    ])
+  })
+
+  it('ignores a listing across rules and removes visible and pending matches', async () => {
+    const sameListingOtherRule = { ...notification, id: 'rule-2:listing-1', ruleId: 'rule-2' }
+    const otherListing = { ...notification, id: 'rule-1:listing-2', listingId: 'listing-2' }
+    await saveNewMarketplaceNotifications('husain', [notification, sameListingOtherRule, otherListing])
+
+    expect(await ignoreMarketplaceListing('husain', 'listing-1')).toEqual([otherListing])
+    expect(await readMarketplaceNotifications('husain')).toEqual([otherListing])
+    expect(await readPendingMarketplaceNotifications('husain')).toEqual([otherListing])
+
+    const newRuleMatch = { ...notification, id: 'rule-3:listing-1', ruleId: 'rule-3' }
+    expect(await saveNewMarketplaceNotifications('husain', [newRuleMatch])).toEqual([])
+    expect(await readMarketplaceNotifications('husain')).toEqual([])
   })
 })

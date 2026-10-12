@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { MarketplaceAlertNotification, MarketplaceAlertRule } from '../../lib/marketplaceAlerts'
-import { scanMarketplaceAlertsNow } from './marketplaceAlertsApi'
+import { ignoreMarketplaceAlertListing, scanMarketplaceAlertsNow } from './marketplaceAlertsApi'
 
 const rule: MarketplaceAlertRule = {
   id: 'walker-alert',
@@ -63,5 +63,24 @@ describe('development marketplace refresh', () => {
     const second = await scanMarketplaceAlertsNow([rule])
     expect(second.notifications).toHaveLength(3)
     expect(second.newNotifications).toEqual([])
+  })
+
+  it('keeps an ignored listing out of later development scans', async () => {
+    const first = await scanMarketplaceAlertsNow([rule])
+    const ignored = first.notifications[0]
+    const remaining = await ignoreMarketplaceAlertListing(ignored.listingId)
+
+    expect(remaining.some((notification) => notification.listingId === ignored.listingId)).toBe(false)
+    const next = await scanMarketplaceAlertsNow([rule])
+    expect(next.notifications.some((notification) => notification.listingId === ignored.listingId)).toBe(false)
+  })
+
+  it('records manual scan activity in development', async () => {
+    await scanMarketplaceAlertsNow([rule])
+    const raw = localStorage.getItem('rax-marketplace-alert-scan-log-v1')
+    expect(raw).not.toBeNull()
+    expect(JSON.parse(raw ?? '[]')[0]).toMatchObject({
+      source: 'manual', requests: 5, error: null,
+    })
   })
 })
