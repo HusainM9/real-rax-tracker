@@ -42,6 +42,8 @@ export type MarketplaceAlertPlayer = {
   noBidsOnly?: boolean
   /** Notify for this player's Iconic listings without applying rarity or RAX/rating limits. */
   alwaysNotifyIconic?: boolean
+  /** Notify for this player's Mystic listings without applying rarity or RAX/rating limits. */
+  alwaysNotifyMystic?: boolean
 }
 
 export type MarketplaceAlertRule = {
@@ -128,6 +130,7 @@ export type MarketplaceAlertNotification = {
   /** Highest valid bulk-auction price after applying the allowance. */
   maxAuctionPrice?: number | null
   iconicPriceOverride?: boolean
+  mysticPriceOverride?: boolean
   numBids: number
   rarity: string
   serialNumber: number | null
@@ -208,6 +211,7 @@ export function marketplaceRuleRarities(rule: MarketplaceAlertRule): Marketplace
     if (allowed.length === 0) return [...MARKETPLACE_RARITIES]
     allowed.forEach((rarity) => rarities.add(rarity))
     if (player.alwaysNotifyIconic) rarities.add('Iconic')
+    if (player.alwaysNotifyMystic) rarities.add('Mystic')
   }
   return [...rarities]
 }
@@ -250,6 +254,7 @@ export function parseMarketplaceAlertRule(value: unknown): MarketplaceAlertRule 
           ...(Array.isArray(player.rarities) ? { rarities: rarityValues(player.rarities) } : {}),
           ...(player.noBidsOnly === true ? { noBidsOnly: true } : {}),
           ...(player.alwaysNotifyIconic === true ? { alwaysNotifyIconic: true } : {}),
+          ...(player.alwaysNotifyMystic === true ? { alwaysNotifyMystic: true } : {}),
         }
         return [[entityId, parsed] as const]
       })).values()]
@@ -384,8 +389,10 @@ export function marketplaceListingMatchesRule(
     : rule.rarities
   const rarity = marketplaceListingRarity(listing).toLowerCase()
   const iconicPriceOverride = player?.alwaysNotifyIconic === true && rarity === 'iconic'
+  const mysticPriceOverride = player?.alwaysNotifyMystic === true && rarity === 'mystic'
+  const priceOverride = iconicPriceOverride || mysticPriceOverride
   if (
-    !iconicPriceOverride &&
+    !priceOverride &&
     allowedRarities.length > 0 &&
     !allowedRarities.some((entry) => entry.toLowerCase() === rarity)
   ) {
@@ -399,7 +406,7 @@ export function marketplaceListingMatchesRule(
   if (rule.priceMax !== null && price > rule.priceMax) return false
   const pricePerRatingMax = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
   const rating = marketplaceListingRating(listing)
-  if (pricePerRatingMax !== null && !iconicPriceOverride) {
+  if (pricePerRatingMax !== null && !priceOverride) {
     if (
       rating === null ||
       rating <= 0 ||
@@ -429,6 +436,8 @@ export function createMarketplaceNotification(
   const maxPricePerRating = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
   const rarity = marketplaceListingRarity(listing)
   const iconicPriceOverride = player?.alwaysNotifyIconic === true && rarity.toLowerCase() === 'iconic'
+  const mysticPriceOverride = player?.alwaysNotifyMystic === true && rarity.toLowerCase() === 'mystic'
+  const priceOverride = iconicPriceOverride || mysticPriceOverride
   return {
     id: `${rule.id}:${listingId}`,
     ruleId: rule.id,
@@ -441,10 +450,11 @@ export function createMarketplaceNotification(
     rating,
     pricePerRating: rating && rating > 0 ? price / rating : null,
     maxPricePerRating,
-    maxAuctionPrice: iconicPriceOverride
+    maxAuctionPrice: priceOverride
       ? null
       : marketplaceMaximumBulkAuctionPrice(rating, maxPricePerRating),
     iconicPriceOverride,
+    mysticPriceOverride,
     numBids: Math.max(0, Number(listing.numBids ?? 0)),
     rarity,
     serialNumber: finiteNumber(listing.mintNumber ?? listing.card?.serialNumber, 1),

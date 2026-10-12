@@ -30,6 +30,7 @@ export function applyMarketplacePlayerSelection(
       ...(Array.isArray(current?.rarities) ? { rarities: current.rarities } : {}),
       ...(current?.noBidsOnly === true ? { noBidsOnly: true } : {}),
       ...(current?.alwaysNotifyIconic === true ? { alwaysNotifyIconic: true } : {}),
+      ...(current?.alwaysNotifyMystic === true ? { alwaysNotifyMystic: true } : {}),
     }]
   })
 }

@@ -93,6 +93,18 @@ describe('marketplace notification delivery', () => {
     expect(message).not.toContain('Max auction:')
   })
 
+  it('labels Mystic player overrides without showing an inapplicable price ceiling', () => {
+    const message = formatMarketplaceNotificationMessage('husain', [{
+      ...notification,
+      rarity: 'Mystic',
+      mysticPriceOverride: true,
+      maxPricePerRating: 35,
+      maxAuctionPrice: null,
+    }])
+    expect(message).toContain('Mystic · Mystic price override')
+    expect(message).not.toContain('Max auction:')
+  })
+
   it('includes a one-click Real auction link for a live numeric listing', () => {
     expect(formatMarketplaceNotificationMessage('husain', [{
       ...notification,

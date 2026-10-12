@@ -83,13 +83,13 @@ describe('marketplace rule parsing', () => {
       ...rule,
       players: [
         { entityId: 22490, name: ' Trevor Lawrence ' },
-        { entityId: 22490, name: 'Duplicate', rarityLabel: ' Legendary 4 ', pricePerRatingMax: 250, rarities: ['Epic', 'Fake'], noBidsOnly: true, alwaysNotifyIconic: true },
+        { entityId: 22490, name: 'Duplicate', rarityLabel: ' Legendary 4 ', pricePerRatingMax: 250, rarities: ['Epic', 'Fake'], noBidsOnly: true, alwaysNotifyIconic: true, alwaysNotifyMystic: true },
         { entityId: 'bad', name: 'Invalid' },
       ],
       pricePerRatingMax: 300,
     })).toMatchObject({
       pricePerRatingMax: 300,
-      players: [{ entityId: 22490, name: 'Duplicate', rarityLabel: 'Legendary 4', pricePerRatingMax: 250, rarities: ['Epic'], noBidsOnly: true, alwaysNotifyIconic: true }],
+      players: [{ entityId: 22490, name: 'Duplicate', rarityLabel: 'Legendary 4', pricePerRatingMax: 250, rarities: ['Epic'], noBidsOnly: true, alwaysNotifyIconic: true, alwaysNotifyMystic: true }],
     })
   })
 
@@ -129,6 +129,14 @@ describe('marketplace feed routing', () => {
       rarities: ['Rare'],
       players: [{ entityId: 22490, name: 'Trevor Lawrence', alwaysNotifyIconic: true }],
     })).toEqual(['Rare', 'Iconic'])
+  })
+
+  it('requests the Mystic feed for a player override even when defaults exclude it', () => {
+    expect(marketplaceRuleRarities({
+      ...rule,
+      rarities: ['Rare'],
+      players: [{ entityId: 22490, name: 'Trevor Lawrence', alwaysNotifyMystic: true }],
+    })).toEqual(['Rare', 'Mystic'])
   })
 
   it('matches card and all-types rules against their intended listings', () => {
@@ -346,6 +354,36 @@ describe('marketplace listing matching', () => {
     })
   })
 
+  it('allows a player-specific Mystic override through rarity and ratio filters', () => {
+    const mystic = {
+      ...listing,
+      listingType: 'userpassfull',
+      rarity: 6,
+      value: 50,
+      minBidPrice: 5000,
+      card: { ...listing.card, boostInfo: { rarityLabel: 'Mystic', progress: 8 } },
+    }
+    const playerRule = {
+      ...rule,
+      itemType: 'bulk' as const,
+      entityScope: 'ownedPlayers' as const,
+      priceMax: null,
+      pricePerRatingMax: 40,
+      rarities: ['Rare'] as MarketplaceAlertRule['rarities'],
+      players: [{ entityId: 22490, name: 'Trevor Lawrence', alwaysNotifyMystic: true }],
+    }
+    expect(marketplaceListingMatchesRule(playerRule, mystic)).toBe(true)
+    expect(marketplaceListingMatchesRule({
+      ...playerRule,
+      players: [{ entityId: 22490, name: 'Trevor Lawrence' }],
+    }, mystic)).toBe(false)
+    expect(createMarketplaceNotification(playerRule, mystic)).toMatchObject({
+      mysticPriceOverride: true,
+      maxPricePerRating: 40,
+      maxAuctionPrice: null,
+    })
+  })
+
   it('applies inclusive minimum and maximum prices', () => {
     expect(marketplaceListingMatchesRule({ ...rule, priceMin: 2000, priceMax: 2000 }, listing)).toBe(true)
     expect(marketplaceListingMatchesRule({ ...rule, priceMin: 2001 }, listing)).toBe(false)
@@ -441,6 +479,7 @@ describe('marketplace prices and notifications', () => {
       price: 2000, rating: null, pricePerRating: null,
       maxPricePerRating: null, maxAuctionPrice: null,
       iconicPriceOverride: false,
+      mysticPriceOverride: false,
       numBids: 0, rarity: 'Rare', serialNumber: 1707,
       endsAt: '2026-10-12T10:00:00.000Z', foundAt: '2026-10-12T09:50:00.000Z',
     })

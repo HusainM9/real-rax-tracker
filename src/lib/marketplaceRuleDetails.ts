@@ -28,6 +28,7 @@ export function marketplaceRuleTrackingDetails(rule: MarketplaceAlertRule) {
       const hasCustomPrice = player.pricePerRatingMax !== undefined
       const noBidsOnly = player.noBidsOnly === true
       const alwaysNotifyIconic = player.alwaysNotifyIconic === true
+      const alwaysNotifyMystic = player.alwaysNotifyMystic === true
       const effectiveRarities = hasCustomRarities ? player.rarities! : rule.rarities
       return {
         entityId: player.entityId,
@@ -39,6 +40,7 @@ export function marketplaceRuleTrackingDetails(rule: MarketplaceAlertRule) {
         hasCustomPrice,
         noBidsOnly,
         alwaysNotifyIconic,
+        alwaysNotifyMystic,
       }
     }),
   }

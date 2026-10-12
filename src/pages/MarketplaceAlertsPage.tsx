@@ -79,7 +79,8 @@ function hasCustomPlayerFilters(player: MarketplaceAlertPlayer): boolean {
   return player.pricePerRatingMax !== undefined ||
     Array.isArray(player.rarities) ||
     player.noBidsOnly === true ||
-    player.alwaysNotifyIconic === true
+    player.alwaysNotifyIconic === true ||
+    player.alwaysNotifyMystic === true
 }
 
 function ruleSummary(rule: MarketplaceAlertRule): string {
@@ -142,8 +143,9 @@ function RuleTrackingPanel({ rule }: { rule: MarketplaceAlertRule }) {
                 <strong>{[
                   player.noBidsOnly ? 'No bids only' : null,
                   player.alwaysNotifyIconic ? 'Any Iconic price' : null,
+                  player.alwaysNotifyMystic ? 'Any Mystic price' : null,
                 ].filter(Boolean).join(' · ') || 'None'}</strong>
-                {(player.noBidsOnly || player.alwaysNotifyIconic) ? <em>Custom</em> : null}
+                {(player.noBidsOnly || player.alwaysNotifyIconic || player.alwaysNotifyMystic) ? <em>Custom</em> : null}
               </div>
             </div>
           ))}
@@ -566,6 +568,7 @@ export default function MarketplaceAlertsPage() {
                       <div className="marketplace-player-specific-options">
                         <label className="marketplace-simple-check"><input type="checkbox" checked={editingPlayer.noBidsOnly === true} onChange={(event) => updatePlayer(editingPlayer.entityId, (player) => ({ ...player, noBidsOnly: event.target.checked || undefined }))} /><span>Only listings with no bids for this player</span></label>
                         <label className="marketplace-simple-check"><input type="checkbox" checked={editingPlayer.alwaysNotifyIconic === true} onChange={(event) => updatePlayer(editingPlayer.entityId, (player) => ({ ...player, alwaysNotifyIconic: event.target.checked || undefined }))} /><span>Always notify for Iconic <small>Ignores rarity and RAX/rating limits.</small></span></label>
+                        <label className="marketplace-simple-check"><input type="checkbox" checked={editingPlayer.alwaysNotifyMystic === true} onChange={(event) => updatePlayer(editingPlayer.entityId, (player) => ({ ...player, alwaysNotifyMystic: event.target.checked || undefined }))} /><span>Always notify for Mystic <small>Ignores rarity and RAX/rating limits.</small></span></label>
                       </div>
                     </div>
                   ) : null}
@@ -674,7 +677,7 @@ export default function MarketplaceAlertsPage() {
                   <div className="marketplace-notification-copy">
                     <span>{item.ruleName}</span>
                     <h3>{item.playerName}</h3>
-                    <p>Bulk rating auction · {item.sport.toUpperCase()} {item.season} · {item.rarity || 'Any rarity'} · {item.iconicPriceOverride ? 'Iconic price override · ' : ''}{item.rating != null ? `${item.rating} bulk rating · ` : ''}{item.pricePerRating != null ? `${item.pricePerRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} RAX/rating · ` : ''}{item.numBids} bid{item.numBids === 1 ? '' : 's'}</p>
+                    <p>Bulk rating auction · {item.sport.toUpperCase()} {item.season} · {item.rarity || 'Any rarity'} · {item.iconicPriceOverride ? 'Iconic price override · ' : ''}{item.mysticPriceOverride ? 'Mystic price override · ' : ''}{item.rating != null ? `${item.rating} bulk rating · ` : ''}{item.pricePerRating != null ? `${item.pricePerRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} RAX/rating · ` : ''}{item.numBids} bid{item.numBids === 1 ? '' : 's'}</p>
                   </div>
                   <div className="marketplace-notification-price">
                     <strong>{item.price.toLocaleString()}</strong>
