@@ -30,8 +30,10 @@ describe('marketplace player selection', () => {
       name: 'A.J. Brown',
       pricePerRatingMax: 35,
       rarities: ['Iconic'],
+      noBidsOnly: true,
+      alwaysNotifyIconic: true,
     }], [3, 2])).toEqual([
-      { entityId: 2, name: 'A.J. Brown', rarityLabel: 'Iconic 1', pricePerRatingMax: 35, rarities: ['Iconic'] },
+      { entityId: 2, name: 'A.J. Brown', rarityLabel: 'Iconic 1', pricePerRatingMax: 35, rarities: ['Iconic'], noBidsOnly: true, alwaysNotifyIconic: true },
       { entityId: 3, name: 'Baker Mayfield', rarityLabel: 'Epic 4' },
     ])
   })

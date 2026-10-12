@@ -9,7 +9,7 @@ const rule: MarketplaceAlertRule = {
     { entityId: 1, name: 'Default Player', rarityLabel: 'Rare 3' },
     { entityId: 2, name: 'Custom Price', pricePerRatingMax: 25 },
     { entityId: 3, name: 'All Rarities', rarities: [] },
-    { entityId: 4, name: 'Two Rarities', rarities: ['Rare', 'Epic'] },
+    { entityId: 4, name: 'Two Rarities', rarities: ['Rare', 'Epic'], noBidsOnly: true, alwaysNotifyIconic: true },
   ],
   ratingMin: 10,
   ratingMax: 100,
@@ -33,10 +33,10 @@ describe('marketplace rule tracking details', () => {
       noBids: true,
     })
     expect(details.players).toEqual([
-      expect.objectContaining({ name: 'Default Player', rarities: 'Legendary', maxRaxPerRating: 40, hasCustomRarities: false, hasCustomPrice: false }),
+      expect.objectContaining({ name: 'Default Player', rarities: 'Legendary', maxRaxPerRating: 40, hasCustomRarities: false, hasCustomPrice: false, noBidsOnly: false, alwaysNotifyIconic: false }),
       expect.objectContaining({ name: 'Custom Price', rarities: 'Legendary', maxRaxPerRating: 25, hasCustomRarities: false, hasCustomPrice: true }),
       expect.objectContaining({ name: 'All Rarities', rarities: 'All rarities', maxRaxPerRating: 40, hasCustomRarities: true, hasCustomPrice: false }),
-      expect.objectContaining({ name: 'Two Rarities', rarities: 'Rare, Epic', maxRaxPerRating: 40, hasCustomRarities: true, hasCustomPrice: false }),
+      expect.objectContaining({ name: 'Two Rarities', rarities: 'Rare, Epic', maxRaxPerRating: 40, hasCustomRarities: true, hasCustomPrice: false, noBidsOnly: true, alwaysNotifyIconic: true }),
     ])
   })
 

@@ -10,6 +10,7 @@ import {
   marketplaceListingRarity,
   marketplaceListingRating,
   marketplaceListingUrl,
+  marketplaceRuleRarities,
   parseMarketplaceAlertRule,
   type MarketplaceAlertRule,
   type MarketplaceListing,
@@ -82,13 +83,13 @@ describe('marketplace rule parsing', () => {
       ...rule,
       players: [
         { entityId: 22490, name: ' Trevor Lawrence ' },
-        { entityId: 22490, name: 'Duplicate', rarityLabel: ' Legendary 4 ', pricePerRatingMax: 250, rarities: ['Epic', 'Fake'] },
+        { entityId: 22490, name: 'Duplicate', rarityLabel: ' Legendary 4 ', pricePerRatingMax: 250, rarities: ['Epic', 'Fake'], noBidsOnly: true, alwaysNotifyIconic: true },
         { entityId: 'bad', name: 'Invalid' },
       ],
       pricePerRatingMax: 300,
     })).toMatchObject({
       pricePerRatingMax: 300,
-      players: [{ entityId: 22490, name: 'Duplicate', rarityLabel: 'Legendary 4', pricePerRatingMax: 250, rarities: ['Epic'] }],
+      players: [{ entityId: 22490, name: 'Duplicate', rarityLabel: 'Legendary 4', pricePerRatingMax: 250, rarities: ['Epic'], noBidsOnly: true, alwaysNotifyIconic: true }],
     })
   })
 
@@ -120,6 +121,14 @@ describe('marketplace feed routing', () => {
     expect(marketplaceListingMatchesRule(rule, bulkListing)).toBe(false)
     expect(marketplaceListingMatchesRule({ ...rule, itemType: 'bulk' }, bulkListing)).toBe(true)
     expect(marketplaceListingMatchesRule({ ...rule, itemType: 'bulk' }, listing)).toBe(false)
+  })
+
+  it('requests the Iconic feed for a player override even when defaults exclude it', () => {
+    expect(marketplaceRuleRarities({
+      ...rule,
+      rarities: ['Rare'],
+      players: [{ entityId: 22490, name: 'Trevor Lawrence', alwaysNotifyIconic: true }],
+    })).toEqual(['Rare', 'Iconic'])
   })
 
   it('matches card and all-types rules against their intended listings', () => {
@@ -284,6 +293,59 @@ describe('marketplace listing matching', () => {
     }, { ...rated, card: { ...rated.card, boostInfo: { rarityLabel: 'Mystic', progress: 8 } } })).toBe(true)
   })
 
+  it('can require no bids for one player without changing the alert default', () => {
+    const rated = {
+      ...listing,
+      listingType: 'userpassfull',
+      numBids: 1,
+      currentBidAmount: 2000,
+      value: 50,
+    }
+    const playerRule = {
+      ...rule,
+      itemType: 'bulk' as const,
+      entityScope: 'ownedPlayers' as const,
+      noBids: false,
+      priceMax: null,
+      players: [{ entityId: 22490, name: 'Trevor Lawrence', noBidsOnly: true }],
+    }
+    expect(marketplaceListingMatchesRule(playerRule, rated)).toBe(false)
+    expect(marketplaceListingMatchesRule({
+      ...playerRule,
+      players: [{ entityId: 22490, name: 'Trevor Lawrence' }],
+    }, rated)).toBe(true)
+  })
+
+  it('allows a player-specific Iconic override through rarity and ratio filters', () => {
+    const iconic = {
+      ...listing,
+      listingType: 'userpassfull',
+      rarity: 7,
+      value: 50,
+      minBidPrice: 5000,
+      card: { ...listing.card, boostInfo: { rarityLabel: 'Iconic', progress: 8 } },
+    }
+    const playerRule = {
+      ...rule,
+      itemType: 'bulk' as const,
+      entityScope: 'ownedPlayers' as const,
+      priceMax: null,
+      pricePerRatingMax: 40,
+      rarities: ['Rare'] as MarketplaceAlertRule['rarities'],
+      players: [{ entityId: 22490, name: 'Trevor Lawrence', alwaysNotifyIconic: true }],
+    }
+    expect(marketplaceListingMatchesRule(playerRule, iconic)).toBe(true)
+    expect(marketplaceListingMatchesRule({
+      ...playerRule,
+      players: [{ entityId: 22490, name: 'Trevor Lawrence' }],
+    }, iconic)).toBe(false)
+    expect(createMarketplaceNotification(playerRule, iconic)).toMatchObject({
+      iconicPriceOverride: true,
+      maxPricePerRating: 40,
+      maxAuctionPrice: null,
+    })
+  })
+
   it('applies inclusive minimum and maximum prices', () => {
     expect(marketplaceListingMatchesRule({ ...rule, priceMin: 2000, priceMax: 2000 }, listing)).toBe(true)
     expect(marketplaceListingMatchesRule({ ...rule, priceMin: 2001 }, listing)).toBe(false)
@@ -378,6 +440,7 @@ describe('marketplace prices and notifications', () => {
       listingId: '1457616609', playerName: 'Trevor Lawrence', sport: 'nfl', season: 2026,
       price: 2000, rating: null, pricePerRating: null,
       maxPricePerRating: null, maxAuctionPrice: null,
+      iconicPriceOverride: false,
       numBids: 0, rarity: 'Rare', serialNumber: 1707,
       endsAt: '2026-10-12T10:00:00.000Z', foundAt: '2026-10-12T09:50:00.000Z',
     })

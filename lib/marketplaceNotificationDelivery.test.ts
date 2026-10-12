@@ -81,6 +81,18 @@ describe('marketplace notification delivery', () => {
     expect(message).toContain('Max auction: 3,200 RAX (35 + 1 allowance per rating)')
   })
 
+  it('labels Iconic player overrides without showing an inapplicable price ceiling', () => {
+    const message = formatMarketplaceNotificationMessage('husain', [{
+      ...notification,
+      rarity: 'Iconic',
+      iconicPriceOverride: true,
+      maxPricePerRating: 35,
+      maxAuctionPrice: null,
+    }])
+    expect(message).toContain('Iconic · Iconic price override')
+    expect(message).not.toContain('Max auction:')
+  })
+
   it('includes a one-click Real auction link for a live numeric listing', () => {
     expect(formatMarketplaceNotificationMessage('husain', [{
       ...notification,

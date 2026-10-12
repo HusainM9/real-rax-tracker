@@ -26,6 +26,8 @@ export function marketplaceRuleTrackingDetails(rule: MarketplaceAlertRule) {
     players: (rule.players ?? []).map((player) => {
       const hasCustomRarities = Array.isArray(player.rarities)
       const hasCustomPrice = player.pricePerRatingMax !== undefined
+      const noBidsOnly = player.noBidsOnly === true
+      const alwaysNotifyIconic = player.alwaysNotifyIconic === true
       const effectiveRarities = hasCustomRarities ? player.rarities! : rule.rarities
       return {
         entityId: player.entityId,
@@ -35,6 +37,8 @@ export function marketplaceRuleTrackingDetails(rule: MarketplaceAlertRule) {
         maxRaxPerRating: player.pricePerRatingMax ?? rule.pricePerRatingMax ?? null,
         hasCustomRarities,
         hasCustomPrice,
+        noBidsOnly,
+        alwaysNotifyIconic,
       }
     }),
   }

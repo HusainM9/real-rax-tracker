@@ -19,6 +19,7 @@ function describeNotification(notification: MarketplaceAlertNotification): strin
       : null,
     `${notification.numBids} bid${notification.numBids === 1 ? '' : 's'}`,
     notification.rarity || null,
+    notification.iconicPriceOverride ? 'Iconic price override' : null,
     notification.serialNumber ? `#${notification.serialNumber}` : null,
   ].filter(Boolean)
   const auctionUrl = marketplaceListingUrl(notification.listingId)

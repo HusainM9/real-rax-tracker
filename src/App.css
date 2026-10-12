@@ -5699,7 +5699,7 @@ button.linkish {
 
 .marketplace-rule-player-row {
   display: grid;
-  grid-template-columns: minmax(9rem, 1.3fr) minmax(7.5rem, 1fr) minmax(8rem, 1fr);
+  grid-template-columns: minmax(9rem, 1.3fr) minmax(7.5rem, 1fr) minmax(8rem, 1fr) minmax(8rem, 1fr);
   gap: 0.8rem;
   align-items: center;
   padding: 0.75rem 0;
@@ -6277,6 +6277,34 @@ button.linkish {
   text-transform: none;
 }
 
+.marketplace-player-specific-options {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding-top: 0.2rem;
+}
+
+.marketplace-player-specific-options .marketplace-simple-check {
+  align-items: flex-start;
+  min-height: 3.1rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.marketplace-player-specific-options .marketplace-simple-check span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.marketplace-player-specific-options .marketplace-simple-check small {
+  color: #858581;
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
 .marketplace-field-help {
   display: block;
   margin-top: 0.35rem;
@@ -6330,6 +6358,7 @@ button.linkish {
   .marketplace-real-user-loader { grid-template-columns: 1fr; }
   .marketplace-real-user-loader > .button { width: 100%; }
   .marketplace-player-editor { grid-template-columns: 1fr; }
+  .marketplace-player-specific-options { grid-template-columns: 1fr; }
   .marketplace-player-editor-heading { align-items: flex-start; flex-direction: column; }
   .marketplace-rarity-picker legend { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
 }

@@ -75,6 +75,13 @@ function createId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `market-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function hasCustomPlayerFilters(player: MarketplaceAlertPlayer): boolean {
+  return player.pricePerRatingMax !== undefined ||
+    Array.isArray(player.rarities) ||
+    player.noBidsOnly === true ||
+    player.alwaysNotifyIconic === true
+}
+
 function ruleSummary(rule: MarketplaceAlertRule): string {
   const playerCount = rule.players?.length ?? 0
   const parts = [
@@ -83,9 +90,7 @@ function ruleSummary(rule: MarketplaceAlertRule): string {
     rule.rarities.length > 0 ? rule.rarities.join(', ') : 'all rarities',
   ]
   if (rule.pricePerRatingMax != null) parts.push(`≤ ${rule.pricePerRatingMax.toLocaleString()} RAX/rating`)
-  const customPlayers = rule.players?.filter((player) =>
-    player.pricePerRatingMax !== undefined || Array.isArray(player.rarities),
-  ).length ?? 0
+  const customPlayers = rule.players?.filter(hasCustomPlayerFilters).length ?? 0
   if (customPlayers > 0) parts.push(`${customPlayers} custom`)
   if (rule.noBids) parts.push('no bids')
   return parts.join(' · ')
@@ -131,6 +136,14 @@ function RuleTrackingPanel({ rule }: { rule: MarketplaceAlertRule }) {
                 <span>Rarities</span>
                 <strong>{player.rarities}</strong>
                 {player.hasCustomRarities ? <em>Custom</em> : null}
+              </div>
+              <div className="marketplace-rule-player-setting">
+                <span>Player overrides</span>
+                <strong>{[
+                  player.noBidsOnly ? 'No bids only' : null,
+                  player.alwaysNotifyIconic ? 'Any Iconic price' : null,
+                ].filter(Boolean).join(' · ') || 'None'}</strong>
+                {(player.noBidsOnly || player.alwaysNotifyIconic) ? <em>Custom</em> : null}
               </div>
             </div>
           ))}
@@ -538,7 +551,7 @@ export default function MarketplaceAlertsPage() {
                       <span key={player.entityId} className="marketplace-player-chip">
                         <span>{player.name}</span>
                         {player.rarityLabel ? <b>{player.rarityLabel}</b> : null}
-                        {(player.pricePerRatingMax !== undefined || Array.isArray(player.rarities)) ? <i title="Custom filters">Custom</i> : null}
+                        {hasCustomPlayerFilters(player) ? <i title="Custom filters">Custom</i> : null}
                         <button className="edit" type="button" aria-label={`Edit filters for ${player.name}`} onClick={() => setEditingPlayerId(editingPlayerId === player.entityId ? null : player.entityId)}>✎</button>
                         <button type="button" aria-label={`Remove ${player.name}`} onClick={() => { setDraft({ ...draft, players: draft.players.filter((entry) => entry.entityId !== player.entityId) }); if (editingPlayerId === player.entityId) setEditingPlayerId(null) }}>×</button>
                       </span>
@@ -550,6 +563,10 @@ export default function MarketplaceAlertsPage() {
                       <div className="marketplace-player-editor-heading"><div><span>Player filters</span><strong>{editingPlayer.name}</strong></div><button type="button" onClick={() => updatePlayer(editingPlayer.entityId, (player) => ({ entityId: player.entityId, name: player.name, ...(player.rarityLabel ? { rarityLabel: player.rarityLabel } : {}) }))}>Use alert defaults</button></div>
                       <label className="field"><span>Maximum RAX per rating <small>Overrides the alert default</small></span><div className="marketplace-price-input"><input type="number" min="0" step="0.01" placeholder={draft.pricePerRatingMax == null ? 'No default' : String(draft.pricePerRatingMax)} value={editingPlayer.pricePerRatingMax ?? ''} onChange={(event) => { const value = numberOrNull(event.target.value); updatePlayer(editingPlayer.entityId, (player) => ({ ...player, pricePerRatingMax: value ?? undefined })) }} /><span>RAX</span></div></label>
                       <fieldset className="marketplace-filter-group marketplace-rarity-picker"><legend>Player rarity <small>{Array.isArray(editingPlayer.rarities) ? 'Custom selection; empty means all.' : 'Using alert defaults.'}</small></legend><div className="marketplace-chip-grid">{MARKETPLACE_RARITIES.map((rarity) => { const selected = (editingPlayer.rarities ?? draft.rarities).includes(rarity); return <label key={rarity} className={`marketplace-filter-chip${selected ? ' selected' : ''}`}><input type="checkbox" checked={selected} onChange={() => { const current = editingPlayer.rarities ?? draft.rarities; const next = current.includes(rarity) ? current.filter((entry) => entry !== rarity) : [...current, rarity] as MarketplaceRarity[]; updatePlayer(editingPlayer.entityId, (player) => ({ ...player, rarities: next })) }} /><span>{rarity}</span></label> })}</div></fieldset>
+                      <div className="marketplace-player-specific-options">
+                        <label className="marketplace-simple-check"><input type="checkbox" checked={editingPlayer.noBidsOnly === true} onChange={(event) => updatePlayer(editingPlayer.entityId, (player) => ({ ...player, noBidsOnly: event.target.checked || undefined }))} /><span>Only listings with no bids for this player</span></label>
+                        <label className="marketplace-simple-check"><input type="checkbox" checked={editingPlayer.alwaysNotifyIconic === true} onChange={(event) => updatePlayer(editingPlayer.entityId, (player) => ({ ...player, alwaysNotifyIconic: event.target.checked || undefined }))} /><span>Always notify for Iconic <small>Ignores rarity and RAX/rating limits.</small></span></label>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -657,7 +674,7 @@ export default function MarketplaceAlertsPage() {
                   <div className="marketplace-notification-copy">
                     <span>{item.ruleName}</span>
                     <h3>{item.playerName}</h3>
-                    <p>Bulk rating auction · {item.sport.toUpperCase()} {item.season} · {item.rarity || 'Any rarity'} · {item.rating != null ? `${item.rating} bulk rating · ` : ''}{item.pricePerRating != null ? `${item.pricePerRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} RAX/rating · ` : ''}{item.numBids} bid{item.numBids === 1 ? '' : 's'}</p>
+                    <p>Bulk rating auction · {item.sport.toUpperCase()} {item.season} · {item.rarity || 'Any rarity'} · {item.iconicPriceOverride ? 'Iconic price override · ' : ''}{item.rating != null ? `${item.rating} bulk rating · ` : ''}{item.pricePerRating != null ? `${item.pricePerRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} RAX/rating · ` : ''}{item.numBids} bid{item.numBids === 1 ? '' : 's'}</p>
                   </div>
                   <div className="marketplace-notification-price">
                     <strong>{item.price.toLocaleString()}</strong>
