@@ -1,0 +1,2 @@
+# Test sources belong in Git, but should never become Vercel Functions.
+**/*.test.ts
