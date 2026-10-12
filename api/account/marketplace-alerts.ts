@@ -6,11 +6,17 @@ import {
   saveMarketplaceAlertRules,
 } from '../../lib/marketplaceAlertStore'
 import { parseMarketplaceAlertRule, type MarketplaceAlertRule } from '../../lib/marketplaceAlerts'
+import { requireEarningsSession } from '../../lib/earningsAuth'
 import { requireAccountSession } from '../admin/_helpers'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'PUT') {
+    return new Response('Method Not Allowed', { status: 405 })
+  }
+  const accessError = await requireEarningsSession(request, 'Marketplace')
+  if (accessError) return accessError
   const session = await requireAccountSession(request)
   if (session instanceof Response) return session
   if (!marketplaceAlertStorageConfigured()) {

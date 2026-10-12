@@ -1,5 +1,6 @@
 import { readMarketplaceAlertRules, readMarketplaceNotifications } from '../../lib/marketplaceAlertStore'
 import { scanMarketplaceAlerts } from '../../lib/marketplaceMonitor'
+import { requireEarningsSession } from '../../lib/earningsAuth'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
 import { requireAccountSession } from '../admin/_helpers'
 
@@ -7,6 +8,8 @@ export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+  const accessError = await requireEarningsSession(request, 'Marketplace')
+  if (accessError) return accessError
   const session = await requireAccountSession(request)
   if (session instanceof Response) return session
   const config = resolveRealApiConfig()

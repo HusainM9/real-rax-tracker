@@ -86,7 +86,7 @@ export default function App() {
                   <Route path="/plan/packs" element={<Navigate to="/packs" replace />} />
                   <Route path="/cards" element={<CardsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/marketplace" element={<MarketplaceAlertsPage />} />
+                  <Route path="/marketplace" element={<RequireEarnings feature="marketplace"><MarketplaceAlertsPage /></RequireEarnings>} />
                   <Route path="/sell" element={<SellPage />} />
                   <Route path="/help" element={<HelpPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

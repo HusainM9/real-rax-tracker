@@ -47,9 +47,12 @@ export async function hasEarningsSession(request: Request): Promise<boolean> {
   return verifyEarningsSessionToken(readCookie(request, COOKIE_NAME))
 }
 
-export async function requireEarningsSession(request: Request): Promise<Response | null> {
+export async function requireEarningsSession(
+  request: Request,
+  featureName = 'Earnings',
+): Promise<Response | null> {
   if (await hasEarningsSession(request)) return null
-  return Response.json({ error: 'Earnings access required.' }, { status: 401 })
+  return Response.json({ error: `${featureName} access required.` }, { status: 401 })
 }
 
 export function buildEarningsCookieHeader(token: string): string {

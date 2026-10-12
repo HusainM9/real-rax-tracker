@@ -2,7 +2,42 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 type Status = 'loading' | 'locked' | 'authenticated'
 
-export default function RequireEarnings({ children }: { children: ReactNode }) {
+type ProtectedFeature = 'earnings' | 'marketplace'
+
+const FEATURE_COPY: Record<ProtectedFeature, {
+  eyebrow: string
+  previewTitle: string
+  previewDescription: string
+  dialogTitle: string
+  dialogDescription: string
+  buttonLabel: string
+}> = {
+  earnings: {
+    eyebrow: 'Earnings report',
+    previewTitle: 'Daily player-card earnings',
+    previewDescription: 'Unlock this private report to view linked-account earnings and statistics.',
+    dialogTitle: 'Unlock Earnings',
+    dialogDescription: 'Enter the private access password to view linked-account reports.',
+    buttonLabel: 'Open Earnings',
+  },
+  marketplace: {
+    eyebrow: 'Marketplace alerts',
+    previewTitle: 'Private listing monitor',
+    previewDescription: 'Unlock this private tool to manage filters, scans, and listing alerts.',
+    dialogTitle: 'Unlock Marketplace',
+    dialogDescription: 'Enter the private access password to manage marketplace alerts.',
+    buttonLabel: 'Open Marketplace',
+  },
+}
+
+export default function RequireEarnings({
+  children,
+  feature = 'earnings',
+}: {
+  children: ReactNode
+  feature?: ProtectedFeature
+}) {
+  const copy = FEATURE_COPY[feature]
   const [status, setStatus] = useState<Status>('loading')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -41,7 +76,7 @@ export default function RequireEarnings({ children }: { children: ReactNode }) {
       })
       const data = (await response.json().catch(() => null)) as { error?: string } | null
       if (!response.ok) {
-        setError(data?.error || 'Could not unlock Earnings.')
+        setError(data?.error || `Could not unlock ${copy.dialogTitle.replace('Unlock ', '')}.`)
         return
       }
       setStatus('authenticated')
@@ -57,9 +92,9 @@ export default function RequireEarnings({ children }: { children: ReactNode }) {
   return (
     <div className="earnings-lock-shell">
       <section className="earnings-lock-preview" aria-hidden="true">
-        <p className="eyebrow">Earnings report</p>
-        <h1>Daily player-card earnings</h1>
-        <p>Unlock this private report to view linked-account earnings and statistics.</p>
+        <p className="eyebrow">{copy.eyebrow}</p>
+        <h1>{copy.previewTitle}</h1>
+        <p>{copy.previewDescription}</p>
       </section>
       <div className="app-modal-backdrop earnings-access-backdrop">
         <section
@@ -68,9 +103,9 @@ export default function RequireEarnings({ children }: { children: ReactNode }) {
           aria-modal="true"
           aria-labelledby="earnings-access-title"
         >
-          <p className="eyebrow">Earnings access required</p>
-          <h1 id="earnings-access-title">Unlock Earnings</h1>
-          <p className="auth-lead">Enter the Earnings password to view linked-account reports.</p>
+          <p className="eyebrow">Private access required</p>
+          <h1 id="earnings-access-title">{copy.dialogTitle}</h1>
+          <p className="auth-lead">{copy.dialogDescription}</p>
           {status === 'loading' ? (
             <p className="auth-status">Checking access…</p>
           ) : (
@@ -88,7 +123,7 @@ export default function RequireEarnings({ children }: { children: ReactNode }) {
               </label>
               {error ? <p className="auth-error" role="alert">{error}</p> : null}
               <button className="button primary auth-submit" type="submit" disabled={submitting || !password}>
-                {submitting ? 'Unlocking…' : 'Open Earnings'}
+                {submitting ? 'Unlocking…' : copy.buttonLabel}
               </button>
             </form>
           )}

@@ -88,12 +88,15 @@ export default async function middleware(request: Request) {
 
   if (
     pathname === '/api/account/earnings' ||
-    pathname === '/api/account/earnings-tracking'
+    pathname === '/api/account/earnings-tracking' ||
+    pathname === '/api/account/marketplace-alerts' ||
+    pathname === '/api/account/marketplace-scan'
   ) {
     const token = readCookie(request, getEarningsCookieName())
     if (await verifyEarningsSessionToken(token)) return next()
     if (pathname.startsWith('/api/')) {
-      return Response.json({ error: 'Earnings access required.' }, { status: 401 })
+      const label = pathname.includes('/marketplace-') ? 'Marketplace' : 'Earnings'
+      return Response.json({ error: `${label} access required.` }, { status: 401 })
     }
   }
 

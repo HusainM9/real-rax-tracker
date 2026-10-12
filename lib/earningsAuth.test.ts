@@ -5,6 +5,7 @@ import {
   earningsPasswordMatches,
   getEarningsCookieName,
   hasEarningsSession,
+  requireEarningsSession,
   verifyEarningsSessionToken,
 } from './earningsAuth'
 
@@ -36,5 +37,15 @@ describe('earningsAuth', () => {
   it('does not bypass earnings access without its signed cookie', async () => {
     process.env.AUTH_SESSION_SECRET = 'session-secret'
     await expect(hasEarningsSession(new Request('http://localhost/earnings'))).resolves.toBe(false)
+  })
+
+  it('can protect Marketplace with the same signed access session', async () => {
+    process.env.AUTH_SESSION_SECRET = 'session-secret'
+    const response = await requireEarningsSession(
+      new Request('http://localhost/marketplace'),
+      'Marketplace',
+    )
+    expect(response?.status).toBe(401)
+    await expect(response?.json()).resolves.toEqual({ error: 'Marketplace access required.' })
   })
 })

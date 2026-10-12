@@ -44,9 +44,9 @@ export default function ProfilePage() {
             <p className="profile-blurb">{snapshot.blurb}</p>
           </div>
           <div className="profile-hero-actions">
-            <Link className="profile-earnings-cta" to="/marketplace">
-              <span>Marketplace</span>
-              <strong>Listing alerts →</strong>
+            <Link className="profile-earnings-cta profile-marketplace-cta" to="/marketplace">
+              <span>Marketplace alerts</span>
+              <strong>Open marketplace →</strong>
             </Link>
             <Link className="profile-earnings-cta" to="/earnings">
               <span>Daily RAX</span>

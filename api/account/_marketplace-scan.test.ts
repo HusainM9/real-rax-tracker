@@ -3,6 +3,7 @@ import type { MarketplaceAlertNotification, MarketplaceAlertRule } from '../../l
 
 const mocks = vi.hoisted(() => ({
   requireAccountSession: vi.fn(),
+  requireEarningsSession: vi.fn(),
   resolveRealApiConfig: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
   readMarketplaceNotifications: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../admin/_helpers', () => ({ requireAccountSession: mocks.requireAccountSession }))
+vi.mock('../../lib/earningsAuth', () => ({ requireEarningsSession: mocks.requireEarningsSession }))
 vi.mock('../../lib/realApi', () => ({ resolveRealApiConfig: mocks.resolveRealApiConfig }))
 vi.mock('../../lib/marketplaceAlertStore', () => ({
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
@@ -24,6 +26,7 @@ const fresh = { id: 'rule-1:listing-1' } as MarketplaceAlertNotification
 const older = { id: 'rule-1:listing-old' } as MarketplaceAlertNotification
 
 beforeEach(() => {
+  mocks.requireEarningsSession.mockReset().mockResolvedValue(null)
   mocks.requireAccountSession.mockReset().mockResolvedValue({ username: 'husain' })
   mocks.resolveRealApiConfig.mockReset().mockReturnValue({ baseUrl: 'https://web.realapp.com' })
   mocks.readMarketplaceAlertRules.mockReset().mockResolvedValue([rule])
@@ -44,6 +47,16 @@ describe('account marketplace scan endpoint', () => {
     mocks.requireAccountSession.mockResolvedValue(Response.json({ error: 'Account login required' }, { status: 401 }))
     const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
     expect(response.status).toBe(401)
+  })
+
+  it('requires the shared private access session before account access', async () => {
+    mocks.requireEarningsSession.mockResolvedValue(
+      Response.json({ error: 'Marketplace access required.' }, { status: 401 }),
+    )
+    const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Marketplace access required.' })
+    expect(mocks.requireAccountSession).not.toHaveBeenCalled()
   })
 
   it('requires a configured Real transport session', async () => {
