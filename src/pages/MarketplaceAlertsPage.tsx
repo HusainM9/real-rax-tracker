@@ -18,6 +18,11 @@ import {
 } from '../lib/marketplaceAlertsApi'
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
+import {
+  applyMarketplacePlayerSelection,
+  filterMarketplacePlayers,
+  initialMarketplacePlayerSelection,
+} from '../lib/marketplacePlayerSelection'
 import { fetchRealUserPasses } from '../lib/realPassImport'
 import { SPORTS } from '../types/rax'
 
@@ -28,6 +33,7 @@ type Draft = Omit<MarketplaceAlertRule, 'id' | 'createdAt' | 'updatedAt' | 'enab
 
 const currentSeason = new Date().getUTCFullYear()
 const PLAYER_PAGE_SIZE = 12
+const PLAYER_PICKER_PAGE_SIZE = 16
 const initialDraft: Draft = {
   name: '',
   sport: 'nfl',
@@ -107,6 +113,11 @@ export default function MarketplaceAlertsPage() {
   const [status, setStatus] = useState('Loading alerts…')
   const [busy, setBusy] = useState(false)
   const [playersBusy, setPlayersBusy] = useState(false)
+  const [availablePlayers, setAvailablePlayers] = useState<MarketplaceAlertPlayer[]>([])
+  const [playerPickerOpen, setPlayerPickerOpen] = useState(false)
+  const [pickerSelectedIds, setPickerSelectedIds] = useState<number[]>([])
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [pickerPage, setPickerPage] = useState(1)
   const [playerPage, setPlayerPage] = useState(1)
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
@@ -123,9 +134,11 @@ export default function MarketplaceAlertsPage() {
   useEffect(() => {
     const cached = getCachedMarketplacePlayers(realUsername, draft.sport, draft.season)
     if (!cached) {
+      setAvailablePlayers([])
       setPlayersLoadedAt(null)
       return
     }
+    setAvailablePlayers(cached.players)
     setDraft((current) => current.players.length > 0
       ? current
       : { ...current, players: cached.players })
@@ -133,6 +146,15 @@ export default function MarketplaceAlertsPage() {
     setPlayerPage(1)
     setEditingPlayerId(null)
   }, [realUsername, draft.sport, draft.season])
+
+  useEffect(() => {
+    if (!playerPickerOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPlayerPickerOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [playerPickerOpen])
 
   useEffect(() => {
     let active = true
@@ -171,12 +193,14 @@ export default function MarketplaceAlertsPage() {
       const players = realOwnedMarketplacePlayers(result, draft.sport, draft.season)
       const loadedAt = new Date().toISOString()
       const cached = saveCachedMarketplacePlayers(username, draft.sport, draft.season, players, loadedAt)
-      setDraft((current) => ({ ...current, players }))
+      setAvailablePlayers(players)
+      setPickerSelectedIds(initialMarketplacePlayerSelection(players, draft.players))
+      setPickerQuery('')
+      setPickerPage(1)
+      setPlayerPickerOpen(players.length > 0)
       setPlayersLoadedAt(loadedAt)
-      setPlayerPage(1)
-      setEditingPlayerId(null)
       setStatus(players.length > 0
-        ? `Loaded ${players.length} owned ${draft.sport.toUpperCase()} player${players.length === 1 ? '' : 's'} from @${username}${cached ? ' and saved them on this device' : ''}.`
+        ? `Loaded ${players.length} owned ${draft.sport.toUpperCase()} player${players.length === 1 ? '' : 's'} from @${username}${cached ? ' and saved them on this device' : ''}. Choose the players to monitor.`
         : `No owned ${draft.sport.toUpperCase()} players were found for @${username} in ${draft.season}.`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not load owned players.')
@@ -217,6 +241,7 @@ export default function MarketplaceAlertsPage() {
   }
 
   const editRule = (rule: MarketplaceAlertRule) => {
+    setAvailablePlayers(rule.players ?? [])
     setDraft({
       name: rule.name,
       sport: rule.sport,
@@ -310,6 +335,29 @@ export default function MarketplaceAlertsPage() {
     resolvedPlayerPage * PLAYER_PAGE_SIZE,
   )
   const editingPlayer = draft.players.find((player) => player.entityId === editingPlayerId)
+  const filteredPickerPlayers = filterMarketplacePlayers(availablePlayers, pickerQuery)
+  const pickerPageCount = Math.max(1, Math.ceil(filteredPickerPlayers.length / PLAYER_PICKER_PAGE_SIZE))
+  const resolvedPickerPage = Math.min(pickerPage, pickerPageCount)
+  const paginatedPickerPlayers = filteredPickerPlayers.slice(
+    (resolvedPickerPage - 1) * PLAYER_PICKER_PAGE_SIZE,
+    resolvedPickerPage * PLAYER_PICKER_PAGE_SIZE,
+  )
+
+  const openPlayerPicker = () => {
+    setPickerSelectedIds(initialMarketplacePlayerSelection(availablePlayers, draft.players))
+    setPickerQuery('')
+    setPickerPage(1)
+    setPlayerPickerOpen(true)
+  }
+
+  const savePlayerSelection = () => {
+    const players = applyMarketplacePlayerSelection(availablePlayers, draft.players, pickerSelectedIds)
+    setDraft((current) => ({ ...current, players }))
+    setPlayerPickerOpen(false)
+    setPlayerPage(1)
+    setEditingPlayerId(null)
+    setStatus(`Saved ${players.length} player${players.length === 1 ? '' : 's'} to this alert.`)
+  }
 
   const updatePlayer = (
     entityId: number,
@@ -359,22 +407,22 @@ export default function MarketplaceAlertsPage() {
           </div>
 
           <div className="marketplace-form-grid marketplace-essentials">
-            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, players: [] }); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
-            <label className="field"><span>Season</span><input type="number" min="2000" max="2200" value={draft.season} onChange={(event) => { setDraft({ ...draft, season: Number(event.target.value) || currentSeason, players: [] }); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} /></label>
+            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
+            <label className="field"><span>Season</span><input type="number" min="2000" max="2200" value={draft.season} onChange={(event) => { setDraft({ ...draft, season: Number(event.target.value) || currentSeason, players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} /></label>
 
             <section className="marketplace-owned-picker marketplace-span-2">
               <div className="marketplace-owned-picker-heading">
                 <div><h3>Owned players</h3><p>Loaded live from a Real username for this sport and season.</p></div>
               </div>
               <div className="marketplace-real-user-loader">
-                <label className="field"><span>Real @username</span><div className="marketplace-username-input"><span>@</span><input value={realUsername} placeholder="username" onChange={(event) => { setRealUsername(event.target.value.replace(/^@/, '')); setDraft({ ...draft, players: [] }); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void loadOwnedPlayers() } }} /></div></label>
+                <label className="field"><span>Real @username</span><div className="marketplace-username-input"><span>@</span><input value={realUsername} placeholder="username" onChange={(event) => { setRealUsername(event.target.value.replace(/^@/, '')); setDraft({ ...draft, players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void loadOwnedPlayers() } }} /></div></label>
                 <button className="button secondary" type="button" disabled={playersBusy} onClick={() => void loadOwnedPlayers()}>{playersBusy ? 'Loading from Real…' : draft.players.length > 0 ? 'Reload from Real' : 'Load from Real'}</button>
               </div>
               {draft.players.length > 0 ? (
                 <div className="marketplace-owned-selection">
                   <div className="marketplace-player-list-heading">
-                    <strong>{draft.players.length} selected</strong>
-                    <span>Page {resolvedPlayerPage} of {playerPageCount}{playersLoadedAt ? ` · saved ${formatAge(playersLoadedAt)}` : ''}</span>
+                    <div><strong>{draft.players.length} selected</strong><span>Page {resolvedPlayerPage} of {playerPageCount}{playersLoadedAt ? ` · saved ${formatAge(playersLoadedAt)}` : ''}</span></div>
+                    {availablePlayers.length > 0 ? <button className="button secondary" type="button" onClick={openPlayerPicker}>Edit players</button> : null}
                   </div>
                   <div className="marketplace-player-chips">
                     {paginatedPlayers.map((player) => (
@@ -396,6 +444,8 @@ export default function MarketplaceAlertsPage() {
                     </div>
                   ) : null}
                 </div>
+              ) : availablePlayers.length > 0 ? (
+                <div className="marketplace-owned-empty marketplace-owned-empty-action"><span>No players selected.</span><button className="button secondary" type="button" onClick={openPlayerPicker}>Choose players</button></div>
               ) : <p className="marketplace-owned-empty">No players loaded yet.</p>}
             </section>
 
@@ -464,6 +514,38 @@ export default function MarketplaceAlertsPage() {
           </div>
         )}
       </section>
+
+      {playerPickerOpen ? (
+        <div className="app-modal-backdrop marketplace-player-picker-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPlayerPickerOpen(false) }}>
+          <section className="marketplace-player-picker-modal" role="dialog" aria-modal="true" aria-labelledby="marketplace-player-picker-title">
+            <header className="marketplace-player-picker-header">
+              <div><span>Owned players</span><h2 id="marketplace-player-picker-title">Choose who to monitor</h2><p>Uncheck players you do not want in this alert. Your changes apply when you save.</p></div>
+              <button type="button" aria-label="Close player picker" onClick={() => setPlayerPickerOpen(false)}>×</button>
+            </header>
+            <div className="marketplace-player-picker-tools">
+              <label><span className="sr-only">Search players</span><input type="search" value={pickerQuery} placeholder="Search players or rarity" autoFocus onChange={(event) => { setPickerQuery(event.target.value); setPickerPage(1) }} /></label>
+              <strong>{pickerSelectedIds.length} of {availablePlayers.length} selected</strong>
+              <div><button type="button" onClick={() => setPickerSelectedIds(availablePlayers.map((player) => player.entityId))}>Select all</button><button type="button" onClick={() => setPickerSelectedIds([])}>Clear</button></div>
+            </div>
+            <div className="marketplace-player-picker-list">
+              {paginatedPickerPlayers.length > 0 ? paginatedPickerPlayers.map((player) => {
+                const selected = pickerSelectedIds.includes(player.entityId)
+                return (
+                  <label key={player.entityId} className={selected ? 'selected' : ''}>
+                    <input type="checkbox" checked={selected} onChange={() => setPickerSelectedIds((current) => current.includes(player.entityId) ? current.filter((entityId) => entityId !== player.entityId) : [...current, player.entityId])} />
+                    <span><strong>{player.name}</strong>{player.rarityLabel ? <small>{player.rarityLabel}</small> : null}</span>
+                    <i aria-hidden="true">✓</i>
+                  </label>
+                )
+              }) : <div className="marketplace-player-picker-empty">No players match “{pickerQuery}”.</div>}
+            </div>
+            <footer className="marketplace-player-picker-footer">
+              <div>{pickerPageCount > 1 ? <div className="marketplace-player-pagination"><button type="button" disabled={resolvedPickerPage === 1} onClick={() => setPickerPage(resolvedPickerPage - 1)}>Previous</button><span>Page {resolvedPickerPage} of {pickerPageCount}</span><button type="button" disabled={resolvedPickerPage === pickerPageCount} onClick={() => setPickerPage(resolvedPickerPage + 1)}>Next</button></div> : null}</div>
+              <div><button className="button secondary" type="button" onClick={() => setPlayerPickerOpen(false)}>Cancel</button><button className="button primary" type="button" onClick={savePlayerSelection}>Save {pickerSelectedIds.length} player{pickerSelectedIds.length === 1 ? '' : 's'}</button></div>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }
