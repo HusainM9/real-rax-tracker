@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MARKETPLACE_PAGE_SCAN_INTERVAL_MS,
+  marketplacePageScanKey,
   startMarketplacePageScanner,
 } from './marketplacePageScanner'
 
@@ -9,6 +10,22 @@ afterEach(() => {
 })
 
 describe('marketplace page scanner', () => {
+  it('uses a stable key for equivalent active rules', () => {
+    const first = [
+      { id: 'b', enabled: true, updatedAt: '2026-10-12T00:00:00.000Z' },
+      { id: 'paused', enabled: false, updatedAt: '2026-10-12T01:00:00.000Z' },
+      { id: 'a', enabled: true, updatedAt: '2026-10-12T00:00:00.000Z' },
+    ]
+    const sameRulesFromServer = [
+      { ...first[2] }, { ...first[0] }, { ...first[1] },
+    ]
+
+    expect(marketplacePageScanKey(first)).toBe(marketplacePageScanKey(sameRulesFromServer))
+    expect(marketplacePageScanKey(first)).toBe(
+      'a:2026-10-12T00:00:00.000Z|b:2026-10-12T00:00:00.000Z',
+    )
+  })
+
   it('runs every five minutes while active and stops after cleanup', () => {
     vi.useFakeTimers()
     const scan = vi.fn()

@@ -9,7 +9,7 @@ import {
   type MarketplaceRarityApiValue,
 } from './marketplaceAlerts.js'
 import { saveNewMarketplaceNotifications } from './marketplaceAlertStore.js'
-import { realGetJson, type RealApiContext } from './realApi.js'
+import { RealApiError, realGetJson, type RealApiContext } from './realApi.js'
 
 type MarketplaceResponse = {
   listings?: MarketplaceListing[]
@@ -67,27 +67,41 @@ export async function scanMarketplaceAlerts(options: {
   notifications: MarketplaceAlertNotification[]
   checkedListings: number
   requests: number
+  failedRequests: number
+  warning: string | null
 }> {
   const candidates: MarketplaceAlertNotification[] = []
   const checked = new Set<string>()
   const groups = groupRules(options.rules)
+  const rejectedGroups: ScanGroup[] = []
 
   for (const group of groups) {
-    const response = await realGetJson<MarketplaceResponse>(
-      '/cardmarketplacelistings',
-      options.context,
-      {
-        cohort: 'all',
-        filterCustomType: group.filterCustomType,
-        listingType: 'userpassfull',
-        prestige: 'all',
-        // Real's `rarity=all` currently returns only one rarity slice. Numeric
-        // feeds are the reliable way to cover every bulk rarity.
-        rarity: group.rarity,
-        season: group.season,
-        sport: group.sport,
-      },
-    )
+    let response: MarketplaceResponse
+    try {
+      response = await realGetJson<MarketplaceResponse>(
+        '/cardmarketplacelistings',
+        options.context,
+        {
+          cohort: 'all',
+          filterCustomType: group.filterCustomType,
+          listingType: 'userpassfull',
+          prestige: 'all',
+          // Real's `rarity=all` currently returns only one rarity slice. Numeric
+          // feeds are the reliable way to cover every bulk rarity.
+          rarity: group.rarity,
+          season: group.season,
+          sport: group.sport,
+        },
+      )
+    } catch (error) {
+      // Real responds with 400 for marketplace combinations it does not currently
+      // expose. One unsupported sport must not prevent valid feeds from scanning.
+      if (error instanceof RealApiError && error.status === 400) {
+        rejectedGroups.push(group)
+        continue
+      }
+      throw error
+    }
     for (const listing of Array.isArray(response.listings) ? response.listings : []) {
       checked.add(String(listing.id))
       for (const rule of group.rules) {
@@ -99,5 +113,14 @@ export async function scanMarketplaceAlerts(options: {
 
   const unique = [...new Map(candidates.map((notification) => [notification.id, notification])).values()]
   const notifications = await saveNewMarketplaceNotifications(options.owner, unique)
-  return { notifications, checkedListings: checked.size, requests: groups.length }
+  const warning = rejectedGroups.length > 0
+    ? `${rejectedGroups.length} of ${groups.length} feeds skipped because Real rejected them (400).`
+    : null
+  return {
+    notifications,
+    checkedListings: checked.size,
+    requests: groups.length,
+    failedRequests: rejectedGroups.length,
+    warning,
+  }
 }

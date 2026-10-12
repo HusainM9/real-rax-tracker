@@ -14,12 +14,13 @@ import { useRaxData } from '../context/RaxDataContext'
 import {
   ignoreMarketplaceAlertListing,
   loadMarketplaceAlerts,
+  MarketplaceScanRequestError,
   saveMarketplaceAlerts,
   scanMarketplaceAlertsNow,
 } from '../lib/marketplaceAlertsApi'
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
-import { startMarketplacePageScanner } from '../lib/marketplacePageScanner'
+import { marketplacePageScanKey, startMarketplacePageScanner } from '../lib/marketplacePageScanner'
 import {
   applyMarketplacePlayerSelection,
   filterMarketplacePlayers,
@@ -133,6 +134,7 @@ export default function MarketplaceAlertsPage() {
   const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null)
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
   const [playersLoadedAt, setPlayersLoadedAt] = useState<string | null>(null)
+  const activeScanKey = marketplacePageScanKey(rules)
   const [realUsername, setRealUsername] = useState(
     () => (data.settings.savedUsername || accountUsername || '').replace(/^@/, '').trim(),
   )
@@ -309,7 +311,7 @@ export default function MarketplaceAlertsPage() {
         logEntry,
         ...current.filter((entry) => entry.id !== logEntry.id),
       ].slice(0, 40))
-      setStatus(`Checked ${result.checkedListings} listings across ${result.requests} feed${result.requests === 1 ? '' : 's'} · ${result.newNotifications.length} new match${result.newNotifications.length === 1 ? '' : 'es'}.`)
+      setStatus(`Checked ${result.checkedListings} listings across ${result.requests} feed${result.requests === 1 ? '' : 's'} · ${result.newNotifications.length} new match${result.newNotifications.length === 1 ? '' : 'es'}.${result.scanStatus.warning ? ` ${result.scanStatus.warning}` : ''}`)
       if ('Notification' in window && Notification.permission === 'granted') {
         for (const item of result.newNotifications.slice(0, 3)) {
           new Notification(`${item.playerName} · ${item.price.toLocaleString()} RAX`, {
@@ -319,6 +321,18 @@ export default function MarketplaceAlertsPage() {
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Marketplace scan failed.')
+      if (error instanceof MarketplaceScanRequestError && error.scanStatus) {
+        const logEntry: MarketplaceScanLogEntry = {
+          ...error.scanStatus,
+          id: `${error.scanStatus.startedAt}:${source}`,
+          source,
+        }
+        setScanStatus(error.scanStatus)
+        setScanLog((current) => [
+          logEntry,
+          ...current.filter((entry) => entry.id !== logEntry.id),
+        ].slice(0, 40))
+      }
     } finally {
       scanInFlightRef.current = false
       setBusy(false)
@@ -338,9 +352,9 @@ export default function MarketplaceAlertsPage() {
   }, [])
 
   useEffect(() => {
-    if (import.meta.env.DEV || rules.every((rule) => !rule.enabled)) return
+    if (import.meta.env.DEV || !activeScanKey) return
     return startMarketplacePageScanner(() => void scan('page'))
-  }, [rules])
+  }, [activeScanKey])
 
   const enableBrowserNotifications = async () => {
     if (!('Notification' in window)) {
@@ -530,7 +544,7 @@ export default function MarketplaceAlertsPage() {
                 {scanLog.slice(0, 8).map((entry) => (
                   <li key={entry.id} className={entry.error ? 'failed' : ''}>
                     <span className="marketplace-scan-log-dot" aria-hidden="true" />
-                    <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}`}</span></div>
+                    <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}${entry.warning ? ` · ${entry.warning}` : ''}`}</span></div>
                     <time dateTime={entry.finishedAt}><b>{entry.source === 'automatic' ? 'Auto' : entry.source === 'page' ? 'Page' : 'Manual'}</b>{formatScanTime(entry.finishedAt)}</time>
                   </li>
                 ))}

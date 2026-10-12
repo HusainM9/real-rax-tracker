@@ -44,7 +44,7 @@ beforeEach(() => {
   mocks.readPendingMarketplaceNotifications.mockReset().mockResolvedValue([fresh])
   mocks.markMarketplaceNotificationsDelivered.mockReset().mockResolvedValue(undefined)
   mocks.scanMarketplaceAlerts.mockReset().mockResolvedValue({
-    notifications: [fresh], checkedListings: 10, requests: 2,
+    notifications: [fresh], checkedListings: 10, requests: 2, failedRequests: 0, warning: null,
   })
   mocks.deliverMarketplaceNotifications.mockReset().mockResolvedValue({
     configured: true, channel: 'discord_dm', delivered: 1,
@@ -137,11 +137,29 @@ describe('account marketplace scan endpoint', () => {
     expect(mocks.markMarketplaceNotificationsDelivered).not.toHaveBeenCalled()
   })
 
+  it('keeps a successful scan when Discord delivery fails', async () => {
+    mocks.deliverMarketplaceNotifications.mockRejectedValue(new Error('Discord DM delivery failed (403).'))
+
+    const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.scanStatus).toMatchObject({
+      checkedListings: 10,
+      error: null,
+      warning: 'Scan completed, but Discord DM delivery failed (403).',
+    })
+    expect(mocks.markMarketplaceNotificationsDelivered).not.toHaveBeenCalled()
+  })
+
   it('returns a bounded upstream error response', async () => {
     mocks.scanMarketplaceAlerts.mockRejectedValue(new Error('Real request failed'))
     const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
     expect(response.status).toBe(502)
-    expect(await response.json()).toEqual({ error: 'Real request failed' })
+    expect(await response.json()).toMatchObject({
+      error: 'Real request failed',
+      scanStatus: { error: 'Real request failed' },
+    })
     expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
       'husain', expect.objectContaining({ error: 'Real request failed' }), 'manual',
     )

@@ -13,6 +13,16 @@ const DEV_NOTIFICATIONS_KEY = 'rax-marketplace-alert-notifications-v1'
 const DEV_IGNORED_LISTINGS_KEY = 'rax-marketplace-alert-ignored-listings-v1'
 const DEV_SCAN_LOG_KEY = 'rax-marketplace-alert-scan-log-v1'
 
+export class MarketplaceScanRequestError extends Error {
+  readonly scanStatus: MarketplaceScanStatus | null
+
+  constructor(message: string, scanStatus: MarketplaceScanStatus | null) {
+    super(message)
+    this.name = 'MarketplaceScanRequestError'
+    this.scanStatus = scanStatus
+  }
+}
+
 export type MarketplaceAlertsPayload = {
   rules: MarketplaceAlertRule[]
   notifications: MarketplaceAlertNotification[]
@@ -98,7 +108,7 @@ export async function scanMarketplaceAlertsNow(
     const now = new Date().toISOString()
     const emptyStatus: MarketplaceScanStatus = {
       startedAt: now, finishedAt: now, checkedListings: 0, requests: 0,
-      newMatches: 0, delivered: 0, deliveryChannel: null, error: null,
+      newMatches: 0, delivered: 0, deliveryChannel: null, error: null, warning: null,
     }
     if (!rule) return { notifications: existing, newNotifications: [], checkedListings: 0, requests: 0, scanStatus: emptyStatus }
     const ignored = new Set(readLocal<string[]>(DEV_IGNORED_LISTINGS_KEY, []))
@@ -119,6 +129,7 @@ export async function scanMarketplaceAlertsNow(
       delivered: 0,
       deliveryChannel: null,
       error: null,
+      warning: null,
     }
     const logEntry: MarketplaceScanLogEntry = { ...scanStatus, id: `${now}:${source}`, source }
     writeLocal(DEV_SCAN_LOG_KEY, [logEntry, ...readLocal<MarketplaceScanLogEntry[]>(DEV_SCAN_LOG_KEY, [])].slice(0, 40))
@@ -145,7 +156,12 @@ export async function scanMarketplaceAlertsNow(
     scanStatus?: MarketplaceScanStatus
     error?: string
   }>(response)
-  if (!response.ok) throw new Error(data.error || `Marketplace scan failed (${response.status}).`)
+  if (!response.ok) {
+    throw new MarketplaceScanRequestError(
+      data.error || `Marketplace scan failed (${response.status}).`,
+      data.scanStatus ?? null,
+    )
+  }
   const all = Array.isArray(data.notifications) ? data.notifications : []
   const scanStatus = data.scanStatus ?? {
     startedAt: new Date().toISOString(),
@@ -156,6 +172,7 @@ export async function scanMarketplaceAlertsNow(
     delivered: 0,
     deliveryChannel: null,
     error: null,
+    warning: null,
   }
   return {
     notifications: all,

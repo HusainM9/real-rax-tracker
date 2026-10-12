@@ -29,6 +29,7 @@ export type MarketplaceScanStatus = {
   delivered: number
   deliveryChannel: string | null
   error: string | null
+  warning?: string | null
 }
 
 export type MarketplaceScanLogEntry = MarketplaceScanStatus & {

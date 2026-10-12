@@ -3,11 +3,22 @@ import type { MarketplaceAlertRule, MarketplaceListing } from './marketplaceAler
 import type { RealApiContext } from './realApi'
 
 const mocks = vi.hoisted(() => ({
+  RealApiError: class RealApiError extends Error {
+    readonly status?: number
+
+    constructor(_kind: string, message: string, status?: number) {
+      super(message)
+      this.status = status
+    }
+  },
   realGetJson: vi.fn(),
   saveNewMarketplaceNotifications: vi.fn(),
 }))
 
-vi.mock('./realApi.js', () => ({ realGetJson: mocks.realGetJson }))
+vi.mock('./realApi.js', () => ({
+  RealApiError: mocks.RealApiError,
+  realGetJson: mocks.realGetJson,
+}))
 vi.mock('./marketplaceAlertStore.js', () => ({
   saveNewMarketplaceNotifications: mocks.saveNewMarketplaceNotifications,
 }))
@@ -226,5 +237,29 @@ describe('marketplace monitor', () => {
     await expect(scanMarketplaceAlerts({ owner: 'husain', rules: [baseRule], context }))
       .rejects.toThrow('Real rate limited this request')
     expect(mocks.saveNewMarketplaceNotifications).not.toHaveBeenCalled()
+  })
+
+  it('continues valid sports when Real rejects an unsupported sport feed', async () => {
+    mocks.realGetJson.mockImplementation(async (_path, _context, query) => {
+      if (query.sport === 'wnba') {
+        throw new mocks.RealApiError('upstream', 'Real API request failed (400).', 400)
+      }
+      return { listings: query.rarity === 3 ? [bulkListing] : [] }
+    })
+
+    const result = await scanMarketplaceAlerts({
+      owner: 'husain',
+      rules: [baseRule, { ...baseRule, id: 'wnba-rule', sport: 'wnba' }],
+      context,
+    })
+
+    expect(result).toMatchObject({
+      checkedListings: 1,
+      requests: 10,
+      failedRequests: 5,
+      warning: '5 of 10 feeds skipped because Real rejected them (400).',
+    })
+    expect(result.notifications).toHaveLength(1)
+    expect(mocks.saveNewMarketplaceNotifications).toHaveBeenCalledOnce()
   })
 })

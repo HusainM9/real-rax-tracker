@@ -38,11 +38,22 @@ export default async function handler(request: Request): Promise<Response> {
     }
     const scan = await scanMarketplaceAlerts({ owner: session.username, rules, context })
     const pending = await readPendingMarketplaceNotifications(session.username)
-    const delivery = await deliverMarketplaceNotifications({
-      owner: session.username,
-      notifications: pending,
-      signal: request.signal,
-    })
+    let delivery: Awaited<ReturnType<typeof deliverMarketplaceNotifications>> = {
+      configured: false,
+      channel: null,
+      delivered: 0,
+    }
+    let deliveryWarning: string | null = null
+    try {
+      delivery = await deliverMarketplaceNotifications({
+        owner: session.username,
+        notifications: pending,
+        signal: request.signal,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Notification delivery failed.'
+      deliveryWarning = `Scan completed, but ${message}`
+    }
     if (delivery.delivered > 0) {
       await markMarketplaceNotificationsDelivered(session.username, pending.map((item) => item.id))
     }
@@ -56,6 +67,7 @@ export default async function handler(request: Request): Promise<Response> {
       delivered: delivery.delivered,
       deliveryChannel: delivery.channel,
       error: null,
+      warning: [scan.warning, deliveryWarning].filter(Boolean).join(' ') || null,
     }
     await saveMarketplaceScanStatus(session.username, scanStatus, source)
     return Response.json({
@@ -68,7 +80,7 @@ export default async function handler(request: Request): Promise<Response> {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Marketplace scan failed.'
-    await saveMarketplaceScanStatus(session.username, {
+    const scanStatus: MarketplaceScanStatus = {
       startedAt,
       finishedAt: new Date().toISOString(),
       checkedListings: 0,
@@ -77,9 +89,12 @@ export default async function handler(request: Request): Promise<Response> {
       delivered: 0,
       deliveryChannel: null,
       error: message,
-    }, source)
+      warning: null,
+    }
+    await saveMarketplaceScanStatus(session.username, scanStatus, source)
     return Response.json({
       error: message,
+      scanStatus,
     }, { status: 502 })
   }
 }
