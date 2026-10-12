@@ -7,8 +7,11 @@ const mocks = vi.hoisted(() => ({
   resolveRealApiConfig: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
   readMarketplaceNotifications: vi.fn(),
+  readPendingMarketplaceNotifications: vi.fn(),
+  markMarketplaceNotificationsDelivered: vi.fn(),
   saveMarketplaceScanStatus: vi.fn(),
   scanMarketplaceAlerts: vi.fn(),
+  deliverMarketplaceNotifications: vi.fn(),
 }))
 
 vi.mock('../admin/_helpers', () => ({ requireAccountSession: mocks.requireAccountSession }))
@@ -17,9 +20,14 @@ vi.mock('../../lib/realApi', () => ({ resolveRealApiConfig: mocks.resolveRealApi
 vi.mock('../../lib/marketplaceAlertStore', () => ({
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
   readMarketplaceNotifications: mocks.readMarketplaceNotifications,
+  readPendingMarketplaceNotifications: mocks.readPendingMarketplaceNotifications,
+  markMarketplaceNotificationsDelivered: mocks.markMarketplaceNotificationsDelivered,
   saveMarketplaceScanStatus: mocks.saveMarketplaceScanStatus,
 }))
 vi.mock('../../lib/marketplaceMonitor', () => ({ scanMarketplaceAlerts: mocks.scanMarketplaceAlerts }))
+vi.mock('../../lib/marketplaceNotificationDelivery', () => ({
+  deliverMarketplaceNotifications: mocks.deliverMarketplaceNotifications,
+}))
 
 import handler from './marketplace-scan'
 
@@ -33,8 +41,13 @@ beforeEach(() => {
   mocks.resolveRealApiConfig.mockReset().mockReturnValue({ baseUrl: 'https://web.realapp.com' })
   mocks.readMarketplaceAlertRules.mockReset().mockResolvedValue([rule])
   mocks.readMarketplaceNotifications.mockReset().mockResolvedValue([fresh, older])
+  mocks.readPendingMarketplaceNotifications.mockReset().mockResolvedValue([fresh])
+  mocks.markMarketplaceNotificationsDelivered.mockReset().mockResolvedValue(undefined)
   mocks.scanMarketplaceAlerts.mockReset().mockResolvedValue({
     notifications: [fresh], checkedListings: 10, requests: 2,
+  })
+  mocks.deliverMarketplaceNotifications.mockReset().mockResolvedValue({
+    configured: true, channel: 'discord_dm', delivered: 1,
   })
   mocks.saveMarketplaceScanStatus.mockReset().mockResolvedValue(undefined)
 })
@@ -83,6 +96,8 @@ describe('account marketplace scan endpoint', () => {
         checkedListings: 10,
         requests: 2,
         newMatches: 1,
+        delivered: 1,
+        deliveryChannel: 'discord_dm',
         error: null,
       },
     })
@@ -90,8 +105,36 @@ describe('account marketplace scan endpoint', () => {
       owner: 'husain', rules: [rule],
     }))
     expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
-      'husain', expect.objectContaining({ checkedListings: 10, newMatches: 1 }), 'manual',
+      'husain', expect.objectContaining({ checkedListings: 10, newMatches: 1, delivered: 1 }), 'manual',
     )
+    expect(mocks.deliverMarketplaceNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      owner: 'husain', notifications: [fresh],
+    }))
+    expect(mocks.markMarketplaceNotificationsDelivered).toHaveBeenCalledWith('husain', [fresh.id])
+  })
+
+  it('records page-open scans separately from manual checks', async () => {
+    const response = await handler(new Request('https://example.com/api/account/marketplace-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'page' }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
+      'husain', expect.objectContaining({ checkedListings: 10 }), 'page',
+    )
+  })
+
+  it('keeps pending matches when no notification channel is configured', async () => {
+    mocks.deliverMarketplaceNotifications.mockResolvedValue({
+      configured: false, channel: null, delivered: 0,
+    })
+
+    const response = await handler(new Request('https://example.com/api/account/marketplace-scan', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.markMarketplaceNotificationsDelivered).not.toHaveBeenCalled()
   })
 
   it('returns a bounded upstream error response', async () => {

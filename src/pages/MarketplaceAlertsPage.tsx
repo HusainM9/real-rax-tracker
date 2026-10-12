@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   MARKETPLACE_RARITIES,
   marketplaceListingUrl,
@@ -19,6 +19,7 @@ import {
 } from '../lib/marketplaceAlertsApi'
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
+import { startMarketplacePageScanner } from '../lib/marketplacePageScanner'
 import {
   applyMarketplacePlayerSelection,
   filterMarketplacePlayers,
@@ -113,6 +114,7 @@ function formatScanTime(iso: string): string {
 export default function MarketplaceAlertsPage() {
   const { data } = useRaxData()
   const { username: accountUsername } = useAccountAuth()
+  const scanInFlightRef = useRef(false)
   const [draft, setDraft] = useState<Draft>(initialDraft)
   const [rules, setRules] = useState<MarketplaceAlertRule[]>([])
   const [notifications, setNotifications] = useState<MarketplaceAlertNotification[]>([])
@@ -289,18 +291,19 @@ export default function MarketplaceAlertsPage() {
     setStatus('Edit cancelled.')
   }
 
-  const scan = async () => {
-    if (busy || rules.every((rule) => !rule.enabled)) return
+  const scan = async (source: 'manual' | 'page' = 'manual') => {
+    if (scanInFlightRef.current || rules.every((rule) => !rule.enabled)) return
+    scanInFlightRef.current = true
     setBusy(true)
     setStatus('Checking the newest marketplace listings…')
     try {
-      const result = await scanMarketplaceAlertsNow(rules)
+      const result = await scanMarketplaceAlertsNow(rules, source)
       setNotifications(result.notifications)
       setScanStatus(result.scanStatus)
       const logEntry: MarketplaceScanLogEntry = {
         ...result.scanStatus,
-        id: `${result.scanStatus.startedAt}:manual`,
-        source: 'manual',
+        id: `${result.scanStatus.startedAt}:${source}`,
+        source,
       }
       setScanLog((current) => [
         logEntry,
@@ -317,6 +320,7 @@ export default function MarketplaceAlertsPage() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Marketplace scan failed.')
     } finally {
+      scanInFlightRef.current = false
       setBusy(false)
     }
   }
@@ -332,6 +336,11 @@ export default function MarketplaceAlertsPage() {
     }, 60_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (import.meta.env.DEV || rules.every((rule) => !rule.enabled)) return
+    return startMarketplacePageScanner(() => void scan('page'))
+  }, [rules])
 
   const enableBrowserNotifications = async () => {
     if (!('Notification' in window)) {
@@ -512,17 +521,17 @@ export default function MarketplaceAlertsPage() {
             {rules.length === 0 ? <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div> : <div className="marketplace-rule-list">{rules.map((rule) => <article key={rule.id} className={`marketplace-rule-card${rule.enabled ? '' : ' disabled'}`}><div><span className="marketplace-rule-sport">{rule.enabled ? 'ACTIVE' : 'PAUSED'} · {rule.sport.toUpperCase()} {rule.season}</span><h3>{rule.name}</h3><p>{ruleSummary(rule)}</p></div><details className="marketplace-rule-menu"><summary aria-label={`Options for ${rule.name}`}>•••</summary><div><button type="button" onClick={() => editRule(rule)}>Edit alert</button><button type="button" onClick={() => void persist(rules.map((entry) => entry.id === rule.id ? { ...entry, enabled: !entry.enabled, updatedAt: new Date().toISOString() } : entry), `${rule.name} ${rule.enabled ? 'paused' : 'enabled'}.`)}>{rule.enabled ? 'Pause alert' : 'Enable alert'}</button><button type="button" className="danger" onClick={() => void persist(rules.filter((entry) => entry.id !== rule.id), `${rule.name} removed.`)}>Remove</button></div></details></article>)}</div>}
           </section>
           <section className="panel marketplace-scan-log-panel">
-            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>Live checks of the Real marketplace.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Every 5 min'}</span></div>
+            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>Page-open fallback checks the Real marketplace every five minutes.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Page open · 5 min'}</span></div>
             {busy ? <div className="marketplace-scan-live"><i aria-hidden="true" /><span>Requesting the latest bulk-rating feeds…</span></div> : null}
             {scanLog.length === 0 ? (
-              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The first automatic check will appear here.</span></div>
+              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The first page check starts as soon as your active alerts load.</span></div>
             ) : (
               <ol className="marketplace-scan-log">
                 {scanLog.slice(0, 8).map((entry) => (
                   <li key={entry.id} className={entry.error ? 'failed' : ''}>
                     <span className="marketplace-scan-log-dot" aria-hidden="true" />
                     <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}`}</span></div>
-                    <time dateTime={entry.finishedAt}><b>{entry.source === 'automatic' ? 'Auto' : 'Manual'}</b>{formatScanTime(entry.finishedAt)}</time>
+                    <time dateTime={entry.finishedAt}><b>{entry.source === 'automatic' ? 'Auto' : entry.source === 'page' ? 'Page' : 'Manual'}</b>{formatScanTime(entry.finishedAt)}</time>
                   </li>
                 ))}
               </ol>

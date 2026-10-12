@@ -84,6 +84,7 @@ export async function saveMarketplaceAlerts(
 
 export async function scanMarketplaceAlertsNow(
   rules: MarketplaceAlertRule[],
+  source: 'manual' | 'page' = 'manual',
 ): Promise<{
   notifications: MarketplaceAlertNotification[]
   newNotifications: MarketplaceAlertNotification[]
@@ -119,7 +120,7 @@ export async function scanMarketplaceAlertsNow(
       deliveryChannel: null,
       error: null,
     }
-    const logEntry: MarketplaceScanLogEntry = { ...scanStatus, id: `${now}:manual`, source: 'manual' }
+    const logEntry: MarketplaceScanLogEntry = { ...scanStatus, id: `${now}:${source}`, source }
     writeLocal(DEV_SCAN_LOG_KEY, [logEntry, ...readLocal<MarketplaceScanLogEntry[]>(DEV_SCAN_LOG_KEY, [])].slice(0, 40))
     return {
       notifications: demos,
@@ -133,6 +134,8 @@ export async function scanMarketplaceAlertsNow(
   const response = await fetch('/api/account/marketplace-scan', {
     method: 'POST',
     credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }),
   })
   const data = await readResponseJson<{
     notifications?: MarketplaceAlertNotification[]

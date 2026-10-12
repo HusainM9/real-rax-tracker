@@ -33,7 +33,7 @@ export type MarketplaceScanStatus = {
 
 export type MarketplaceScanLogEntry = MarketplaceScanStatus & {
   id: string
-  source: 'automatic' | 'manual'
+  source: 'automatic' | 'manual' | 'page'
 }
 
 function ownerKey(owner: string): string {
@@ -161,7 +161,12 @@ export async function readMarketplaceScanLog(
       const entry = typeof value === 'string' ? JSON.parse(value) : value
       if (!entry || typeof entry !== 'object') return []
       const candidate = entry as MarketplaceScanLogEntry
-      if ((candidate.source !== 'automatic' && candidate.source !== 'manual') || !candidate.startedAt) return []
+      if (
+        candidate.source !== 'automatic' &&
+        candidate.source !== 'manual' &&
+        candidate.source !== 'page'
+      ) return []
+      if (!candidate.startedAt) return []
       return [candidate]
     } catch {
       return []

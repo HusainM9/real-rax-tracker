@@ -1,10 +1,13 @@
 import {
+  markMarketplaceNotificationsDelivered,
   readMarketplaceAlertRules,
   readMarketplaceNotifications,
+  readPendingMarketplaceNotifications,
   saveMarketplaceScanStatus,
   type MarketplaceScanStatus,
 } from '../../lib/marketplaceAlertStore'
 import { scanMarketplaceAlerts } from '../../lib/marketplaceMonitor'
+import { deliverMarketplaceNotifications } from '../../lib/marketplaceNotificationDelivery'
 import { requireEarningsSession } from '../../lib/earningsAuth'
 import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
 import { requireAccountSession } from '../admin/_helpers'
@@ -22,6 +25,9 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'The Real marketplace session is not configured.' }, { status: 503 })
   }
 
+  const body = await request.json().catch(() => null) as { source?: unknown } | null
+  const source = body?.source === 'page' ? 'page' : 'manual'
+
   const startedAt = new Date().toISOString()
   try {
     const rules = await readMarketplaceAlertRules(session.username)
@@ -31,6 +37,15 @@ export default async function handler(request: Request): Promise<Response> {
       publicCacheNamespace: `marketplace:${session.username}:${Date.now()}`,
     }
     const scan = await scanMarketplaceAlerts({ owner: session.username, rules, context })
+    const pending = await readPendingMarketplaceNotifications(session.username)
+    const delivery = await deliverMarketplaceNotifications({
+      owner: session.username,
+      notifications: pending,
+      signal: request.signal,
+    })
+    if (delivery.delivered > 0) {
+      await markMarketplaceNotificationsDelivered(session.username, pending.map((item) => item.id))
+    }
     const notifications = await readMarketplaceNotifications(session.username)
     const scanStatus: MarketplaceScanStatus = {
       startedAt,
@@ -38,11 +53,11 @@ export default async function handler(request: Request): Promise<Response> {
       checkedListings: scan.checkedListings,
       requests: scan.requests,
       newMatches: scan.notifications.length,
-      delivered: 0,
-      deliveryChannel: null,
+      delivered: delivery.delivered,
+      deliveryChannel: delivery.channel,
       error: null,
     }
-    await saveMarketplaceScanStatus(session.username, scanStatus, 'manual')
+    await saveMarketplaceScanStatus(session.username, scanStatus, source)
     return Response.json({
       ok: true,
       checkedListings: scan.checkedListings,
@@ -62,7 +77,7 @@ export default async function handler(request: Request): Promise<Response> {
       delivered: 0,
       deliveryChannel: null,
       error: message,
-    }, 'manual')
+    }, source)
     return Response.json({
       error: message,
     }, { status: 502 })
