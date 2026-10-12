@@ -91,14 +91,14 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 - `BASIC_AUTH_PASSWORD` and `AUTH_SESSION_SECRET` for the deployment gate
 - `KV_REST_API_URL`, `KV_REST_API_TOKEN`, and optional `TRACKER_SYNC_SECRET` for accounts and sync
 - `REAL_*` server variables for Real pass and earnings import
-- `CRON_SECRET` for the scheduled 6:30 AM Eastern public earnings snapshots
+- `CRON_SECRET` for bearer-token protection on scheduled 5:30 AM Eastern public earnings snapshots. When omitted, the endpoint accepts only Vercel's native `vercel-cron/1.0` invocation marker and still enforces the narrow snapshot-time window.
 - `VITE_REAL_IMPORT_ENABLED` for the corresponding browser UI switch
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for the shared catalog
 - `ADMIN_PASSWORD` for operator access
 
 `REAL_AUTH_INFO`, `REAL_SESSION_TOKEN`, and `REAL_DEVICE_UUID` are live credentials. Keep them in local or Vercel environment settings only.
 
-The Earnings page reconstructs daily totals from Real's public active-pass, booster, and box-score data. The complete linked-account list is synchronized to server storage and refreshed every morning just before Real's reset. Two separate once-daily Vercel cron jobs cover the EST and EDT offsets (compatible with Hobby scheduling limits); the endpoint's `America/New_York` guard allows only the 6:30 AM invocation to create snapshots.
+The Earnings page reconstructs daily totals from Real's public active-pass, booster, and box-score data. The complete linked-account list is synchronized to server storage and refreshed every morning before Real's reset. Three once-daily Vercel cron jobs cover the EST and EDT offsets plus an imprecise Hobby-plan fallback. The endpoint's `America/New_York` guard prefers 5:30 AM, permits a fallback during the 6 AM hour, and never overwrites an account/day snapshot that was already saved successfully. If Real continues returning `429` after its request-level backoff, the snapshot job makes one bounded account-level retry, stops before the serverless deadline, and defers all unsaved accounts to the later cron invocation. The response lists completed, retried, rate-limited, and deferred accounts for diagnostics.
 
 ## Shared catalog
 

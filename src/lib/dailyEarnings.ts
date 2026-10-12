@@ -32,11 +32,15 @@ function earningsCacheKey(username: string): string {
   return username.replace(/^@/, '').trim().toLowerCase()
 }
 
+function datedEarningsCacheKey(username: string, day: string): string {
+  return `${earningsCacheKey(username)}|${day}`
+}
+
 export function cacheDailyEarningsResult(
   current: DailyEarningsResultCache,
   result: DailyEarningsResult,
 ): DailyEarningsResultCache {
-  return { ...current, [earningsCacheKey(result.username)]: result }
+  return { ...current, [datedEarningsCacheKey(result.username, result.day)]: result }
 }
 
 export function readCachedDailyEarningsResults(
@@ -45,8 +49,8 @@ export function readCachedDailyEarningsResults(
   day: string,
 ): DailyEarningsResult[] {
   return usernames.flatMap((username) => {
-    const result = cache[earningsCacheKey(username)]
-    return result?.day === day ? [result] : []
+    const result = cache[datedEarningsCacheKey(username, day)]
+    return result ? [result] : []
   })
 }
 

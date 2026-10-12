@@ -3833,6 +3833,33 @@ button.calendar-day {
   min-width: 0;
 }
 
+.earnings-day-picker {
+  display: grid;
+  flex: 0 1 15rem;
+  gap: 0.45rem;
+  min-width: min(100%, 13.5rem);
+}
+
+.earnings-day-picker select {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.035) linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 1rem) 50% / 0.35rem 0.35rem no-repeat;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  min-height: 3.35rem;
+  padding: 0.65rem 2rem 0.65rem 0.8rem;
+}
+
+.earnings-day-picker select:hover,
+.earnings-day-picker select:focus {
+  border-color: rgba(228, 160, 36, 0.48);
+  outline: none;
+}
+
+.earnings-day-picker option { background: #17171b; color: var(--text); }
+
 .earnings-control-label {
   color: var(--muted);
   font-size: 0.78rem;

@@ -4,8 +4,9 @@
     "api/cron/snapshot-earnings*.ts": { "maxDuration": 300 }
   },
   "crons": [
-    { "path": "/api/cron/snapshot-earnings-summer", "schedule": "30 10 * * *" },
-    { "path": "/api/cron/snapshot-earnings-winter", "schedule": "30 11 * * *" }
+    { "path": "/api/cron/snapshot-earnings-summer", "schedule": "30 9 * * *" },
+    { "path": "/api/cron/snapshot-earnings-winter", "schedule": "30 10 * * *" },
+    { "path": "/api/cron/snapshot-earnings-fallback", "schedule": "30 11 * * *" }
   ],
   "headers": [
     {

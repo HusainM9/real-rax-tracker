@@ -335,7 +335,7 @@ export async function reconstructPublicDailyEarnings(
     const cached = cachedBoxes.get(id)
     return cached?.fingerprint === fingerprint ? [] : [[id, summary, fingerprint] as const]
   })
-  // A small incremental refresh can safely use a wider pool. Cold scans and the forced 6:30
+  // A small incremental refresh can safely use a wider pool. Cold scans and the forced scheduled
   // refresh keep the conservative limit that avoids sustained Real API rate limiting.
   const incrementalDetailConcurrency = detailInputs.length <= 24
     ? Math.min(6, Math.max(detailConcurrency, context.config.concurrency * 3))

@@ -66,4 +66,16 @@ describe('daily earnings result cache', () => {
 
     expect(readCachedDailyEarningsResults(cache, ['gordon'], '2026-10-13')).toEqual([])
   })
+
+  it('retains multiple scheduled days for the same account', () => {
+    const october12 = result('gordon', 120, '2026-10-12')
+    const october13 = result('gordon', 145, '2026-10-13')
+    const cache = cacheDailyEarningsResult(
+      cacheDailyEarningsResult({}, october12),
+      october13,
+    )
+
+    expect(readCachedDailyEarningsResults(cache, ['gordon'], '2026-10-12')).toEqual([october12])
+    expect(readCachedDailyEarningsResults(cache, ['gordon'], '2026-10-13')).toEqual([october13])
+  })
 })

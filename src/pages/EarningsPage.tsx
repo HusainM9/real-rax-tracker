@@ -36,6 +36,14 @@ function percentChange(current: number, previous: number): string {
   return `${change >= 0 ? '+' : ''}${change}%`
 }
 
+function displayEarningsDay(day: string): string {
+  return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
 const DEMO_USERNAME = 'demo-collector'
 const ALL_ACCOUNTS = '__all-linked-accounts__'
 const ACCOUNT_RATE_LIMIT_RETRY_MS = 5_000
@@ -141,7 +149,8 @@ export default function EarningsPage() {
   const [selectedUsername, setSelectedUsername] = useState(import.meta.env.DEV ? DEMO_USERNAME : accounts[0]?.username ?? '')
   const isDemo = import.meta.env.DEV && selectedUsername === DEMO_USERNAME
   const isAllAccounts = selectedUsername === ALL_ACCOUNTS
-  const [day, setDay] = useState(import.meta.env.DEV ? DEMO_RESULT.day : currentRealEarningsDay)
+  const [latestDay, setLatestDay] = useState(currentRealEarningsDay)
+  const [day, setDay] = useState(import.meta.env.DEV ? DEMO_RESULT.day : latestDay)
   const [accountResults, setAccountResults] = useState<DailyEarningsResultCache>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -174,6 +183,15 @@ export default function EarningsPage() {
     }
     return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day))
   }, [history, isAllAccounts, linkedAccounts, selectedUsername])
+  const availableDays = useMemo(
+    () => [...new Set(accountHistory.map((row) => row.day))].sort((a, b) => b.localeCompare(a)),
+    [accountHistory],
+  )
+  const reportDays = useMemo(
+    () => [...new Set([latestDay, ...availableDays])].sort((a, b) => b.localeCompare(a)),
+    [availableDays, latestDay],
+  )
+  const isHistoricalDay = day !== latestDay
   const recentHistory = accountHistory.slice(-30)
   const maxDaily = Math.max(1, ...recentHistory.map((row) => row.dailyTotal))
   const selectedDate = new Date(`${day}T12:00:00`)
@@ -200,6 +218,7 @@ export default function EarningsPage() {
   const highestDay = highestEarningDay(accountHistory)
   const bestWeekday = highestAverageWeekday(accountHistory)
   const topPasses = rankEarningPasses(accountHistory)
+  const hasReportData = Boolean(result || accountHistory.length > 0)
 
   useEffect(() => {
     if (!accounts.some((account) => account.username === selectedUsername)) setSelectedUsername(accounts[0]?.username ?? '')
@@ -217,13 +236,11 @@ export default function EarningsPage() {
           linkedAccounts.map((account) => account.username),
         ))
         setAccountResults((current) => {
-          const next = { ...current }
+          let snapshotsByAccountAndDay: DailyEarningsResultCache = {}
           for (const snapshot of snapshots) {
-            if (snapshot.day !== day) continue
-            const key = snapshot.username.toLowerCase()
-            if (current[key]?.day !== day) next[key] = snapshot
+            snapshotsByAccountAndDay = cacheDailyEarningsResult(snapshotsByAccountAndDay, snapshot)
           }
-          return next
+          return { ...snapshotsByAccountAndDay, ...current }
         })
       }
     }).catch((trackingError) => {
@@ -232,7 +249,7 @@ export default function EarningsPage() {
       }
     })
     return () => controller.abort()
-  }, [day, isDemo, linkedAccounts])
+  }, [isDemo, linkedAccounts])
 
   useEffect(() => {
     if (isDemo) {
@@ -240,13 +257,22 @@ export default function EarningsPage() {
       setHistory(DEMO_HISTORY)
       setError('')
     } else {
+      const currentDay = currentRealEarningsDay()
+      setLatestDay(currentDay)
+      setDay(currentDay)
       setHistory(readEarningsHistory())
     }
   }, [isDemo])
 
   useEffect(() => {
     if (isDemo) return
-    const updateDay = () => setDay(currentRealEarningsDay())
+    const updateDay = () => {
+      const next = currentRealEarningsDay()
+      setLatestDay((previous) => {
+        setDay((selected) => selected === previous ? next : selected)
+        return next
+      })
+    }
     updateDay()
     const timer = window.setInterval(updateDay, 60_000)
     return () => window.clearInterval(timer)
@@ -328,7 +354,7 @@ export default function EarningsPage() {
           <p>Active-season RAX for the current Real earnings day. On This Day claims are tracked separately.</p>
           {isDemo ? <span className="earnings-demo-badge">Development preview data</span> : null}
         </div>
-        <div className="earnings-hero-total"><span>{result?.dayDisplay ?? 'Current day'}</span><strong>{formatRax(result?.dailyTotal ?? 0)}</strong><small>RAX earned</small></div>
+        <div className="earnings-hero-total"><span>{result?.dayDisplay ?? displayEarningsDay(day)}</span><strong>{formatRax(result?.dailyTotal ?? 0)}</strong><small>{isHistoricalDay ? 'Saved RAX' : 'RAX earned'}</small></div>
         <Link className="earnings-back-link" to="/profile">← Profile</Link>
       </section>
 
@@ -339,7 +365,8 @@ export default function EarningsPage() {
             {accounts.map((account) => <button className={`earnings-account-tab${selectedUsername === account.username ? ' is-active' : ''}`} type="button" key={account.id} onClick={() => setSelectedUsername(account.username)}><span>{account.username === ALL_ACCOUNTS ? 'Σ' : account.name.slice(0, 1).toUpperCase()}</span><strong>{account.name}</strong>{account.username !== ALL_ACCOUNTS ? <small>@{account.username}</small> : <small>{linkedAccounts.length} linked</small>}</button>)}
           </div>
         </div>
-        <button className="button primary" type="button" disabled={loading || !day || isDemo} onClick={() => void loadEarnings()}>{isDemo ? 'Preview report' : loading ? 'Loading…' : isAllAccounts ? 'Refresh all accounts' : 'Refresh earnings'}</button>
+        {!isDemo ? <label className="earnings-day-picker"><span className="earnings-control-label">Earnings day</span><select value={day} onChange={(event) => setDay(event.target.value)}>{reportDays.map((reportDay) => <option value={reportDay} key={reportDay}>{displayEarningsDay(reportDay)}{reportDay === latestDay ? ' · Current' : ' · Saved'}</option>)}</select></label> : null}
+        <button className="button primary" type="button" disabled={loading || !day || isDemo || isHistoricalDay} onClick={() => void loadEarnings()}>{isDemo ? 'Preview report' : isHistoricalDay ? 'Saved snapshot' : loading ? 'Loading…' : isAllAccounts ? 'Refresh all accounts' : 'Refresh earnings'}</button>
       </section>
       {refreshLog.length > 0 ? (
         <section className="panel earnings-refresh-log" aria-live="polite">
@@ -364,11 +391,11 @@ export default function EarningsPage() {
         </section>
       ) : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Live preview from public active passes, boosters, and Real box scores. Reports use the final snapshot captured at 6:30 AM Eastern.</p> : null}
+      {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Live preview from public active passes, boosters, and Real box scores. Reports use the first successful snapshot captured from 5:30 AM Eastern.</p> : null}
 
-      {result ? <>
+      {hasReportData ? <>
         <section className="earnings-summary-grid">
-          <div className="panel earnings-summary-card earnings-summary-primary"><span>Daily earnings</span><strong>{formatRax(result.dailyTotal)} RAX</strong><small>{result.dayDisplay}</small></div>
+          <div className="panel earnings-summary-card earnings-summary-primary"><span>Daily earnings</span><strong>{formatRax(result?.dailyTotal ?? 0)} RAX</strong><small>{result?.dayDisplay ?? displayEarningsDay(day)}</small></div>
           <div className="panel earnings-summary-card"><span>This week</span><strong>{formatRax(weeklyTotal)} RAX</strong><small>Monday through today</small></div>
           <div className="panel earnings-summary-card"><span>This month</span><strong>{formatRax(monthlyTotal)} RAX</strong><small>{selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</small></div>
           <div className="panel earnings-summary-card"><span>Highest earned day</span><strong>{formatRax(highestDay?.dailyTotal ?? 0)} RAX</strong><small>{highestDay?.day ?? 'No tracked days yet'}</small></div>
@@ -382,8 +409,10 @@ export default function EarningsPage() {
           <div className="earnings-chart-layout"><div className="earnings-chart-axis"><span>{formatRax(chartCeiling)}</span><span>{formatRax(chartCeiling / 2)}</span><span>0</span></div><div className="earnings-chart" role="img" aria-label="Daily earnings over the last 30 tracked days">{recentHistory.map((entry, index) => { const showLabel = index === 0 || index === recentHistory.length - 1 || index % 5 === 0; return <div className="earnings-chart-column" key={entry.day} title={`${entry.day}: ${formatRax(entry.dailyTotal)} RAX`}><strong className={showLabel ? '' : 'is-hidden'}>{formatRax(entry.dailyTotal)}</strong><div className="earnings-chart-track"><span style={{ height: `${Math.max(3, (entry.dailyTotal / chartCeiling) * 100)}%` }} /></div><small className={showLabel ? '' : 'is-hidden'}>{entry.day.slice(5)}</small></div> })}</div></div>
         </section>
         <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Highest earning passes</h2><p>Top player passes across every tracked day for {reportSubject}.</p></div></div>{topPasses.length === 0 ? <p className="empty">Pass rankings will appear after the first tracked refresh.</p> : <div className="earnings-list">{topPasses.map((pass, index) => <article className="earnings-row earnings-ranked-pass" key={`${pass.username}:${pass.label}:${index}`}><div><strong><span>{index + 1}</span>{pass.label}</strong><small>{[pass.sport, isAllAccounts ? `@${pass.username}` : '', `${pass.days} earning day${pass.days === 1 ? '' : 's'}`, `best ${formatRax(pass.best)} RAX`].filter(Boolean).join(' · ')}</small></div><div className="earnings-row-total"><strong>{formatRax(pass.total)} RAX</strong><small>Total tracked</small></div></article>)}</div>}</section>
-        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>What earned today</h2><p>{result.earnings.length} player pass{result.earnings.length === 1 ? '' : 'es'} contributed.</p></div></div><div className="earnings-list">{result.earnings.map((row) => <article className="earnings-row" key={row.id || row.pass.id}><PassIdentity name={row.pass.label} passKind="player" sport={row.pass.sport} avatar={row.pass.avatar} meta={[row.pass.sport, row.pass.season, row.pass.rarityLabel].filter(Boolean).join(' · ')} /><div className="earnings-row-total"><strong>{formatRax(row.totalEarnings)} RAX</strong>{row.infos.length ? <small>{row.infos.map((info) => `${info.label}: ${info.value}`).join(' · ')}</small> : null}</div></article>)}</div></section>
+        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>What earned on this day</h2><p>{result ? `${result.earnings.length} player pass${result.earnings.length === 1 ? '' : 'es'} contributed.` : `No saved snapshot for ${displayEarningsDay(day)}.`}</p></div></div>{result ? <div className="earnings-list">{result.earnings.map((row) => <article className="earnings-row" key={row.id || row.pass.id}><PassIdentity name={row.pass.label} passKind="player" sport={row.pass.sport} avatar={row.pass.avatar} meta={[row.pass.sport, row.pass.season, row.pass.rarityLabel].filter(Boolean).join(' · ')} /><div className="earnings-row-total"><strong>{formatRax(row.totalEarnings)} RAX</strong>{row.infos.length ? <small>{row.infos.map((info) => `${info.label}: ${info.value}`).join(' · ')}</small> : null}</div></article>)}</div> : <p className="empty">Choose a saved day above, or refresh the current day for a live preview.</p>}</section>
       </> : null}
+
+      {!hasReportData && !isDemo ? <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>No saved earnings yet</h2><p>The first completed snapshot from 5:30 AM Eastern will appear here automatically. You can still refresh the current day for a live preview.</p></div></div></section> : null}
 
       <section className="panel earnings-accounts-panel"><div className="section-heading"><div><h2>Linked accounts</h2><p>The same account list used by Packs. There is no required primary account.</p></div><button className="button compact" type="button" onClick={() => addPackAccountTemplate()}>Add account</button></div>
         {templates.length === 0 ? <p className="empty">No linked accounts yet. The development report above is preview-only.</p> : <div className="pack-account-list">{templates.map((account) => <div className="pack-account-row" key={account.id}><label className="pack-account-field"><span>Name</span><input value={account.name} onChange={(event) => updatePackAccountTemplate(account.id, { name: event.target.value })} /></label><label className="pack-account-field"><span>Real username</span><input value={account.username} placeholder="@username" onChange={(event) => updatePackAccountTemplate(account.id, { username: event.target.value })} /></label><button className="button danger compact" type="button" onClick={() => removePackAccountTemplate(account.id)}>Remove</button></div>)}</div>}
