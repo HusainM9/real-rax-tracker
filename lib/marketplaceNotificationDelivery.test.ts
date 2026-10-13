@@ -189,6 +189,44 @@ describe('marketplace notification delivery', () => {
     })
   })
 
+  it('routes an account to its explicit Discord recipient instead of the legacy user', async () => {
+    process.env.MARKETPLACE_DISCORD_BOT_TOKEN = 'discord-bot-token'
+    process.env.MARKETPLACE_DISCORD_USER_ID = '111111111111111111'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ id: 'dm-channel-2' }))
+      .mockResolvedValueOnce(Response.json({ id: 'message-2' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deliverMarketplaceNotifications({
+      owner: 'another-user',
+      notifications: [notification],
+      discordUserId: '222222222222222222',
+      allowLegacyDiscordUserId: false,
+    })
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      recipient_id: '222222222222222222',
+    })
+  })
+
+  it('does not leak alerts to the legacy recipient after account routing is enabled', async () => {
+    process.env.MARKETPLACE_DISCORD_BOT_TOKEN = 'discord-bot-token'
+    process.env.MARKETPLACE_DISCORD_USER_ID = '111111111111111111'
+    delete process.env.MARKETPLACE_DISCORD_WEBHOOK_URL
+    delete process.env.MARKETPLACE_TELEGRAM_BOT_TOKEN
+    delete process.env.MARKETPLACE_TELEGRAM_CHAT_ID
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(deliverMarketplaceNotifications({
+      owner: 'unlinked-user',
+      notifications: [notification],
+      discordUserId: null,
+      allowLegacyDiscordUserId: false,
+    })).resolves.toEqual({ configured: false, channel: null, delivered: 0 })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects an invalid Discord user ID before calling Discord', async () => {
     process.env.MARKETPLACE_DISCORD_BOT_TOKEN = 'discord-bot-token'
     process.env.MARKETPLACE_DISCORD_USER_ID = 'not-a-user-id'

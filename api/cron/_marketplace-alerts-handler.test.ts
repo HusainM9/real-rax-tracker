@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   marketplaceAlertStorageConfigured: vi.fn(),
   listMarketplaceAlertOwners: vi.fn(),
+  marketplaceAccountRoutingEnabled: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
+  readMarketplaceDeliverySettings: vi.fn(),
   readPendingMarketplaceNotifications: vi.fn(),
   markMarketplaceNotificationsDelivered: vi.fn(),
   saveMarketplaceScanStatus: vi.fn(),
@@ -15,7 +17,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../lib/marketplaceAlertStore.js', () => ({
   marketplaceAlertStorageConfigured: mocks.marketplaceAlertStorageConfigured,
   listMarketplaceAlertOwners: mocks.listMarketplaceAlertOwners,
+  marketplaceAccountRoutingEnabled: mocks.marketplaceAccountRoutingEnabled,
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings: mocks.readMarketplaceDeliverySettings,
   readPendingMarketplaceNotifications: mocks.readPendingMarketplaceNotifications,
   markMarketplaceNotificationsDelivered: mocks.markMarketplaceNotificationsDelivered,
   saveMarketplaceScanStatus: mocks.saveMarketplaceScanStatus,
@@ -43,7 +47,11 @@ beforeEach(() => {
   process.env.MARKETPLACE_SCAN_SECRET = 'market-secret'
   mocks.marketplaceAlertStorageConfigured.mockReset().mockReturnValue(true)
   mocks.listMarketplaceAlertOwners.mockReset().mockResolvedValue(['husain'])
+  mocks.marketplaceAccountRoutingEnabled.mockReset().mockResolvedValue(true)
   mocks.readMarketplaceAlertRules.mockReset().mockResolvedValue([{ id: 'rule-1' }])
+  mocks.readMarketplaceDeliverySettings.mockReset().mockResolvedValue({
+    discordUserId: '123456789012345678',
+  })
   mocks.readPendingMarketplaceNotifications.mockReset().mockResolvedValue([{ id: 'notification-1' }])
   mocks.markMarketplaceNotificationsDelivered.mockReset().mockResolvedValue(undefined)
   mocks.saveMarketplaceScanStatus.mockReset().mockResolvedValue(undefined)
@@ -98,6 +106,11 @@ describe('hosted marketplace monitor endpoint', () => {
     expect(mocks.markMarketplaceNotificationsDelivered).toHaveBeenCalledWith(
       'husain', ['notification-1'],
     )
+    expect(mocks.deliverMarketplaceNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      owner: 'husain',
+      discordUserId: '123456789012345678',
+      allowLegacyDiscordUserId: false,
+    }))
     expect(mocks.saveMarketplaceScanStatus).toHaveBeenCalledWith(
       'husain',
       expect.objectContaining({
@@ -113,6 +126,32 @@ describe('hosted marketplace monitor endpoint', () => {
     })
     await handler(request())
     expect(mocks.markMarketplaceNotificationsDelivered).not.toHaveBeenCalled()
+  })
+
+  it('resolves a different Discord recipient for every rule owner', async () => {
+    mocks.listMarketplaceAlertOwners.mockResolvedValue(['first-user', 'second-user'])
+    mocks.readMarketplaceDeliverySettings
+      .mockResolvedValueOnce({ discordUserId: '111111111111111111' })
+      .mockResolvedValueOnce({ discordUserId: '222222222222222222' })
+
+    await handler(request())
+
+    expect(mocks.deliverMarketplaceNotifications).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        owner: 'first-user',
+        discordUserId: '111111111111111111',
+        allowLegacyDiscordUserId: false,
+      }),
+    )
+    expect(mocks.deliverMarketplaceNotifications).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        owner: 'second-user',
+        discordUserId: '222222222222222222',
+        allowLegacyDiscordUserId: false,
+      }),
+    )
   })
 
   it('isolates owner failures and records them for the UI', async () => {

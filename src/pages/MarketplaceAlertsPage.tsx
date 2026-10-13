@@ -16,6 +16,7 @@ import {
   loadMarketplaceAlerts,
   MarketplaceScanRequestError,
   saveMarketplaceAlerts,
+  saveMarketplaceDiscordRecipient,
   scanMarketplaceAlertsNow,
 } from '../lib/marketplaceAlertsApi'
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
@@ -188,6 +189,9 @@ export default function MarketplaceAlertsPage() {
   const [scanLog, setScanLog] = useState<MarketplaceScanLogEntry[]>([])
   const [status, setStatus] = useState('Loading alerts…')
   const [busy, setBusy] = useState(false)
+  const [discordUserId, setDiscordUserId] = useState('')
+  const [discordBotConfigured, setDiscordBotConfigured] = useState(false)
+  const [discordSaving, setDiscordSaving] = useState(false)
   const [playersBusy, setPlayersBusy] = useState(false)
   const [ignoringListingId, setIgnoringListingId] = useState<string | null>(null)
   const [availablePlayers, setAvailablePlayers] = useState<MarketplaceAlertPlayer[]>([])
@@ -244,6 +248,8 @@ export default function MarketplaceAlertsPage() {
         setNotifications(payload.notifications)
         setScanStatus(payload.scanStatus)
         setScanLog(payload.scanLog)
+        setDiscordUserId(payload.deliverySettings.discordUserId ?? '')
+        setDiscordBotConfigured(payload.discordBotConfigured)
         setStatus(payload.rules.length ? 'Monitoring rules loaded.' : 'Create your first alert rule.')
       })
       .catch((error) => active && setStatus(error instanceof Error ? error.message : 'Could not load alerts.'))
@@ -431,6 +437,21 @@ export default function MarketplaceAlertsPage() {
     setStatus(permission === 'granted' ? 'Browser notifications enabled.' : 'Browser notifications were not enabled.')
   }
 
+  const saveDiscordRecipient = async () => {
+    setDiscordSaving(true)
+    try {
+      const saved = await saveMarketplaceDiscordRecipient(discordUserId)
+      setDiscordUserId(saved.discordUserId ?? '')
+      setStatus(saved.discordUserId
+        ? `Discord DMs for @${accountUsername || 'this account'} are routed to the saved user.`
+        : `Discord DMs are disabled for @${accountUsername || 'this account'}.`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not save the Discord recipient.')
+    } finally {
+      setDiscordSaving(false)
+    }
+  }
+
   const ignoreListing = async (item: MarketplaceAlertNotification) => {
     if (ignoringListingId) return
     setIgnoringListingId(item.listingId)
@@ -514,6 +535,35 @@ export default function MarketplaceAlertsPage() {
         <button className="marketplace-health-action" type="button" onClick={() => void enableBrowserNotifications()}>
           Enable desktop notifications
         </button>
+      </section>
+
+      <section className="panel marketplace-discord-routing">
+        <div className="marketplace-discord-routing-copy">
+          <span>Discord delivery</span>
+          <strong>DM alerts for @{accountUsername || 'this account'}</strong>
+          <p>Save the Discord User ID that should receive matches from this account’s filters.</p>
+        </div>
+        <label className="field">
+          <span>Discord User ID</span>
+          <input
+            value={discordUserId}
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="123456789012345678"
+            onChange={(event) => setDiscordUserId(event.target.value.replace(/\D/g, ''))}
+          />
+        </label>
+        <button
+          className="button secondary"
+          type="button"
+          disabled={discordSaving}
+          onClick={() => void saveDiscordRecipient()}
+        >
+          {discordSaving ? 'Saving…' : 'Save Discord recipient'}
+        </button>
+        <span className={`marketplace-discord-routing-state${discordBotConfigured ? ' ready' : ''}`}>
+          {discordBotConfigured ? 'Bot connected' : 'Bot token missing'}
+        </span>
       </section>
 
       <dl className="marketplace-overview" aria-label="Marketplace alert overview">

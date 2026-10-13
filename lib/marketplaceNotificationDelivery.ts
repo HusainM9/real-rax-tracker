@@ -46,10 +46,22 @@ export function formatMarketplaceNotificationMessage(
   return lines.join('\n')
 }
 
-function deliveryChannel(): MarketplaceDeliveryResult['channel'] {
+function discordRecipient(options: {
+  discordUserId?: string | null
+  allowLegacyDiscordUserId?: boolean
+}): string | null {
+  if (options.discordUserId) return options.discordUserId.trim()
+  if (options.allowLegacyDiscordUserId === false) return null
+  return process.env.MARKETPLACE_DISCORD_USER_ID?.trim() || null
+}
+
+function deliveryChannel(options: {
+  discordUserId?: string | null
+  allowLegacyDiscordUserId?: boolean
+}): MarketplaceDeliveryResult['channel'] {
   if (
     process.env.MARKETPLACE_DISCORD_BOT_TOKEN?.trim() &&
-    process.env.MARKETPLACE_DISCORD_USER_ID?.trim()
+    discordRecipient(options)
   ) return 'discord_dm'
   if (process.env.MARKETPLACE_DISCORD_WEBHOOK_URL?.trim()) return 'discord'
   if (
@@ -82,10 +94,10 @@ async function postDiscordBotJson<T>(
 
 async function sendDiscordDirectMessage(
   message: string,
+  recipientId: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const token = process.env.MARKETPLACE_DISCORD_BOT_TOKEN!.trim()
-  const recipientId = process.env.MARKETPLACE_DISCORD_USER_ID!.trim()
   if (!/^\d{15,22}$/.test(recipientId)) {
     throw new Error('Discord DM delivery is configured with an invalid user ID.')
   }
@@ -126,18 +138,22 @@ async function postJson(url: string, body: unknown, signal?: AbortSignal): Promi
 export async function deliverMarketplaceNotifications(options: {
   owner: string
   notifications: MarketplaceAlertNotification[]
+  discordUserId?: string | null
+  allowLegacyDiscordUserId?: boolean
   signal?: AbortSignal
 }): Promise<MarketplaceDeliveryResult> {
+  const channel = deliveryChannel(options)
   if (options.notifications.length === 0) {
-    return { configured: deliveryChannel() !== null, channel: deliveryChannel(), delivered: 0 }
+    return { configured: channel !== null, channel, delivered: 0 }
   }
 
-  const channel = deliveryChannel()
   if (!channel) return { configured: false, channel: null, delivered: 0 }
   const message = formatMarketplaceNotificationMessage(options.owner, options.notifications)
 
   if (channel === 'discord_dm') {
-    await sendDiscordDirectMessage(message, options.signal)
+    const recipientId = discordRecipient(options)
+    if (!recipientId) return { configured: false, channel: null, delivered: 0 }
+    await sendDiscordDirectMessage(message, recipientId, options.signal)
   } else if (channel === 'discord') {
     await postJson(process.env.MARKETPLACE_DISCORD_WEBHOOK_URL!.trim(), {
       content: message.slice(0, 2_000),

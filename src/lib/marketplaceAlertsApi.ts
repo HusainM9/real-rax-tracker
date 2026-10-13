@@ -5,6 +5,7 @@ import {
   type MarketplaceAlertRule,
 } from '../../lib/marketplaceAlerts'
 import type { MarketplaceScanLogEntry, MarketplaceScanStatus } from '../../lib/marketplaceAlertStore'
+import type { MarketplaceDeliverySettings } from '../../lib/marketplaceAlertStore'
 import { readResponseJson } from './readResponseJson'
 import { simulateMarketplaceBulkAuctions } from './marketplaceDevSimulation'
 
@@ -12,6 +13,7 @@ const DEV_RULES_KEY = 'rax-marketplace-alert-rules-v1'
 const DEV_NOTIFICATIONS_KEY = 'rax-marketplace-alert-notifications-v1'
 const DEV_IGNORED_LISTINGS_KEY = 'rax-marketplace-alert-ignored-listings-v1'
 const DEV_SCAN_LOG_KEY = 'rax-marketplace-alert-scan-log-v1'
+const DEV_DELIVERY_SETTINGS_KEY = 'rax-marketplace-alert-delivery-settings-v1'
 
 export class MarketplaceScanRequestError extends Error {
   readonly scanStatus: MarketplaceScanStatus | null
@@ -29,6 +31,8 @@ export type MarketplaceAlertsPayload = {
   storageConfigured: boolean
   scanStatus: MarketplaceScanStatus | null
   scanLog: MarketplaceScanLogEntry[]
+  deliverySettings: MarketplaceDeliverySettings
+  discordBotConfigured: boolean
 }
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -66,12 +70,33 @@ export async function loadMarketplaceAlerts(): Promise<MarketplaceAlertsPayload>
       storageConfigured: true,
       scanStatus: scanLog[0] ?? fallbackStatus,
       scanLog: scanLog.length > 0 ? scanLog : [{ ...fallbackStatus, id: `${fallbackStatus.startedAt}:automatic`, source: 'automatic' }],
+      deliverySettings: readLocal<MarketplaceDeliverySettings>(DEV_DELIVERY_SETTINGS_KEY, { discordUserId: null }),
+      discordBotConfigured: true,
     }
   }
   const response = await fetch('/api/account/marketplace-alerts', { credentials: 'include' })
   const data = await readResponseJson<MarketplaceAlertsPayload & { error?: string }>(response)
   if (!response.ok) throw new Error(data.error || `Could not load marketplace alerts (${response.status}).`)
   return data
+}
+
+export async function saveMarketplaceDiscordRecipient(
+  discordUserId: string,
+): Promise<MarketplaceDeliverySettings> {
+  const deliverySettings = { discordUserId: discordUserId.trim() || null }
+  if (import.meta.env.DEV) {
+    writeLocal(DEV_DELIVERY_SETTINGS_KEY, deliverySettings)
+    return deliverySettings
+  }
+  const response = await fetch('/api/account/marketplace-alerts', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deliverySettings }),
+  })
+  const data = await readResponseJson<{ deliverySettings?: MarketplaceDeliverySettings; error?: string }>(response)
+  if (!response.ok) throw new Error(data.error || `Could not save Discord recipient (${response.status}).`)
+  return data.deliverySettings ?? { discordUserId: null }
 }
 
 export async function saveMarketplaceAlerts(

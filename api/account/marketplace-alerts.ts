@@ -2,10 +2,12 @@ import {
   ignoreMarketplaceListing,
   marketplaceAlertStorageConfigured,
   readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings,
   readMarketplaceNotifications,
   readMarketplaceScanLog,
   readMarketplaceScanStatus,
   saveMarketplaceAlertRules,
+  saveMarketplaceDeliverySettings,
 } from '../../lib/marketplaceAlertStore'
 import { parseMarketplaceAlertRule, type MarketplaceAlertRule } from '../../lib/marketplaceAlerts'
 import { requireEarningsSession } from '../../lib/earningsAuth'
@@ -33,21 +35,44 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   if (request.method === 'GET') {
-    const [rules, notifications, scanStatus, scanLog] = await Promise.all([
+    const [rules, notifications, scanStatus, scanLog, deliverySettings] = await Promise.all([
       readMarketplaceAlertRules(session.username),
       readMarketplaceNotifications(session.username),
       readMarketplaceScanStatus(session.username),
       readMarketplaceScanLog(session.username),
+      readMarketplaceDeliverySettings(session.username),
     ])
-    return Response.json({ ok: true, storageConfigured: true, rules, notifications, scanStatus, scanLog })
+    return Response.json({
+      ok: true,
+      storageConfigured: true,
+      rules,
+      notifications,
+      scanStatus,
+      scanLog,
+      deliverySettings,
+      discordBotConfigured: Boolean(process.env.MARKETPLACE_DISCORD_BOT_TOKEN?.trim()),
+    })
   }
 
   if (request.method === 'PUT') {
-    let body: { rules?: unknown }
+    let body: { rules?: unknown; deliverySettings?: unknown }
     try {
       body = await request.json() as typeof body
     } catch {
       return Response.json({ error: 'Invalid request body.' }, { status: 400 })
+    }
+    if (body.deliverySettings && typeof body.deliverySettings === 'object') {
+      try {
+        const input = body.deliverySettings as { discordUserId?: unknown }
+        const deliverySettings = await saveMarketplaceDeliverySettings(session.username, {
+          discordUserId: typeof input.discordUserId === 'string' ? input.discordUserId : null,
+        })
+        return Response.json({ ok: true, storageConfigured: true, deliverySettings })
+      } catch (error) {
+        return Response.json({
+          error: error instanceof Error ? error.message : 'Invalid Discord delivery settings.',
+        }, { status: 400 })
+      }
     }
     const rules = Array.isArray(body.rules)
       ? body.rules

@@ -51,13 +51,16 @@ vi.mock('./adminEventStore.js', () => ({ adminStorageConfigured: () => true }))
 import {
   ignoreMarketplaceListing,
   listMarketplaceAlertOwners,
+  marketplaceAccountRoutingEnabled,
   markMarketplaceNotificationsDelivered,
   readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings,
   readMarketplaceNotifications,
   readMarketplaceScanStatus,
   readMarketplaceScanLog,
   readPendingMarketplaceNotifications,
   saveMarketplaceAlertRules,
+  saveMarketplaceDeliverySettings,
   saveMarketplaceScanStatus,
   saveNewMarketplaceNotifications,
 } from './marketplaceAlertStore'
@@ -83,6 +86,27 @@ beforeEach(() => {
 })
 
 describe('marketplace alert storage', () => {
+  it('stores a Discord recipient per normalized account and enables account routing', async () => {
+    expect(await marketplaceAccountRoutingEnabled()).toBe(false)
+    expect(await readMarketplaceDeliverySettings('husain')).toEqual({ discordUserId: null })
+
+    await saveMarketplaceDeliverySettings('  Husain  ', {
+      discordUserId: '123456789012345678',
+    })
+
+    expect(await marketplaceAccountRoutingEnabled()).toBe(true)
+    expect(await readMarketplaceDeliverySettings('HUSAIN')).toEqual({
+      discordUserId: '123456789012345678',
+    })
+    expect(await readMarketplaceDeliverySettings('another-user')).toEqual({ discordUserId: null })
+  })
+
+  it('rejects invalid Discord recipients before saving them', async () => {
+    await expect(saveMarketplaceDeliverySettings('husain', { discordUserId: 'not-an-id' }))
+      .rejects.toThrow('valid Discord User ID')
+    expect(await marketplaceAccountRoutingEnabled()).toBe(false)
+  })
+
   it('normalizes owner keys and lists only owners with saved rules', async () => {
     await saveMarketplaceAlertRules('  Husain  ', [rule])
     expect(await listMarketplaceAlertOwners()).toEqual(['husain'])

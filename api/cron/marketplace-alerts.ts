@@ -1,8 +1,10 @@
 import {
   listMarketplaceAlertOwners,
+  marketplaceAccountRoutingEnabled,
   marketplaceAlertStorageConfigured,
   markMarketplaceNotificationsDelivered,
   readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings,
   readPendingMarketplaceNotifications,
   saveMarketplaceScanStatus,
 } from '../../lib/marketplaceAlertStore.js'
@@ -42,6 +44,7 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   const owners = await listMarketplaceAlertOwners()
+  const accountRoutingEnabled = await marketplaceAccountRoutingEnabled()
   const startedAtMs = Date.now()
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(SOFT_BUDGET_MS)])
   const completed: Array<{
@@ -65,6 +68,7 @@ export default async function handler(request: Request): Promise<Response> {
     const startedAt = new Date().toISOString()
     try {
       const rules = await readMarketplaceAlertRules(owner)
+      const deliverySettings = await readMarketplaceDeliverySettings(owner)
       const context: RealApiContext = {
         config: realConfig,
         signal,
@@ -79,7 +83,13 @@ export default async function handler(request: Request): Promise<Response> {
       }
       let deliveryWarning: string | null = null
       try {
-        delivery = await deliverMarketplaceNotifications({ owner, notifications: pending, signal })
+        delivery = await deliverMarketplaceNotifications({
+          owner,
+          notifications: pending,
+          discordUserId: deliverySettings.discordUserId,
+          allowLegacyDiscordUserId: !accountRoutingEnabled,
+          signal,
+        })
       } catch (error) {
         deliveryWarning = `Scan completed, but ${errorMessage(error)}`
       }

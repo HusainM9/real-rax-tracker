@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   requireEarningsSession: vi.fn(),
   resolveRealApiConfig: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
+  readMarketplaceDeliverySettings: vi.fn(),
+  marketplaceAccountRoutingEnabled: vi.fn(),
   readMarketplaceNotifications: vi.fn(),
   readPendingMarketplaceNotifications: vi.fn(),
   markMarketplaceNotificationsDelivered: vi.fn(),
@@ -19,6 +21,8 @@ vi.mock('../../lib/earningsAuth', () => ({ requireEarningsSession: mocks.require
 vi.mock('../../lib/realApi', () => ({ resolveRealApiConfig: mocks.resolveRealApiConfig }))
 vi.mock('../../lib/marketplaceAlertStore', () => ({
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings: mocks.readMarketplaceDeliverySettings,
+  marketplaceAccountRoutingEnabled: mocks.marketplaceAccountRoutingEnabled,
   readMarketplaceNotifications: mocks.readMarketplaceNotifications,
   readPendingMarketplaceNotifications: mocks.readPendingMarketplaceNotifications,
   markMarketplaceNotificationsDelivered: mocks.markMarketplaceNotificationsDelivered,
@@ -40,6 +44,10 @@ beforeEach(() => {
   mocks.requireAccountSession.mockReset().mockResolvedValue({ username: 'husain' })
   mocks.resolveRealApiConfig.mockReset().mockReturnValue({ baseUrl: 'https://web.realapp.com' })
   mocks.readMarketplaceAlertRules.mockReset().mockResolvedValue([rule])
+  mocks.readMarketplaceDeliverySettings.mockReset().mockResolvedValue({
+    discordUserId: '123456789012345678',
+  })
+  mocks.marketplaceAccountRoutingEnabled.mockReset().mockResolvedValue(true)
   mocks.readMarketplaceNotifications.mockReset().mockResolvedValue([fresh, older])
   mocks.readPendingMarketplaceNotifications.mockReset().mockResolvedValue([fresh])
   mocks.markMarketplaceNotificationsDelivered.mockReset().mockResolvedValue(undefined)
@@ -109,6 +117,8 @@ describe('account marketplace scan endpoint', () => {
     )
     expect(mocks.deliverMarketplaceNotifications).toHaveBeenCalledWith(expect.objectContaining({
       owner: 'husain', notifications: [fresh],
+      discordUserId: '123456789012345678',
+      allowLegacyDiscordUserId: false,
     }))
     expect(mocks.markMarketplaceNotificationsDelivered).toHaveBeenCalledWith('husain', [fresh.id])
   })

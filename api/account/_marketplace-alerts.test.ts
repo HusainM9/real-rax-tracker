@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   readMarketplaceNotifications: vi.fn(),
   readMarketplaceScanStatus: vi.fn(),
   readMarketplaceScanLog: vi.fn(),
+  readMarketplaceDeliverySettings: vi.fn(),
   saveMarketplaceAlertRules: vi.fn(),
+  saveMarketplaceDeliverySettings: vi.fn(),
   ignoreMarketplaceListing: vi.fn(),
 }))
 
@@ -20,7 +22,9 @@ vi.mock('../../lib/marketplaceAlertStore', () => ({
   readMarketplaceNotifications: mocks.readMarketplaceNotifications,
   readMarketplaceScanStatus: mocks.readMarketplaceScanStatus,
   readMarketplaceScanLog: mocks.readMarketplaceScanLog,
+  readMarketplaceDeliverySettings: mocks.readMarketplaceDeliverySettings,
   saveMarketplaceAlertRules: mocks.saveMarketplaceAlertRules,
+  saveMarketplaceDeliverySettings: mocks.saveMarketplaceDeliverySettings,
   ignoreMarketplaceListing: mocks.ignoreMarketplaceListing,
 }))
 
@@ -34,7 +38,9 @@ beforeEach(() => {
   mocks.readMarketplaceNotifications.mockReset().mockResolvedValue([])
   mocks.readMarketplaceScanStatus.mockReset().mockResolvedValue(null)
   mocks.readMarketplaceScanLog.mockReset().mockResolvedValue([])
+  mocks.readMarketplaceDeliverySettings.mockReset().mockResolvedValue({ discordUserId: null })
   mocks.saveMarketplaceAlertRules.mockReset().mockResolvedValue([])
+  mocks.saveMarketplaceDeliverySettings.mockReset().mockImplementation(async (_owner, settings) => settings)
   mocks.ignoreMarketplaceListing.mockReset().mockResolvedValue([])
 })
 
@@ -47,6 +53,20 @@ describe('account marketplace alerts endpoint', () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       scanLog: [{ id: 'scan-1', source: 'automatic' }],
+      deliverySettings: { discordUserId: null },
+    })
+  })
+
+  it('saves Discord routing only for the signed-in account', async () => {
+    const response = await handler(new Request('https://example.com/api/account/marketplace-alerts', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deliverySettings: { discordUserId: '123456789012345678' } }),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(mocks.saveMarketplaceDeliverySettings).toHaveBeenCalledWith('husain', {
+      discordUserId: '123456789012345678',
     })
   })
 

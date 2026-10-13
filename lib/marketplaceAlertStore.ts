@@ -15,6 +15,8 @@ const PENDING_IDS_PREFIX = 'rax:marketplace-alerts:pending-ids:'
 const SCAN_STATUS_PREFIX = 'rax:marketplace-alerts:scan-status:'
 const SCAN_LOG_PREFIX = 'rax:marketplace-alerts:scan-log:'
 const IGNORED_LISTING_PREFIX = 'rax:marketplace-alerts:ignored-listing:'
+const DELIVERY_SETTINGS_PREFIX = 'rax:marketplace-alerts:delivery-settings:'
+const ACCOUNT_ROUTING_ENABLED_KEY = 'rax:marketplace-alerts:account-routing-enabled'
 const MAX_NOTIFICATIONS = 200
 const MAX_SCAN_LOG_ENTRIES = 40
 const SEEN_TTL_SECONDS = 14 * 24 * 60 * 60
@@ -35,6 +37,10 @@ export type MarketplaceScanStatus = {
 export type MarketplaceScanLogEntry = MarketplaceScanStatus & {
   id: string
   source: 'automatic' | 'manual' | 'page'
+}
+
+export type MarketplaceDeliverySettings = {
+  discordUserId: string | null
 }
 
 function ownerKey(owner: string): string {
@@ -73,6 +79,20 @@ function ignoredListingKey(owner: string, listingId: string): string {
   return `${IGNORED_LISTING_PREFIX}${ownerKey(owner)}:${listingId.trim()}`
 }
 
+function deliverySettingsKey(owner: string): string {
+  return `${DELIVERY_SETTINGS_PREFIX}${ownerKey(owner)}`
+}
+
+export function normalizeDiscordUserId(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value !== 'string') throw new Error('Discord User ID must be a number.')
+  const normalized = value.trim()
+  if (!/^\d{15,22}$/.test(normalized)) {
+    throw new Error('Enter a valid Discord User ID copied from Discord Developer Mode.')
+  }
+  return normalized
+}
+
 function parseNotification(entry: unknown): MarketplaceAlertNotification | null {
   try {
     const parsed = typeof entry === 'string' ? JSON.parse(entry) : entry
@@ -89,6 +109,38 @@ export function marketplaceAlertStorageConfigured(): boolean {
 export async function listMarketplaceAlertOwners(): Promise<string[]> {
   if (!marketplaceAlertStorageConfigured()) return []
   return (await kv.smembers(OWNERS_KEY)).sort()
+}
+
+export async function marketplaceAccountRoutingEnabled(): Promise<boolean> {
+  if (!marketplaceAlertStorageConfigured()) return false
+  return Boolean(await kv.get(ACCOUNT_ROUTING_ENABLED_KEY))
+}
+
+export async function readMarketplaceDeliverySettings(
+  owner: string,
+): Promise<MarketplaceDeliverySettings> {
+  if (!marketplaceAlertStorageConfigured()) return { discordUserId: null }
+  const stored = await kv.get<unknown>(deliverySettingsKey(owner))
+  if (!stored || typeof stored !== 'object') return { discordUserId: null }
+  const discordUserId = (stored as { discordUserId?: unknown }).discordUserId
+  try {
+    return { discordUserId: normalizeDiscordUserId(discordUserId) }
+  } catch {
+    return { discordUserId: null }
+  }
+}
+
+export async function saveMarketplaceDeliverySettings(
+  owner: string,
+  settings: MarketplaceDeliverySettings,
+): Promise<MarketplaceDeliverySettings> {
+  const saved = { discordUserId: normalizeDiscordUserId(settings.discordUserId) }
+  if (!marketplaceAlertStorageConfigured()) return saved
+  await Promise.all([
+    kv.set(deliverySettingsKey(owner), saved),
+    kv.set(ACCOUNT_ROUTING_ENABLED_KEY, '1'),
+  ])
+  return saved
 }
 
 export async function readMarketplaceAlertRules(owner: string): Promise<MarketplaceAlertRule[]> {

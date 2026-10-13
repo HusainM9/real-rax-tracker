@@ -5793,6 +5793,57 @@ button.linkish {
 .marketplace-alerts-page .marketplace-health span:not(.marketplace-health-dot),
 .marketplace-alerts-page .marketplace-health-action { color: #8f8f8b; }
 
+.marketplace-alerts-page .marketplace-discord-routing {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) minmax(15rem, 20rem) auto auto;
+  align-items: end;
+  gap: 0.8rem;
+  padding: 1.1rem 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.marketplace-discord-routing-copy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.marketplace-discord-routing-copy > span {
+  color: #8f8f8b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.marketplace-discord-routing-copy strong { color: #eeeeeb; }
+.marketplace-discord-routing-copy p {
+  margin: 0;
+  color: #8f8f8b;
+  font-size: 0.78rem;
+}
+
+.marketplace-discord-routing .field { gap: 0.35rem; }
+.marketplace-discord-routing .field > span { color: #a8a8a3; font-size: 0.72rem; }
+.marketplace-discord-routing input {
+  min-height: 2.65rem;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f2f2f0;
+  background: #141414;
+}
+
+.marketplace-discord-routing .button { min-height: 2.65rem; white-space: nowrap; }
+.marketplace-discord-routing-state {
+  align-self: center;
+  color: #d28d83;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.marketplace-discord-routing-state.ready { color: #76c8a7; }
+
 .marketplace-alerts-page .marketplace-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -5943,6 +5994,11 @@ button.linkish {
   .marketplace-alerts-page .marketplace-hero { gap: 1rem; }
   .marketplace-alerts-page .marketplace-hero-actions .button { width: auto; }
   .marketplace-alerts-page .marketplace-health-action { width: 100%; margin: 0 0 0 1.05rem; text-align: left; }
+  .marketplace-alerts-page .marketplace-discord-routing {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .marketplace-discord-routing-state { justify-self: start; }
   .marketplace-alerts-page .marketplace-rule-builder,
   .marketplace-alerts-page .marketplace-rules-panel,
   .marketplace-alerts-page .marketplace-feed-panel { padding-block: 1.5rem; }

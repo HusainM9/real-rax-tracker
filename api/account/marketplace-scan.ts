@@ -1,6 +1,8 @@
 import {
   markMarketplaceNotificationsDelivered,
+  marketplaceAccountRoutingEnabled,
   readMarketplaceAlertRules,
+  readMarketplaceDeliverySettings,
   readMarketplaceNotifications,
   readPendingMarketplaceNotifications,
   saveMarketplaceScanStatus,
@@ -31,6 +33,10 @@ export default async function handler(request: Request): Promise<Response> {
   const startedAt = new Date().toISOString()
   try {
     const rules = await readMarketplaceAlertRules(session.username)
+    const [deliverySettings, accountRoutingEnabled] = await Promise.all([
+      readMarketplaceDeliverySettings(session.username),
+      marketplaceAccountRoutingEnabled(),
+    ])
     const context: RealApiContext = {
       config,
       signal: request.signal,
@@ -48,6 +54,8 @@ export default async function handler(request: Request): Promise<Response> {
       delivery = await deliverMarketplaceNotifications({
         owner: session.username,
         notifications: pending,
+        discordUserId: deliverySettings.discordUserId,
+        allowLegacyDiscordUserId: !accountRoutingEnabled,
         signal: request.signal,
       })
     } catch (error) {
