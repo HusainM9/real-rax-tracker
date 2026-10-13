@@ -87,6 +87,13 @@ export function hasSnapshotTimeBudget(
   return now - startedAt + delayMs + SNAPSHOT_RETRY_RESERVE_MS < budgetMs
 }
 
+export function orderSnapshotUsernames(
+  usernames: string[],
+  prioritizeTail = false,
+): string[] {
+  return prioritizeTail ? [...usernames].reverse() : [...usernames]
+}
+
 function waitForSnapshotRetry(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve()
   return new Promise((resolve, reject) => {
@@ -123,7 +130,15 @@ async function handleSnapshot(request: Request): Promise<Response> {
   if (!realConfig) {
     return Response.json({ error: 'The Real API transport session is not configured.' }, { status: 503 })
   }
-  const usernames = await listTrackedEarningsUsernames()
+  // The first 6 AM fallback starts from the opposite end of the account list.
+  // Successful account/day snapshots are skipped below, so this prevents an
+  // account near the end (such as @twinchenzo) from repeatedly being deferred
+  // when the earlier run hits Real's rate limit or our soft time budget.
+  const prioritizeTail = url.pathname.includes('snapshot-earnings-after-six')
+  const usernames = orderSnapshotUsernames(
+    await listTrackedEarningsUsernames(),
+    prioritizeTail,
+  )
   const day = url.searchParams.get('day') ?? currentRealEarningsDay(now)
   const startedAt = Date.now()
   const snapshotSignal = force

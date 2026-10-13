@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { RealApiError } from '../../lib/realApi'
 import {
   hasSnapshotTimeBudget,
   isAuthorizedSnapshotRequest,
   isEasternSnapshotTime,
   isSnapshotRateLimit,
+  orderSnapshotUsernames,
   snapshotRetryDelayMs,
 } from './snapshot-earnings'
 
@@ -81,5 +83,32 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
   it('reserves enough invocation time to finish or defer cleanly', () => {
     expect(hasSnapshotTimeBudget(1_000, 20_000, 5_000)).toBe(true)
     expect(hasSnapshotTimeBudget(1_000, 40_000, 2_000)).toBe(false)
+  })
+
+  it('prioritizes the opposite end of the account list on the 6 AM fallback', () => {
+    const usernames = ['alpha', 'gordon', 'twinchenzo']
+
+    expect(orderSnapshotUsernames(usernames)).toEqual(usernames)
+    expect(orderSnapshotUsernames(usernames, true)).toEqual([
+      'twinchenzo',
+      'gordon',
+      'alpha',
+    ])
+    expect(usernames).toEqual(['alpha', 'gordon', 'twinchenzo'])
+  })
+
+  it('configures a DST-aware 6 AM retry in both seasons', () => {
+    const config = JSON.parse(
+      readFileSync('vercel.json', 'utf8'),
+    ) as { crons: Array<{ path: string; schedule: string }> }
+
+    expect(config.crons).toContainEqual({
+      path: '/api/cron/snapshot-earnings-after-six-summer',
+      schedule: '0 10 * * *',
+    })
+    expect(config.crons).toContainEqual({
+      path: '/api/cron/snapshot-earnings-after-six-winter',
+      schedule: '0 11 * * *',
+    })
   })
 })
