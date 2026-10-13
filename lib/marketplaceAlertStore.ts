@@ -18,11 +18,13 @@ const IGNORED_LISTING_PREFIX = 'rax:marketplace-alerts:ignored-listing:'
 const DELIVERY_SETTINGS_PREFIX = 'rax:marketplace-alerts:delivery-settings:'
 const ACCOUNT_ROUTING_ENABLED_KEY = 'rax:marketplace-alerts:account-routing-enabled'
 const SCAN_LEASE_KEY = 'rax:marketplace-alerts:scan-lease'
+const SCAN_COOLDOWN_KEY = 'rax:marketplace-alerts:scan-cooldown'
 const MAX_NOTIFICATIONS = 200
 const MAX_SCAN_LOG_ENTRIES = 40
 const SEEN_TTL_SECONDS = 14 * 24 * 60 * 60
 const IGNORED_LISTING_TTL_SECONDS = 30 * 24 * 60 * 60
 const SCAN_LEASE_TTL_SECONDS = 70
+const SCAN_COOLDOWN_TTL_SECONDS = 75
 
 export type MarketplaceScanStatus = {
   startedAt: string
@@ -115,6 +117,7 @@ export function marketplaceAlertStorageConfigured(): boolean {
  */
 export async function acquireMarketplaceScanLease(): Promise<string | null> {
   if (!marketplaceAlertStorageConfigured()) return null
+  if (await kv.get(SCAN_COOLDOWN_KEY)) return null
   const token = crypto.randomUUID()
   const claimed = await kv.set(SCAN_LEASE_KEY, token, {
     ex: SCAN_LEASE_TTL_SECONDS,
@@ -126,7 +129,11 @@ export async function acquireMarketplaceScanLease(): Promise<string | null> {
 export async function releaseMarketplaceScanLease(token: string): Promise<void> {
   if (!marketplaceAlertStorageConfigured()) return
   const current = await kv.get<string>(SCAN_LEASE_KEY)
-  if (current === token) await kv.del(SCAN_LEASE_KEY)
+  if (current !== token) return
+  // A short post-run cooldown acknowledges delayed QStash retries without doing
+  // the same exhaustive scan again. It expires before the next two-minute tick.
+  await kv.set(SCAN_COOLDOWN_KEY, '1', { ex: SCAN_COOLDOWN_TTL_SECONDS })
+  await kv.del(SCAN_LEASE_KEY)
 }
 
 export async function listMarketplaceAlertOwners(): Promise<string[]> {

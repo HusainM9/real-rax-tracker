@@ -97,7 +97,7 @@ describe('marketplace alert storage', () => {
     expect(await acquireMarketplaceScanLease()).toBeNull()
 
     await releaseMarketplaceScanLease(lease!)
-    expect(await acquireMarketplaceScanLease()).toEqual(expect.any(String))
+    expect(await acquireMarketplaceScanLease()).toBeNull()
   })
 
   it('stores a Discord recipient per normalized account and enables account routing', async () => {
