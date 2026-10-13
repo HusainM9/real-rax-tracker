@@ -17,10 +17,12 @@ const SCAN_LOG_PREFIX = 'rax:marketplace-alerts:scan-log:'
 const IGNORED_LISTING_PREFIX = 'rax:marketplace-alerts:ignored-listing:'
 const DELIVERY_SETTINGS_PREFIX = 'rax:marketplace-alerts:delivery-settings:'
 const ACCOUNT_ROUTING_ENABLED_KEY = 'rax:marketplace-alerts:account-routing-enabled'
+const SCAN_LEASE_KEY = 'rax:marketplace-alerts:scan-lease'
 const MAX_NOTIFICATIONS = 200
 const MAX_SCAN_LOG_ENTRIES = 40
 const SEEN_TTL_SECONDS = 14 * 24 * 60 * 60
 const IGNORED_LISTING_TTL_SECONDS = 30 * 24 * 60 * 60
+const SCAN_LEASE_TTL_SECONDS = 70
 
 export type MarketplaceScanStatus = {
   startedAt: string
@@ -104,6 +106,27 @@ function parseNotification(entry: unknown): MarketplaceAlertNotification | null 
 
 export function marketplaceAlertStorageConfigured(): boolean {
   return adminStorageConfigured()
+}
+
+/**
+ * Prevent overlapping scheduler deliveries from multiplying Real API traffic.
+ * QStash retries failed deliveries, so one slow scan can otherwise create a
+ * thundering herd of identical scans every two minutes.
+ */
+export async function acquireMarketplaceScanLease(): Promise<string | null> {
+  if (!marketplaceAlertStorageConfigured()) return null
+  const token = crypto.randomUUID()
+  const claimed = await kv.set(SCAN_LEASE_KEY, token, {
+    ex: SCAN_LEASE_TTL_SECONDS,
+    nx: true,
+  })
+  return claimed ? token : null
+}
+
+export async function releaseMarketplaceScanLease(token: string): Promise<void> {
+  if (!marketplaceAlertStorageConfigured()) return
+  const current = await kv.get<string>(SCAN_LEASE_KEY)
+  if (current === token) await kv.del(SCAN_LEASE_KEY)
 }
 
 export async function listMarketplaceAlertOwners(): Promise<string[]> {

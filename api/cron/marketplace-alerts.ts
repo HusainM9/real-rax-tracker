@@ -1,4 +1,5 @@
 import {
+  acquireMarketplaceScanLease,
   listMarketplaceAlertOwners,
   marketplaceAccountRoutingEnabled,
   marketplaceAlertStorageConfigured,
@@ -6,6 +7,7 @@ import {
   readMarketplaceAlertRules,
   readMarketplaceDeliverySettings,
   readPendingMarketplaceNotifications,
+  releaseMarketplaceScanLease,
   saveMarketplaceScanStatus,
 } from '../../lib/marketplaceAlertStore.js'
 import { deliverMarketplaceNotifications } from '../../lib/marketplaceNotificationDelivery.js'
@@ -33,22 +35,27 @@ function errorMessage(error: unknown): string {
   return (error instanceof Error ? error.message : 'Marketplace scan failed.').slice(0, 300)
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
-  }
-  if (!isAuthorizedMarketplaceScanRequest(request)) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  if (!marketplaceAlertStorageConfigured()) {
-    return Response.json({ error: 'Marketplace alert storage is not configured.' }, { status: 503 })
-  }
+type MarketplaceScanResult = {
+  ok: boolean
+  intervalMinutes: number
+  owners: number
+  completed: Array<{
+    owner: string
+    checkedListings: number
+    requests: number
+    newMatches: number
+    delivered: number
+    channel: string | null
+  }>
+  errors: Array<{ owner: string; error: string }>
+  deferred: string[]
+  elapsedMs: number
+}
 
-  const realConfig = resolveRealApiConfig()
-  if (!realConfig) {
-    return Response.json({ error: 'The Real marketplace session is not configured.' }, { status: 503 })
-  }
-
+async function runMarketplaceScan(
+  request: Request,
+  realConfig: NonNullable<ReturnType<typeof resolveRealApiConfig>>,
+): Promise<MarketplaceScanResult> {
   const owners = await listMarketplaceAlertOwners()
   const accountRoutingEnabled = await marketplaceAccountRoutingEnabled()
   const startedAtMs = Date.now()
@@ -76,7 +83,17 @@ export default async function handler(request: Request): Promise<Response> {
       const rules = await readMarketplaceAlertRules(owner)
       const deliverySettings = await readMarketplaceDeliverySettings(owner)
       const context: RealApiContext = {
-        config: realConfig,
+        // Marketplace pagination can touch several pages for each tracked player.
+        // Keep it serial so Real does not turn a harmless scan into a burst of 400
+        // "high volume" responses, and bound retries inside this scheduled window.
+        config: {
+          ...realConfig,
+          concurrency: 1,
+          maxRetries: Math.min(realConfig.maxRetries, 2),
+          retryBaseMs: Math.min(realConfig.retryBaseMs, 500),
+          retryMaxMs: Math.min(realConfig.retryMaxMs, 1_500),
+          timeoutMs: Math.min(realConfig.timeoutMs, 8_000),
+        },
         signal,
         publicCacheNamespace: `marketplace-monitor:${startedAt}`,
       }
@@ -139,7 +156,7 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json({
+  return {
     ok: errors.length === 0 && deferred.length === 0,
     intervalMinutes: 2,
     owners: owners.length,
@@ -147,5 +164,63 @@ export default async function handler(request: Request): Promise<Response> {
     errors,
     deferred,
     elapsedMs: Date.now() - startedAtMs,
+  }
+}
+
+function streamedJson(work: () => Promise<MarketplaceScanResult>): Response {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Returning the Response and one harmless whitespace byte immediately keeps
+      // Vercel from enforcing its 25-second "initial response" timeout while the
+      // scan continues inside the configured 60-second function window.
+      controller.enqueue(encoder.encode(' '))
+      void work()
+        .then((result) => controller.enqueue(encoder.encode(JSON.stringify(result))))
+        .catch((error) => controller.enqueue(encoder.encode(JSON.stringify({
+          ok: false,
+          error: errorMessage(error),
+        }))))
+        .finally(() => controller.close())
+    },
+  })
+  return new Response(stream, {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  })
+}
+
+export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'POST') {
+    return new Response('Method Not Allowed', { status: 405 })
+  }
+  if (!isAuthorizedMarketplaceScanRequest(request)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (!marketplaceAlertStorageConfigured()) {
+    return Response.json({ error: 'Marketplace alert storage is not configured.' }, { status: 503 })
+  }
+
+  const realConfig = resolveRealApiConfig()
+  if (!realConfig) {
+    return Response.json({ error: 'The Real marketplace session is not configured.' }, { status: 503 })
+  }
+
+  const lease = await acquireMarketplaceScanLease()
+  if (!lease) {
+    return Response.json({
+      ok: true,
+      skipped: true,
+      reason: 'scan_in_progress',
+      intervalMinutes: 2,
+    }, { status: 202 })
+  }
+
+  return streamedJson(async () => {
+    try {
+      return await runMarketplaceScan(request, realConfig)
+    } finally {
+      await releaseMarketplaceScanLease(lease)
+    }
   })
 }

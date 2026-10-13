@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   marketplaceAlertStorageConfigured: vi.fn(),
+  acquireMarketplaceScanLease: vi.fn(),
+  releaseMarketplaceScanLease: vi.fn(),
   listMarketplaceAlertOwners: vi.fn(),
   marketplaceAccountRoutingEnabled: vi.fn(),
   readMarketplaceAlertRules: vi.fn(),
@@ -16,6 +18,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../lib/marketplaceAlertStore.js', () => ({
   marketplaceAlertStorageConfigured: mocks.marketplaceAlertStorageConfigured,
+  acquireMarketplaceScanLease: mocks.acquireMarketplaceScanLease,
+  releaseMarketplaceScanLease: mocks.releaseMarketplaceScanLease,
   listMarketplaceAlertOwners: mocks.listMarketplaceAlertOwners,
   marketplaceAccountRoutingEnabled: mocks.marketplaceAccountRoutingEnabled,
   readMarketplaceAlertRules: mocks.readMarketplaceAlertRules,
@@ -46,6 +50,8 @@ beforeEach(() => {
   process.env.NODE_ENV = 'production'
   process.env.MARKETPLACE_SCAN_SECRET = 'market-secret'
   mocks.marketplaceAlertStorageConfigured.mockReset().mockReturnValue(true)
+  mocks.acquireMarketplaceScanLease.mockReset().mockResolvedValue('scan-lease')
+  mocks.releaseMarketplaceScanLease.mockReset().mockResolvedValue(undefined)
   mocks.listMarketplaceAlertOwners.mockReset().mockResolvedValue(['husain'])
   mocks.marketplaceAccountRoutingEnabled.mockReset().mockResolvedValue(true)
   mocks.readMarketplaceAlertRules.mockReset().mockResolvedValue([{ id: 'rule-1' }])
@@ -118,13 +124,29 @@ describe('hosted marketplace monitor endpoint', () => {
         delivered: 1, deliveryChannel: 'discord', error: null,
       }),
     )
+    expect(mocks.releaseMarketplaceScanLease).toHaveBeenCalledWith('scan-lease')
+  })
+
+  it('acknowledges an overlapping scheduler delivery without starting another scan', async () => {
+    mocks.acquireMarketplaceScanLease.mockResolvedValue(null)
+
+    const response = await handler(request())
+
+    expect(response.status).toBe(202)
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      skipped: true,
+      reason: 'scan_in_progress',
+    })
+    expect(mocks.scanMarketplaceAlerts).not.toHaveBeenCalled()
   })
 
   it('does not clear pending matches when no delivery channel is configured', async () => {
     mocks.deliverMarketplaceNotifications.mockResolvedValue({
       configured: false, channel: null, delivered: 0,
     })
-    await handler(request())
+    const response = await handler(request())
+    await response.json()
     expect(mocks.markMarketplaceNotificationsDelivered).not.toHaveBeenCalled()
   })
 
@@ -134,7 +156,8 @@ describe('hosted marketplace monitor endpoint', () => {
       .mockResolvedValueOnce({ discordUserId: '111111111111111111' })
       .mockResolvedValueOnce({ discordUserId: '222222222222222222' })
 
-    await handler(request())
+    const response = await handler(request())
+    await response.json()
 
     expect(mocks.deliverMarketplaceNotifications).toHaveBeenNthCalledWith(
       1,

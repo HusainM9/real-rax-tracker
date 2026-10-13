@@ -49,6 +49,7 @@ vi.mock('@vercel/kv', () => ({
 vi.mock('./adminEventStore.js', () => ({ adminStorageConfigured: () => true }))
 
 import {
+  acquireMarketplaceScanLease,
   ignoreMarketplaceListing,
   listMarketplaceAlertOwners,
   marketplaceAccountRoutingEnabled,
@@ -59,6 +60,7 @@ import {
   readMarketplaceScanStatus,
   readMarketplaceScanLog,
   readPendingMarketplaceNotifications,
+  releaseMarketplaceScanLease,
   saveMarketplaceAlertRules,
   saveMarketplaceDeliverySettings,
   saveMarketplaceScanStatus,
@@ -86,6 +88,18 @@ beforeEach(() => {
 })
 
 describe('marketplace alert storage', () => {
+  it('allows only one active marketplace scan lease and protects its owner token', async () => {
+    const lease = await acquireMarketplaceScanLease()
+    expect(lease).toEqual(expect.any(String))
+    expect(await acquireMarketplaceScanLease()).toBeNull()
+
+    await releaseMarketplaceScanLease('not-the-owner')
+    expect(await acquireMarketplaceScanLease()).toBeNull()
+
+    await releaseMarketplaceScanLease(lease!)
+    expect(await acquireMarketplaceScanLease()).toEqual(expect.any(String))
+  })
+
   it('stores a Discord recipient per normalized account and enables account routing', async () => {
     expect(await marketplaceAccountRoutingEnabled()).toBe(false)
     expect(await readMarketplaceDeliverySettings('husain')).toEqual({ discordUserId: null })
