@@ -135,7 +135,7 @@ export default async function handler(request: Request): Promise<Response> {
 
   return Response.json({
     ok: errors.length === 0 && deferred.length === 0,
-    intervalMinutes: 5,
+    intervalMinutes: 2,
     owners: owners.length,
     completed,
     errors,

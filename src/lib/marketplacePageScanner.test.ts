@@ -26,11 +26,12 @@ describe('marketplace page scanner', () => {
     )
   })
 
-  it('runs every five minutes while active and stops after cleanup', () => {
+  it('runs every two minutes while active and stops after cleanup', () => {
     vi.useFakeTimers()
     const scan = vi.fn()
     const stop = startMarketplacePageScanner(scan)
 
+    expect(MARKETPLACE_PAGE_SCAN_INTERVAL_MS).toBe(2 * 60 * 1000)
     expect(scan).toHaveBeenCalledTimes(1)
 
     vi.advanceTimersByTime(MARKETPLACE_PAGE_SCAN_INTERVAL_MS - 1)

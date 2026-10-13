@@ -1,4 +1,4 @@
-export const MARKETPLACE_PAGE_SCAN_INTERVAL_MS = 5 * 60 * 1000
+export const MARKETPLACE_PAGE_SCAN_INTERVAL_MS = 2 * 60 * 1000
 
 export function marketplacePageScanKey(
   rules: Array<{ id: string; enabled: boolean; updatedAt: string }>,

@@ -164,7 +164,7 @@ function formatAge(iso: string): string {
 }
 
 function scanStatusSummary(scanStatus: MarketplaceScanStatus | null): string {
-  if (!scanStatus) return 'The hosted five-minute monitor has not run yet.'
+  if (!scanStatus) return 'The hosted two-minute monitor has not run yet.'
   if (scanStatus.error) return `Last scan failed ${formatAge(scanStatus.finishedAt)}: ${scanStatus.error}`
   const delivery = scanStatus.deliveryChannel
     ? ` · ${scanStatus.delivered} sent by ${scanStatus.deliveryChannel}`
@@ -569,7 +569,7 @@ export default function MarketplaceAlertsPage() {
       <dl className="marketplace-overview" aria-label="Marketplace alert overview">
         <div><dt>Active alerts</dt><dd>{activeRuleCount}</dd></div>
         <div><dt>Matches</dt><dd>{notifications.length}</dd></div>
-        <div><dt>Automatic checks</dt><dd>Every 5 min</dd></div>
+        <div><dt>Automatic checks</dt><dd>Every 2 min</dd></div>
       </dl>
 
       <section className="marketplace-layout">
@@ -652,7 +652,7 @@ export default function MarketplaceAlertsPage() {
 
         <aside className="marketplace-side-stack">
           <section className="panel marketplace-rules-panel">
-            <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every five minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
+            <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every two minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
             {rules.length === 0 ? (
               <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div>
             ) : (
@@ -697,10 +697,10 @@ export default function MarketplaceAlertsPage() {
             )}
           </section>
           <section className="panel marketplace-scan-log-panel">
-            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>Page-open fallback checks the Real marketplace every five minutes.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Page open · 5 min'}</span></div>
+            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>The hosted monitor runs with the page closed. While open, this page also checks every two minutes.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Hosted + page · 2 min'}</span></div>
             {busy ? <div className="marketplace-scan-live"><i aria-hidden="true" /><span>Requesting the latest bulk-rating feeds…</span></div> : null}
             {scanLog.length === 0 ? (
-              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The first page check starts as soon as your active alerts load.</span></div>
+              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The next hosted or page check will appear here.</span></div>
             ) : (
               <ol className="marketplace-scan-log">
                 {scanLog.slice(0, 8).map((entry) => (

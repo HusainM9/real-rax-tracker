@@ -94,7 +94,7 @@ describe('hosted marketplace monitor endpoint', () => {
     expect(response.status).toBe(200)
     expect(body).toMatchObject({
       ok: true,
-      intervalMinutes: 5,
+      intervalMinutes: 2,
       owners: 1,
       completed: [{
         owner: 'husain', checkedListings: 10, requests: 1,
