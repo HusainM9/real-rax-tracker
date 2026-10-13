@@ -4,10 +4,12 @@ import type { RealApiContext } from './realApi'
 
 const mocks = vi.hoisted(() => ({
   RealApiError: class RealApiError extends Error {
+    readonly kind: string
     readonly status?: number
 
-    constructor(_kind: string, message: string, status?: number) {
+    constructor(kind: string, message: string, status?: number) {
       super(message)
+      this.kind = kind
       this.status = status
     }
   },
@@ -51,7 +53,7 @@ beforeEach(() => {
 })
 
 describe('marketplace monitor', () => {
-  it('groups rules into one request per bulk rarity even when legacy item types differ', async () => {
+  it('groups rules into one all-rarity bulk feed even when legacy item types differ', async () => {
     const result = await scanMarketplaceAlerts({
       owner: 'husain',
       rules: [
@@ -62,18 +64,16 @@ describe('marketplace monitor', () => {
       context,
     })
 
-    expect(result.requests).toBe(5)
-    expect(mocks.realGetJson).toHaveBeenCalledTimes(5)
+    expect(result.requests).toBe(1)
+    expect(mocks.realGetJson).toHaveBeenCalledTimes(1)
     expect(mocks.realGetJson).toHaveBeenCalledWith(
       '/cardmarketplacelistings',
       context,
       expect.objectContaining({
-        filterCustomType: 'all', listingType: 'userpassfull', sport: 'nfl', season: 2026,
+        filterCustomType: 'all', listingType: 'userpassfull', rarity: 'all',
+        sport: 'nfl', season: 2026,
       }),
     )
-    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity).sort()).toEqual([
-      3, 4, 5, 6, 7,
-    ])
   })
 
   it('routes owned-player and owned-team scopes to distinct feeds', async () => {
@@ -86,13 +86,13 @@ describe('marketplace monitor', () => {
       context,
     })
 
-    expect(mocks.realGetJson).toHaveBeenCalledTimes(10)
+    expect(mocks.realGetJson).toHaveBeenCalledTimes(2)
     expect(mocks.realGetJson.mock.calls.filter((call) =>
       call[2].filterCustomType === 'ownedPlayers',
-    )).toHaveLength(5)
+    )).toHaveLength(1)
     expect(mocks.realGetJson.mock.calls.filter((call) =>
       call[2].filterCustomType === 'ownedTeams',
-    )).toHaveLength(5)
+    )).toHaveLength(1)
   })
 
   it('uses the portable all-listings feed when explicit owned player IDs are saved', async () => {
@@ -136,28 +136,24 @@ describe('marketplace monitor', () => {
       owner: 'husain', rules: [{ ...baseRule, itemType: 'all' }], context,
     })
 
-    expect(result.requests).toBe(5)
+    expect(result.requests).toBe(1)
     expect(mocks.realGetJson.mock.calls.map((call) => call[2].listingType)).toEqual([
-      'userpassfull',
-      'userpassfull',
-      'userpassfull',
-      'userpassfull',
       'userpassfull',
     ])
   })
 
-  it('requests only the rarities selected by an alert', async () => {
+  it('requests all rarities once and leaves selected-rarity filtering to the matcher', async () => {
     const result = await scanMarketplaceAlerts({
       owner: 'husain',
       rules: [{ ...baseRule, rarities: ['Epic', 'Iconic'] }],
       context,
     })
 
-    expect(result.requests).toBe(2)
-    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual([4, 7])
+    expect(result.requests).toBe(1)
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all'])
   })
 
-  it('unions player rarity overrides and treats an empty override as every rarity', async () => {
+  it('uses one all-rarity feed for player-specific rarity overrides', async () => {
     const playerRule = {
       ...baseRule,
       rarities: ['Rare'] as MarketplaceAlertRule['rarities'],
@@ -167,7 +163,7 @@ describe('marketplace monitor', () => {
       ],
     }
     await scanMarketplaceAlerts({ owner: 'husain', rules: [playerRule], context })
-    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual([4, 6])
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all'])
 
     mocks.realGetJson.mockClear()
     await scanMarketplaceAlerts({
@@ -175,7 +171,7 @@ describe('marketplace monitor', () => {
       rules: [{ ...playerRule, players: [{ entityId: 7, name: 'Player Seven', rarities: [] }] }],
       context,
     })
-    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual([3, 4, 5, 6, 7])
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all'])
   })
 
   it('does not request feeds for disabled rules', async () => {
@@ -211,7 +207,7 @@ describe('marketplace monitor', () => {
 
   it('keeps multiple matching auctions for the same player from the same rarity feed', async () => {
     mocks.realGetJson.mockImplementation(async (_path, _context, query) => ({
-      listings: query.rarity === 3
+      listings: query.rarity === 'all'
         ? [
             { ...bulkListing, id: 'walker-1', value: '85.7', currentBidAmount: 3000, numBids: 1, rarity: 3 },
             { ...bulkListing, id: 'walker-2', value: '95.3', currentBidAmount: 3500, numBids: 1, rarity: 3 },
@@ -249,6 +245,37 @@ describe('marketplace monitor', () => {
     expect(saved).toHaveLength(1)
   })
 
+  it('walks every cursor page and does not stop when listings repeat', async () => {
+    const listings = Array.from({ length: 19 }, (_, index) => ({
+      ...bulkListing,
+      id: `listing-${index + 1}`,
+      value: 90,
+      rarity: 3,
+      endsAt: `2026-10-12T10:${String(index).padStart(2, '0')}:00.000Z`,
+    }))
+    mocks.realGetJson.mockImplementation(async (_path, _context, query) => {
+      if (!query.beforeEndsAt) return { listings: listings.slice(0, 10) }
+      if (query.beforeEndsAt === listings[9].endsAt) {
+        return { listings: [listings[9], ...listings.slice(10)] }
+      }
+      return { listings: [listings[18]] }
+    })
+
+    const result = await scanMarketplaceAlerts({
+      owner: 'husain',
+      rules: [{ ...baseRule, itemType: 'bulk' }],
+      context,
+    })
+
+    expect(result).toMatchObject({ checkedListings: 19, requests: 3, failedRequests: 0 })
+    expect(result.notifications).toHaveLength(19)
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].beforeEndsAt)).toEqual([
+      undefined,
+      listings[9].endsAt,
+      listings[18].endsAt,
+    ])
+  })
+
   it('propagates upstream failures without marking results as saved', async () => {
     mocks.realGetJson.mockRejectedValue(new Error('Real rate limited this request'))
     await expect(scanMarketplaceAlerts({ owner: 'husain', rules: [baseRule], context }))
@@ -261,7 +288,7 @@ describe('marketplace monitor', () => {
       if (query.sport === 'wnba') {
         throw new mocks.RealApiError('upstream', 'Real API request failed (400).', 400)
       }
-      return { listings: query.rarity === 3 ? [bulkListing] : [] }
+      return { listings: query.rarity === 'all' ? [bulkListing] : [] }
     })
 
     const result = await scanMarketplaceAlerts({
@@ -272,9 +299,9 @@ describe('marketplace monitor', () => {
 
     expect(result).toMatchObject({
       checkedListings: 1,
-      requests: 10,
-      failedRequests: 5,
-      warning: '5 of 10 feeds skipped because Real rejected them (400).',
+      requests: 2,
+      failedRequests: 1,
+      warning: '1 of 2 feeds skipped because Real rejected them (400).',
     })
     expect(result.notifications).toHaveLength(1)
     expect(mocks.saveNewMarketplaceNotifications).toHaveBeenCalledOnce()

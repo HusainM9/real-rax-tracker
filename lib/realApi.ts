@@ -360,6 +360,20 @@ export async function realGetJson<T>(
       continue
     }
     if (!response.ok) {
+      // The marketplace sometimes reports throttling as a generic HTTP 400 with
+      // this message instead of a 429. Treat it as the same retryable condition so
+      // a multi-page scan does not silently abandon the rest of a valid feed.
+      const errorText = await response.text()
+      if (response.status === 400 && /high volume/i.test(errorText)) {
+        lastRateLimitError = new RealApiError(
+          'rate_limited',
+          'Real API rate limited this request (high volume).',
+          400,
+        )
+        const fromHeader = retryAfterMs(response)
+        pendingDelayMs = fromHeader != null ? Math.min(config.retryMaxMs, fromHeader) : null
+        continue
+      }
       throw new RealApiError('upstream', `Real API request failed (${response.status}).`, response.status)
     }
 

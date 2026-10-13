@@ -117,6 +117,29 @@ describe('realGetJson rate-limit retries', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(3)
   })
 
+  it('retries marketplace high-volume responses reported as HTTP 400', async () => {
+    vi.useFakeTimers()
+    let calls = 0
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1
+      if (calls === 1) {
+        return Response.json(
+          { statusCode: 400, error: 'Bad Request', message: 'We are experiencing high volume.' },
+          { status: 400 },
+        )
+      }
+      return Response.json({ listings: [] })
+    }) as unknown as typeof fetch
+
+    const pending = realGetJson<{ listings: unknown[] }>('/cardmarketplacelistings', {
+      config: testConfig({ maxRetries: 2, retryBaseMs: 5, retryMaxMs: 20 }),
+    })
+    await vi.runAllTimersAsync()
+
+    await expect(pending).resolves.toEqual({ listings: [] })
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('does not retry auth failures', async () => {
     globalThis.fetch = vi.fn(async () => new Response('auth', { status: 401 })) as unknown as typeof fetch
 
