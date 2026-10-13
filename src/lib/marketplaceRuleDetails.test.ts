@@ -17,6 +17,7 @@ const rule: MarketplaceAlertRule = {
   listingMode: 'all', prestigeMode: 'all', itemType: 'bulk',
   priceMin: 500, priceMax: null, pricePerRatingMax: 40,
   atTargetPrice: true, noBids: true, maxSerial: null,
+  targetPriceLegendaryOrBelow: true,
   createdAt: '2026-10-12T00:00:00.000Z', updatedAt: '2026-10-12T00:00:00.000Z',
 }
 
@@ -29,7 +30,8 @@ describe('marketplace rule tracking details', () => {
       defaultMaxRaxPerRating: 40,
       ratingRange: '10–100',
       minimumPrice: 500,
-      priceBasis: 'Live target price',
+      priceBasis: 'Current auction price',
+      targetPriceLegendaryOrBelow: true,
       noBids: true,
     })
     expect(details.players).toEqual([
@@ -49,6 +51,7 @@ describe('marketplace rule tracking details', () => {
       rarities: [],
       priceMin: null,
       pricePerRatingMax: null,
+      targetPriceLegendaryOrBelow: false,
       noBids: false,
     })
 
@@ -57,6 +60,7 @@ describe('marketplace rule tracking details', () => {
       defaultMaxRaxPerRating: null,
       ratingRange: 'Any bulk rating',
       minimumPrice: null,
+      targetPriceLegendaryOrBelow: false,
       noBids: false,
       players: [],
     })

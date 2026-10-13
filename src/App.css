@@ -6390,6 +6390,26 @@ button.linkish {
   padding-bottom: 0.65rem;
 }
 
+.marketplace-target-price-check {
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.marketplace-target-price-check > span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.marketplace-target-price-check small {
+  color: #858581;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
 .marketplace-rarity-picker {
   padding-top: 0.15rem;
 }

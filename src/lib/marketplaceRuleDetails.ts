@@ -21,7 +21,8 @@ export function marketplaceRuleTrackingDetails(rule: MarketplaceAlertRule) {
     defaultMaxRaxPerRating: rule.pricePerRatingMax ?? null,
     ratingRange: ratingRange(rule),
     minimumPrice: rule.priceMin ?? null,
-    priceBasis: rule.atTargetPrice ? 'Live target price' : 'Opening price',
+    priceBasis: rule.atTargetPrice ? 'Current auction price' : 'Opening price',
+    targetPriceLegendaryOrBelow: rule.targetPriceLegendaryOrBelow === true,
     noBids: rule.noBids,
     players: (rule.players ?? []).map((player) => {
       const hasCustomRarities = Array.isArray(player.rarities)

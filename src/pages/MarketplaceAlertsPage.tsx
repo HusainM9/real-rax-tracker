@@ -56,6 +56,7 @@ const initialDraft: Draft = {
   priceMin: null,
   priceMax: null,
   pricePerRatingMax: null,
+  targetPriceLegendaryOrBelow: false,
   atTargetPrice: true,
   noBids: false,
   maxSerial: null,
@@ -95,6 +96,7 @@ function ruleSummary(rule: MarketplaceAlertRule): string {
   const customPlayers = rule.players?.filter(hasCustomPlayerFilters).length ?? 0
   if (customPlayers > 0) parts.push(`${customPlayers} custom`)
   if (rule.noBids) parts.push('no bids')
+  if (rule.targetPriceLegendaryOrBelow) parts.push('at target · Legendary or below')
   return parts.join(' · ')
 }
 
@@ -113,6 +115,7 @@ function RuleTrackingPanel({ rule }: { rule: MarketplaceAlertRule }) {
         <div><span>Bid requirement</span><strong>{details.noBids ? 'No bids only' : 'Any bid count'}</strong></div>
         <div><span>Minimum listing price</span><strong>{details.minimumPrice == null ? 'No minimum' : `${details.minimumPrice.toLocaleString()} RAX`}</strong></div>
         <div><span>Price basis</span><strong>{details.priceBasis}</strong></div>
+        <div><span>Target-price filter</span><strong>{details.targetPriceLegendaryOrBelow ? 'At target · Rare–Legendary' : 'Off'}</strong></div>
       </div>
 
       <div className="marketplace-rule-player-heading">
@@ -345,6 +348,7 @@ export default function MarketplaceAlertsPage() {
       priceMin: rule.priceMin,
       priceMax: null,
       pricePerRatingMax: rule.pricePerRatingMax ?? null,
+      targetPriceLegendaryOrBelow: rule.targetPriceLegendaryOrBelow === true,
       atTargetPrice: true,
       noBids: rule.noBids,
       maxSerial: null,
@@ -630,6 +634,8 @@ export default function MarketplaceAlertsPage() {
 
             <label className="field marketplace-price-field"><span>Default maximum RAX per rating</span><div className="marketplace-price-input"><input type="number" min="0" step="0.01" placeholder="Any ratio" value={draft.pricePerRatingMax ?? ''} onChange={(event) => setDraft({ ...draft, pricePerRatingMax: numberOrNull(event.target.value), priceMax: null })} /><span>RAX</span></div><small className="marketplace-field-help">Listing price ÷ bulk rating</small></label>
             <label className="marketplace-simple-check marketplace-no-bids"><input type="checkbox" checked={draft.noBids} onChange={(event) => setDraft({ ...draft, noBids: event.target.checked })} /><span>Only listings with no bids</span></label>
+
+            <label className="marketplace-simple-check marketplace-target-price-check marketplace-span-2"><input type="checkbox" checked={draft.targetPriceLegendaryOrBelow === true} onChange={(event) => setDraft({ ...draft, targetPriceLegendaryOrBelow: event.target.checked })} /><span>Only at-target auctions, Legendary or below <small>Requires the live price to reach the seller’s target and limits matches to Rare, Epic, or Legendary.</small></span></label>
 
             <fieldset className="marketplace-filter-group marketplace-rarity-picker marketplace-span-2">
               <legend>Default bulk rarity <small>Leave all unselected to watch every rarity.</small></legend>

@@ -67,6 +67,8 @@ export type MarketplaceAlertRule = {
   priceMax: number | null
   /** Maximum listing price divided by the bulk rating. */
   pricePerRatingMax?: number | null
+  /** Only match Rare–Legendary auctions whose live bid has reached the seller's target. */
+  targetPriceLegendaryOrBelow?: boolean
   atTargetPrice: boolean
   noBids: boolean
   maxSerial: number | null
@@ -281,6 +283,7 @@ export function parseMarketplaceAlertRule(value: unknown): MarketplaceAlertRule 
     priceMin: finiteNumber(input.priceMin, 0),
     priceMax: finiteNumber(input.priceMax, 0),
     ...(pricePerRatingMax !== null ? { pricePerRatingMax } : {}),
+    ...(input.targetPriceLegendaryOrBelow === true ? { targetPriceLegendaryOrBelow: true } : {}),
     atTargetPrice: input.atTargetPrice === true,
     noBids: input.noBids === true,
     maxSerial: finiteNumber(input.maxSerial, 1),
@@ -295,6 +298,14 @@ export function marketplaceListingPrice(listing: MarketplaceListing): number {
   const buyNow = finiteNumber(listing.buyNowPrice)
   if ((listing.numBids ?? 0) > 0 && current !== null) return current
   return minimum ?? buyNow ?? current ?? 0
+}
+
+/** Real stores the seller's auction target in `buyNowPrice`, despite having no buy-now action. */
+export function marketplaceListingIsAtTargetPrice(listing: MarketplaceListing): boolean {
+  if (finiteNumber(listing.minBidPrice) === null) return false
+  const target = finiteNumber(listing.buyNowPrice)
+  if (target === null || target <= 0) return false
+  return marketplaceListingPrice(listing) >= target
 }
 
 function marketplaceListingOpeningPrice(listing: MarketplaceListing): number {
@@ -388,6 +399,10 @@ export function marketplaceListingMatchesRule(
     ? player.rarities
     : rule.rarities
   const rarity = marketplaceListingRarity(listing).toLowerCase()
+  if (rule.targetPriceLegendaryOrBelow) {
+    const eligibleRarity = rarity === 'rare' || rarity === 'epic' || rarity === 'legendary'
+    if (!eligibleRarity || !marketplaceListingIsAtTargetPrice(listing)) return false
+  }
   const iconicPriceOverride = player?.alwaysNotifyIconic === true && rarity === 'iconic'
   const mysticPriceOverride = player?.alwaysNotifyMystic === true && rarity === 'mystic'
   const priceOverride = iconicPriceOverride || mysticPriceOverride

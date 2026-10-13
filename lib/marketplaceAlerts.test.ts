@@ -5,6 +5,7 @@ import {
   marketplaceApiSport,
   marketplaceApiListingTypes,
   marketplaceListingMatchesRule,
+  marketplaceListingIsAtTargetPrice,
   marketplaceMaximumBulkAuctionPrice,
   marketplaceListingPrice,
   marketplaceListingRarity,
@@ -76,6 +77,17 @@ describe('marketplace rule parsing', () => {
       ratingMin: 0, ratingMax: 99, priceMin: 0, maxSerial: 1,
       rarities: ['Rare', 'Iconic'],
     })
+  })
+
+  it('preserves the target-price Legendary-or-below filter only when enabled', () => {
+    expect(parseMarketplaceAlertRule({
+      ...rule,
+      targetPriceLegendaryOrBelow: true,
+    })).toMatchObject({ targetPriceLegendaryOrBelow: true })
+    expect(parseMarketplaceAlertRule({
+      ...rule,
+      targetPriceLegendaryOrBelow: false,
+    })).not.toHaveProperty('targetPriceLegendaryOrBelow')
   })
 
   it('normalizes and deduplicates explicit owned players', () => {
@@ -239,6 +251,81 @@ describe('marketplace listing matching', () => {
     expect(marketplaceListingMatchesRule({ ...rule, rarities: ['Rare', 'Epic'] }, mystic)).toBe(false)
   })
 
+  it('can require auctions to be at target price and Legendary or below', () => {
+    const targetRule = {
+      ...rule,
+      itemType: 'bulk' as const,
+      rarities: [] as MarketplaceAlertRule['rarities'],
+      priceMax: null,
+      noBids: false,
+      targetPriceLegendaryOrBelow: true,
+    }
+    const rareAtTarget = {
+      ...listing,
+      listingType: 'userpassfull',
+      rarity: 3,
+      minBidPrice: 3000,
+      currentBidAmount: 4000,
+      buyNowPrice: 4000,
+      numBids: 2,
+      value: 100,
+    }
+
+    expect(marketplaceListingIsAtTargetPrice(rareAtTarget)).toBe(true)
+    expect(marketplaceListingMatchesRule(targetRule, rareAtTarget)).toBe(true)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      currentBidAmount: 3900,
+    })).toBe(false)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      buyNowPrice: null,
+    })).toBe(false)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      minBidPrice: null,
+    })).toBe(false)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      rarity: 4,
+    })).toBe(true)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      rarity: 5,
+    })).toBe(true)
+  })
+
+  it('excludes Mystic and Iconic target-price listings even with player overrides', () => {
+    const strictRule = {
+      ...rule,
+      itemType: 'bulk' as const,
+      entityScope: 'ownedPlayers' as const,
+      entityId: null,
+      rarities: [] as MarketplaceAlertRule['rarities'],
+      priceMax: null,
+      noBids: false,
+      targetPriceLegendaryOrBelow: true,
+      players: [{
+        entityId: 22490,
+        name: 'Trevor Lawrence',
+        alwaysNotifyIconic: true,
+        alwaysNotifyMystic: true,
+      }],
+    }
+    const atTarget = {
+      ...listing,
+      listingType: 'userpassfull',
+      minBidPrice: 5000,
+      currentBidAmount: 5000,
+      buyNowPrice: 5000,
+      numBids: 1,
+      value: 50,
+    }
+
+    expect(marketplaceListingMatchesRule(strictRule, { ...atTarget, rarity: 6 })).toBe(false)
+    expect(marketplaceListingMatchesRule(strictRule, { ...atTarget, rarity: 7 })).toBe(false)
+  })
+
   it('matches only players in an explicit owned-player allowlist', () => {
     const ownedRule = {
       ...rule,
@@ -390,7 +477,7 @@ describe('marketplace listing matching', () => {
     expect(marketplaceListingMatchesRule({ ...rule, priceMax: 1999 }, listing)).toBe(false)
   })
 
-  it('can compare either the live target price or original listing price', () => {
+  it('can compare either the current auction price or original listing price', () => {
     const bidListing = { ...listing, numBids: 2, currentBidAmount: 3000 }
     expect(marketplaceListingMatchesRule({ ...rule, noBids: false }, bidListing)).toBe(false)
     expect(marketplaceListingMatchesRule({ ...rule, noBids: false, atTargetPrice: false }, bidListing)).toBe(true)
