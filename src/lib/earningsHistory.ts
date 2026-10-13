@@ -112,6 +112,56 @@ export type EarningPassRanking = {
   days: number
 }
 
+export type EarningSportRanking = {
+  sport: string
+  total: number
+  best: number
+  average: number
+  days: number
+  passes: number
+}
+
+export function rankEarningSports(entries: EarningsHistoryEntry[]): EarningSportRanking[] {
+  const sports = new Map<string, {
+    sport: string
+    dailyTotals: Map<string, number>
+    passes: Set<string>
+  }>()
+
+  for (const row of entries) {
+    for (const pass of row.passes) {
+      const sport = pass.sport.trim() || 'Other'
+      const key = sport.toLowerCase()
+      const current = sports.get(key) ?? {
+        sport,
+        dailyTotals: new Map<string, number>(),
+        passes: new Set<string>(),
+      }
+      current.dailyTotals.set(
+        row.day,
+        (current.dailyTotals.get(row.day) ?? 0) + pass.totalEarnings,
+      )
+      current.passes.add(`${pass.username.toLowerCase()}|${pass.id}`)
+      sports.set(key, current)
+    }
+  }
+
+  return [...sports.values()]
+    .map((row): EarningSportRanking => {
+      const dailyTotals = [...row.dailyTotals.values()]
+      const total = dailyTotals.reduce((sum, value) => sum + value, 0)
+      return {
+        sport: row.sport,
+        total,
+        best: Math.max(0, ...dailyTotals),
+        average: dailyTotals.length > 0 ? total / dailyTotals.length : 0,
+        days: dailyTotals.length,
+        passes: row.passes.size,
+      }
+    })
+    .sort((a, b) => b.total - a.total || b.best - a.best || a.sport.localeCompare(b.sport))
+}
+
 export function rankEarningPasses(
   entries: EarningsHistoryEntry[],
   limit = 5,

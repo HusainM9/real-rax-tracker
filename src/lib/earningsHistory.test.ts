@@ -3,6 +3,7 @@ import {
   highestAverageWeekday,
   highestEarningDay,
   rankEarningPasses,
+  rankEarningSports,
   readEarningsHistory,
   replaceEarningsHistoryForUsernames,
   saveEarningsHistoryEntries,
@@ -60,6 +61,57 @@ describe('earnings report statistics', () => {
     expect(rankEarningPasses(history)).toEqual([
       { username: 'alpha', label: 'Player One', sport: 'NFL', total: 410, best: 300, days: 3 },
       { username: 'alpha', label: 'Player Two', sport: 'NBA', total: 230, best: 200, days: 2 },
+    ])
+  })
+
+  it('ranks sports by tracked earnings with day and pass statistics', () => {
+    expect(rankEarningSports(history)).toEqual([
+      {
+        sport: 'NFL',
+        total: 410,
+        best: 300,
+        average: 410 / 3,
+        days: 3,
+        passes: 1,
+      },
+      {
+        sport: 'NBA',
+        total: 230,
+        best: 200,
+        average: 115,
+        days: 2,
+        passes: 1,
+      },
+    ])
+  })
+
+  it('combines sport labels case-insensitively and keeps accounts distinct', () => {
+    expect(rankEarningSports([
+      history[0]!,
+      {
+        ...history[0]!,
+        username: 'beta',
+        passes: [
+          { username: 'beta', id: '1', label: 'Another player', sport: 'nfl', totalEarnings: 20 },
+        ],
+      },
+    ])).toEqual([
+      {
+        sport: 'NFL',
+        total: 90,
+        best: 90,
+        average: 90,
+        days: 1,
+        passes: 2,
+      },
+      {
+        sport: 'NBA',
+        total: 30,
+        best: 30,
+        average: 30,
+        days: 1,
+        passes: 1,
+      },
     ])
   })
 
