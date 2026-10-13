@@ -3,12 +3,15 @@ import { isAuthorizedMarketplaceScanRequest } from './marketplace-alerts'
 
 const originalNodeEnv = process.env.NODE_ENV
 const originalScanSecret = process.env.MARKETPLACE_SCAN_SECRET
+const originalQstashSecret = process.env.MARKETPLACE_QSTASH_SECRET
 const originalCronSecret = process.env.CRON_SECRET
 
 afterEach(() => {
   process.env.NODE_ENV = originalNodeEnv
   if (originalScanSecret === undefined) delete process.env.MARKETPLACE_SCAN_SECRET
   else process.env.MARKETPLACE_SCAN_SECRET = originalScanSecret
+  if (originalQstashSecret === undefined) delete process.env.MARKETPLACE_QSTASH_SECRET
+  else process.env.MARKETPLACE_QSTASH_SECRET = originalQstashSecret
   if (originalCronSecret === undefined) delete process.env.CRON_SECRET
   else process.env.CRON_SECRET = originalCronSecret
 })
@@ -17,6 +20,7 @@ describe('marketplace scanner authorization', () => {
   it('requires a configured secret in production', () => {
     process.env.NODE_ENV = 'production'
     delete process.env.MARKETPLACE_SCAN_SECRET
+    delete process.env.MARKETPLACE_QSTASH_SECRET
     delete process.env.CRON_SECRET
     expect(isAuthorizedMarketplaceScanRequest(new Request('https://example.com'))).toBe(false)
   })
@@ -26,6 +30,18 @@ describe('marketplace scanner authorization', () => {
     process.env.MARKETPLACE_SCAN_SECRET = 'market-secret'
     expect(isAuthorizedMarketplaceScanRequest(new Request('https://example.com', {
       headers: { authorization: 'Bearer market-secret' },
+    }))).toBe(true)
+  })
+
+  it('accepts a separate QStash secret without replacing the GitHub secret', () => {
+    process.env.NODE_ENV = 'production'
+    process.env.MARKETPLACE_SCAN_SECRET = 'github-secret'
+    process.env.MARKETPLACE_QSTASH_SECRET = 'qstash-secret'
+    expect(isAuthorizedMarketplaceScanRequest(new Request('https://example.com', {
+      headers: { authorization: 'Bearer qstash-secret' },
+    }))).toBe(true)
+    expect(isAuthorizedMarketplaceScanRequest(new Request('https://example.com', {
+      headers: { authorization: 'Bearer github-secret' },
     }))).toBe(true)
   })
 
@@ -53,6 +69,7 @@ describe('marketplace scanner authorization', () => {
   it('falls back to the existing cron secret', () => {
     process.env.NODE_ENV = 'production'
     delete process.env.MARKETPLACE_SCAN_SECRET
+    delete process.env.MARKETPLACE_QSTASH_SECRET
     process.env.CRON_SECRET = 'cron-secret'
     expect(isAuthorizedMarketplaceScanRequest(new Request('https://example.com', {
       headers: { authorization: 'Bearer cron-secret' },
@@ -62,6 +79,7 @@ describe('marketplace scanner authorization', () => {
   it('allows local development requests without a secret', () => {
     process.env.NODE_ENV = 'development'
     delete process.env.MARKETPLACE_SCAN_SECRET
+    delete process.env.MARKETPLACE_QSTASH_SECRET
     delete process.env.CRON_SECRET
     expect(isAuthorizedMarketplaceScanRequest(new Request('http://localhost'))).toBe(true)
   })

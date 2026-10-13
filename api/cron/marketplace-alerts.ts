@@ -18,9 +18,15 @@ const SOFT_BUDGET_MS = 45_000
 
 export function isAuthorizedMarketplaceScanRequest(request: Request): boolean {
   if (process.env.NODE_ENV === 'development') return true
-  const secret = process.env.MARKETPLACE_SCAN_SECRET?.trim() || process.env.CRON_SECRET?.trim()
-  if (!secret) return false
-  return request.headers.get('authorization') === `Bearer ${secret}`
+  const dedicatedSecrets = [
+    process.env.MARKETPLACE_SCAN_SECRET?.trim(),
+    process.env.MARKETPLACE_QSTASH_SECRET?.trim(),
+  ].filter((secret): secret is string => Boolean(secret))
+  const acceptedSecrets = dedicatedSecrets.length > 0
+    ? dedicatedSecrets
+    : [process.env.CRON_SECRET?.trim()].filter((secret): secret is string => Boolean(secret))
+  const authorization = request.headers.get('authorization')
+  return acceptedSecrets.some((secret) => authorization === `Bearer ${secret}`)
 }
 
 function errorMessage(error: unknown): string {
