@@ -95,7 +95,7 @@ describe('marketplace monitor', () => {
     )).toHaveLength(1)
   })
 
-  it('uses the portable all-listings feed when explicit owned player IDs are saved', async () => {
+  it('uses portable player-specific feeds when explicit owned player IDs are saved', async () => {
     await scanMarketplaceAlerts({
       owner: 'husain',
       rules: [{
@@ -110,7 +110,10 @@ describe('marketplace monitor', () => {
     expect(mocks.realGetJson).toHaveBeenCalledWith(
       '/cardmarketplacelistings',
       context,
-      expect.objectContaining({ filterCustomType: 'all', listingType: 'userpassfull' }),
+      expect.objectContaining({
+        filterCustomType: 'all', filterEntityType: 'player', filterEntityId: 7,
+        listingType: 'userpassfull',
+      }),
     )
   })
 
@@ -153,7 +156,7 @@ describe('marketplace monitor', () => {
     expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all'])
   })
 
-  it('uses one all-rarity feed for player-specific rarity overrides', async () => {
+  it('uses one all-rarity feed per tracked player for player-specific overrides', async () => {
     const playerRule = {
       ...baseRule,
       rarities: ['Rare'] as MarketplaceAlertRule['rarities'],
@@ -163,7 +166,8 @@ describe('marketplace monitor', () => {
       ],
     }
     await scanMarketplaceAlerts({ owner: 'husain', rules: [playerRule], context })
-    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all'])
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].rarity)).toEqual(['all', 'all'])
+    expect(mocks.realGetJson.mock.calls.map((call) => call[2].filterEntityId).sort()).toEqual([7, 8])
 
     mocks.realGetJson.mockClear()
     await scanMarketplaceAlerts({
