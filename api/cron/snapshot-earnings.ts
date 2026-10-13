@@ -51,10 +51,25 @@ export function previousEasternDay(now = new Date()): string {
 export function isEasternSnapshotTime(now: Date): boolean {
   const parts = easternParts(now)
   const hour = Number(parts.hour)
-  const minute = Number(parts.minute)
-  // Prefer 5:30 AM Eastern. The 6 AM hour is a fallback for imprecise Hobby cron starts,
-  // and existing account/day snapshots prevent it from replacing a successful 5:30 run.
-  return (hour === 5 && minute >= 30) || hour === 6
+  // Hobby cron starts can land anywhere in their configured UTC hour. Accept the
+  // full local hour for the 4:30 and 5:30 schedules, then let the route-specific
+  // guard below reject inactive EST/EDT jobs.
+  return hour >= 4 && hour <= 6
+}
+
+export function isEasternFinalCheckTime(now: Date): boolean {
+  return Number(easternParts(now).hour) === 6
+}
+
+export function isScheduledSnapshotRouteTime(pathname: string, now: Date): boolean {
+  const hour = Number(easternParts(now).hour)
+  if (pathname.endsWith('/snapshot-earnings-summer')) return hour === 4
+  if (pathname.endsWith('/snapshot-earnings-after-six-summer')) return hour === 5
+  if (pathname.endsWith('/snapshot-earnings-winter')) return hour === 4 || hour === 5
+  if (pathname.endsWith('/snapshot-earnings-after-six-winter')) return hour === 5 || hour === 6
+  if (pathname.endsWith('/snapshot-earnings-fallback')) return hour === 5
+  if (pathname.endsWith('/snapshot-earnings-final-check')) return hour === 6
+  return isEasternSnapshotTime(now)
 }
 
 export function isAuthorizedSnapshotRequest(request: Request): boolean {
@@ -94,6 +109,17 @@ export function orderSnapshotUsernames(
   return prioritizeTail ? [...usernames].reverse() : [...usernames]
 }
 
+export function missingSnapshotUsernames(
+  usernames: string[],
+  completedUsernames: string[],
+  skippedUsernames: string[],
+): string[] {
+  const fetched = new Set(
+    [...completedUsernames, ...skippedUsernames].map((username) => username.toLowerCase()),
+  )
+  return usernames.filter((username) => !fetched.has(username.toLowerCase()))
+}
+
 function waitForSnapshotRetry(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve()
   return new Promise((resolve, reject) => {
@@ -122,19 +148,20 @@ async function handleSnapshot(request: Request): Promise<Response> {
   const url = new URL(request.url)
   const force = process.env.NODE_ENV === 'development' && url.searchParams.get('force') === '1'
   const now = new Date()
-  if (!force && !isEasternSnapshotTime(now)) {
-    return Response.json({ ok: true, skipped: true, reason: 'Outside the 5:30-6:59 AM Eastern snapshot window.' })
+  if (!force && !isScheduledSnapshotRouteTime(url.pathname, now)) {
+    return Response.json({ ok: true, skipped: true, reason: 'Outside this route\'s 4:00-6:59 AM Eastern snapshot window.' })
   }
 
   const realConfig = resolveRealApiConfig()
   if (!realConfig) {
     return Response.json({ error: 'The Real API transport session is not configured.' }, { status: 503 })
   }
-  // The first 6 AM fallback starts from the opposite end of the account list.
+  // Alternating fallbacks start from the opposite end of the account list.
   // Successful account/day snapshots are skipped below, so this prevents an
   // account near the end (such as @twinchenzo) from repeatedly being deferred
   // when the earlier run hits Real's rate limit or our soft time budget.
   const prioritizeTail = url.pathname.includes('snapshot-earnings-after-six')
+    || url.pathname.includes('snapshot-earnings-final-check')
   const usernames = orderSnapshotUsernames(
     await listTrackedEarningsUsernames(),
     prioritizeTail,
@@ -230,7 +257,13 @@ async function handleSnapshot(request: Request): Promise<Response> {
     }
   }
 
-  const hasIncompleteAccounts = errors.length > 0 || rateLimited.length > 0 || deferred.length > 0
+  const missingAccounts = missingSnapshotUsernames(
+    usernames,
+    completed.map(({ username }) => username),
+    skipped,
+  )
+  const finalCheck = !force && isEasternFinalCheckTime(now)
+  const hasIncompleteAccounts = missingAccounts.length > 0
   return Response.json({
     ok: !hasIncompleteAccounts,
     day,
@@ -240,7 +273,17 @@ async function handleSnapshot(request: Request): Promise<Response> {
     rateLimited,
     deferred,
     fallback: hasIncompleteAccounts
-      ? 'Missing account snapshots will be retried by the next scheduled invocation.'
+      ? finalCheck
+        ? 'The final 6:00 AM check found accounts without a saved earnings snapshot.'
+        : 'Missing account snapshots will be retried by the next scheduled invocation.'
+      : null,
+    verification: finalCheck
+      ? {
+          allAccountsFetched: missingAccounts.length === 0,
+          fetchedAccounts: usernames.length - missingAccounts.length,
+          totalAccounts: usernames.length,
+          missingAccounts,
+        }
       : null,
     errors,
   }, { status: hasIncompleteAccounts ? 207 : 200 })

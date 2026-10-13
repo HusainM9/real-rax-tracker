@@ -4,8 +4,11 @@ import { RealApiError } from '../../lib/realApi'
 import {
   hasSnapshotTimeBudget,
   isAuthorizedSnapshotRequest,
+  isEasternFinalCheckTime,
   isEasternSnapshotTime,
+  isScheduledSnapshotRouteTime,
   isSnapshotRateLimit,
+  missingSnapshotUsernames,
   orderSnapshotUsernames,
   snapshotRetryDelayMs,
 } from './snapshot-earnings'
@@ -20,24 +23,71 @@ afterEach(() => {
 })
 
 describe('scheduled earnings snapshot window', () => {
-  it('never accepts a run before 5:30 AM Eastern', () => {
-    expect(isEasternSnapshotTime(new Date('2026-01-15T10:29:00Z'))).toBe(false)
-    expect(isEasternSnapshotTime(new Date('2026-07-15T09:29:00Z'))).toBe(false)
+  it('accepts the 4 AM through 6 AM Eastern recovery window', () => {
+    expect(isEasternSnapshotTime(new Date('2026-01-15T09:00:00Z'))).toBe(true)
+    expect(isEasternSnapshotTime(new Date('2026-07-15T09:00:00Z'))).toBe(true)
+    expect(isEasternSnapshotTime(new Date('2026-01-15T11:59:00Z'))).toBe(true)
+    expect(isEasternSnapshotTime(new Date('2026-07-15T10:59:00Z'))).toBe(true)
   })
 
-  it('accepts the 5:30 AM Eastern primary run across DST', () => {
-    expect(isEasternSnapshotTime(new Date('2026-01-15T10:30:00Z'))).toBe(true)
-    expect(isEasternSnapshotTime(new Date('2026-07-15T09:30:00Z'))).toBe(true)
+  it('rejects runs before 4 AM or after the 6 AM hour', () => {
+    expect(isEasternSnapshotTime(new Date('2026-01-15T08:59:00Z'))).toBe(false)
+    expect(isEasternSnapshotTime(new Date('2026-07-15T07:59:00Z'))).toBe(false)
+    expect(isEasternSnapshotTime(new Date('2026-01-15T12:00:00Z'))).toBe(false)
+    expect(isEasternSnapshotTime(new Date('2026-07-15T11:00:00Z'))).toBe(false)
   })
 
-  it('accepts a delayed fallback throughout the 6 AM hour', () => {
-    expect(isEasternSnapshotTime(new Date('2026-01-15T11:15:00Z'))).toBe(true)
-    expect(isEasternSnapshotTime(new Date('2026-07-15T10:45:00Z'))).toBe(true)
+  it('recognizes the final 6 AM verification hour across DST', () => {
+    expect(isEasternFinalCheckTime(new Date('2026-01-15T11:15:00Z'))).toBe(true)
+    expect(isEasternFinalCheckTime(new Date('2026-07-15T10:45:00Z'))).toBe(true)
+    expect(isEasternFinalCheckTime(new Date('2026-01-15T10:59:00Z'))).toBe(false)
   })
 
-  it('rejects inactive seasonal jobs before 5:30 or after the reset window', () => {
-    expect(isEasternSnapshotTime(new Date('2026-01-15T09:30:00Z'))).toBe(false)
-    expect(isEasternSnapshotTime(new Date('2026-07-15T11:30:00Z'))).toBe(false)
+  it('accepts the intended EST and EDT routes and rejects inactive seasonal jobs', () => {
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-summer',
+      new Date('2026-07-15T08:30:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-summer',
+      new Date('2026-01-15T08:30:00Z'),
+    )).toBe(false)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-after-six-summer',
+      new Date('2026-07-15T09:00:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-winter',
+      new Date('2026-01-15T09:30:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-winter',
+      new Date('2026-07-15T09:30:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-after-six-winter',
+      new Date('2026-01-15T10:00:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-after-six-winter',
+      new Date('2026-07-15T10:00:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-fallback',
+      new Date('2026-01-15T10:30:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-fallback',
+      new Date('2026-07-15T10:30:00Z'),
+    )).toBe(false)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-final-check',
+      new Date('2026-01-15T11:00:00Z'),
+    )).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-final-check',
+      new Date('2026-07-15T11:00:00Z'),
+    )).toBe(false)
   })
 })
 
@@ -97,18 +147,26 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
     expect(usernames).toEqual(['alpha', 'gordon', 'twinchenzo'])
   })
 
-  it('configures a DST-aware 6 AM retry in both seasons', () => {
+  it('reports exactly which accounts still lack a saved snapshot', () => {
+    expect(missingSnapshotUsernames(
+      ['alpha', 'gordon', 'twinchenzo'],
+      ['TWINCHENZO'],
+      ['alpha'],
+    )).toEqual(['gordon'])
+  })
+
+  it('configures shifted recovery attempts and the DST-aware final check', () => {
     const config = JSON.parse(
       readFileSync('vercel.json', 'utf8'),
     ) as { crons: Array<{ path: string; schedule: string }> }
 
-    expect(config.crons).toContainEqual({
-      path: '/api/cron/snapshot-earnings-after-six-summer',
-      schedule: '0 10 * * *',
-    })
-    expect(config.crons).toContainEqual({
-      path: '/api/cron/snapshot-earnings-after-six-winter',
-      schedule: '0 11 * * *',
-    })
+    expect(config.crons).toEqual(expect.arrayContaining([
+      { path: '/api/cron/snapshot-earnings-summer', schedule: '30 8 * * *' },
+      { path: '/api/cron/snapshot-earnings-after-six-summer', schedule: '0 9 * * *' },
+      { path: '/api/cron/snapshot-earnings-winter', schedule: '30 9 * * *' },
+      { path: '/api/cron/snapshot-earnings-after-six-winter', schedule: '0 10 * * *' },
+      { path: '/api/cron/snapshot-earnings-fallback', schedule: '30 10 * * *' },
+      { path: '/api/cron/snapshot-earnings-final-check', schedule: '0 11 * * *' },
+    ]))
   })
 })
