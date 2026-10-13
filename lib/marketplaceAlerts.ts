@@ -67,7 +67,7 @@ export type MarketplaceAlertRule = {
   priceMax: number | null
   /** Maximum listing price divided by the bulk rating. */
   pricePerRatingMax?: number | null
-  /** Only match Rare–Legendary auctions whose live bid has reached the seller's target. */
+  /** Only match Rare–Legendary auctions with a configured target that meets the price limits. */
   targetPriceLegendaryOrBelow?: boolean
   atTargetPrice: boolean
   noBids: boolean
@@ -127,6 +127,9 @@ export type MarketplaceAlertNotification = {
   price: number
   rating?: number | null
   pricePerRating?: number | null
+  /** Configured auction target used by target-price rules. */
+  targetPrice?: number
+  targetPricePerRating?: number | null
   /** Configured rule limit before the standard +1 RAX/rating allowance. */
   maxPricePerRating?: number | null
   /** Highest valid bulk-auction price after applying the allowance. */
@@ -301,11 +304,10 @@ export function marketplaceListingPrice(listing: MarketplaceListing): number {
 }
 
 /** Real stores the seller's auction target in `buyNowPrice`, despite having no buy-now action. */
-export function marketplaceListingIsAtTargetPrice(listing: MarketplaceListing): boolean {
-  if (finiteNumber(listing.minBidPrice) === null) return false
+export function marketplaceListingTargetPrice(listing: MarketplaceListing): number | null {
+  if (finiteNumber(listing.minBidPrice) === null) return null
   const target = finiteNumber(listing.buyNowPrice)
-  if (target === null || target <= 0) return false
-  return marketplaceListingPrice(listing) >= target
+  return target !== null && target > 0 ? target : null
 }
 
 function marketplaceListingOpeningPrice(listing: MarketplaceListing): number {
@@ -399,9 +401,12 @@ export function marketplaceListingMatchesRule(
     ? player.rarities
     : rule.rarities
   const rarity = marketplaceListingRarity(listing).toLowerCase()
+  const configuredTargetPrice = rule.targetPriceLegendaryOrBelow
+    ? marketplaceListingTargetPrice(listing)
+    : null
   if (rule.targetPriceLegendaryOrBelow) {
     const eligibleRarity = rarity === 'rare' || rarity === 'epic' || rarity === 'legendary'
-    if (!eligibleRarity || !marketplaceListingIsAtTargetPrice(listing)) return false
+    if (!eligibleRarity || configuredTargetPrice === null) return false
   }
   const iconicPriceOverride = player?.alwaysNotifyIconic === true && rarity === 'iconic'
   const mysticPriceOverride = player?.alwaysNotifyMystic === true && rarity === 'mystic'
@@ -414,9 +419,9 @@ export function marketplaceListingMatchesRule(
     return false
   }
 
-  const price = rule.atTargetPrice
+  const price = configuredTargetPrice ?? (rule.atTargetPrice
     ? marketplaceListingPrice(listing)
-    : marketplaceListingOpeningPrice(listing)
+    : marketplaceListingOpeningPrice(listing))
   if (rule.priceMin !== null && price < rule.priceMin) return false
   if (rule.priceMax !== null && price > rule.priceMax) return false
   const pricePerRatingMax = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
@@ -447,6 +452,9 @@ export function createMarketplaceNotification(
   const listingId = String(listing.id)
   const price = marketplaceListingPrice(listing)
   const rating = marketplaceListingRating(listing)
+  const targetPrice = rule.targetPriceLegendaryOrBelow
+    ? marketplaceListingTargetPrice(listing)
+    : null
   const player = matchingRulePlayer(rule, listing)
   const maxPricePerRating = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
   const rarity = marketplaceListingRarity(listing)
@@ -464,6 +472,10 @@ export function createMarketplaceNotification(
     price,
     rating,
     pricePerRating: rating && rating > 0 ? price / rating : null,
+    ...(targetPrice !== null ? {
+      targetPrice,
+      targetPricePerRating: rating && rating > 0 ? targetPrice / rating : null,
+    } : {}),
     maxPricePerRating,
     maxAuctionPrice: priceOverride
       ? null

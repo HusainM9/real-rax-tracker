@@ -17,6 +17,12 @@ function describeNotification(notification: MarketplaceAlertNotification): strin
     notification.pricePerRating != null
       ? `${notification.pricePerRating.toLocaleString('en-US', { maximumFractionDigits: 2 })} RAX/rating`
       : null,
+    notification.targetPrice != null
+      ? `${notification.targetPrice.toLocaleString('en-US')} RAX target`
+      : null,
+    notification.targetPricePerRating != null
+      ? `${notification.targetPricePerRating.toLocaleString('en-US', { maximumFractionDigits: 2 })} target RAX/rating`
+      : null,
     `${notification.numBids} bid${notification.numBids === 1 ? '' : 's'}`,
     notification.rarity || null,
     notification.iconicPriceOverride ? 'Iconic price override' : null,

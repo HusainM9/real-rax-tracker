@@ -81,6 +81,19 @@ describe('marketplace notification delivery', () => {
     expect(message).toContain('Max auction: 3,200 RAX (35 + 1 allowance per rating)')
   })
 
+  it('shows the configured target used for a target-price match', () => {
+    const message = formatMarketplaceNotificationMessage('husain', [{
+      ...notification,
+      price: 3000,
+      rating: 100,
+      pricePerRating: 30,
+      targetPrice: 4000,
+      targetPricePerRating: 40,
+    }])
+    expect(message).toContain('3,000 RAX · 100 rating · 30 RAX/rating')
+    expect(message).toContain('4,000 RAX target · 40 target RAX/rating')
+  })
+
   it('labels Iconic player overrides without showing an inapplicable price ceiling', () => {
     const message = formatMarketplaceNotificationMessage('husain', [{
       ...notification,

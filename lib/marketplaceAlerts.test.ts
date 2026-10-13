@@ -5,7 +5,7 @@ import {
   marketplaceApiSport,
   marketplaceApiListingTypes,
   marketplaceListingMatchesRule,
-  marketplaceListingIsAtTargetPrice,
+  marketplaceListingTargetPrice,
   marketplaceMaximumBulkAuctionPrice,
   marketplaceListingPrice,
   marketplaceListingRarity,
@@ -251,12 +251,13 @@ describe('marketplace listing matching', () => {
     expect(marketplaceListingMatchesRule({ ...rule, rarities: ['Rare', 'Epic'] }, mystic)).toBe(false)
   })
 
-  it('can require auctions to be at target price and Legendary or below', () => {
+  it('can require a configured target within the ratio limit at Legendary or below', () => {
     const targetRule = {
       ...rule,
       itemType: 'bulk' as const,
       rarities: [] as MarketplaceAlertRule['rarities'],
       priceMax: null,
+      pricePerRatingMax: 40,
       noBids: false,
       targetPriceLegendaryOrBelow: true,
     }
@@ -271,11 +272,16 @@ describe('marketplace listing matching', () => {
       value: 100,
     }
 
-    expect(marketplaceListingIsAtTargetPrice(rareAtTarget)).toBe(true)
+    expect(marketplaceListingTargetPrice(rareAtTarget)).toBe(4000)
     expect(marketplaceListingMatchesRule(targetRule, rareAtTarget)).toBe(true)
     expect(marketplaceListingMatchesRule(targetRule, {
       ...rareAtTarget,
       currentBidAmount: 3900,
+    })).toBe(true)
+    expect(marketplaceListingMatchesRule(targetRule, {
+      ...rareAtTarget,
+      currentBidAmount: 3000,
+      buyNowPrice: 4200,
     })).toBe(false)
     expect(marketplaceListingMatchesRule(targetRule, {
       ...rareAtTarget,
@@ -293,6 +299,15 @@ describe('marketplace listing matching', () => {
       ...rareAtTarget,
       rarity: 5,
     })).toBe(true)
+    expect(createMarketplaceNotification(targetRule, {
+      ...rareAtTarget,
+      currentBidAmount: 3000,
+    })).toMatchObject({
+      price: 3000,
+      pricePerRating: 30,
+      targetPrice: 4000,
+      targetPricePerRating: 40,
+    })
   })
 
   it('excludes Mystic and Iconic target-price listings even with player overrides', () => {
