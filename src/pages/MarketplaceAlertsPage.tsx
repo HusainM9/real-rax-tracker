@@ -22,6 +22,7 @@ import {
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
 import { marketplacePageScanKey, startMarketplacePageScanner } from '../lib/marketplacePageScanner'
+import { marketplaceAuctionCountdown } from '../lib/marketplaceAuctionCountdown'
 import { marketplaceRuleTrackingDetails } from '../lib/marketplaceRuleDetails'
 import {
   applyMarketplacePlayerSelection,
@@ -207,6 +208,7 @@ export default function MarketplaceAlertsPage() {
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null)
   const [playersLoadedAt, setPlayersLoadedAt] = useState<string | null>(null)
   const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([])
+  const [auctionClock, setAuctionClock] = useState(() => Date.now())
   const activeScanKey = marketplacePageScanKey(rules)
   const [realUsername, setRealUsername] = useState(
     () => (data.settings.savedUsername || accountUsername || '').replace(/^@/, '').trim(),
@@ -241,6 +243,11 @@ export default function MarketplaceAlertsPage() {
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [playerPickerOpen])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAuctionClock(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -728,6 +735,7 @@ export default function MarketplaceAlertsPage() {
           <div className="marketplace-notification-grid">
             {notifications.map((item) => {
               const auctionUrl = marketplaceListingUrl(item.listingId)
+              const countdown = marketplaceAuctionCountdown(item.endsAt, auctionClock)
               return (
                 <article key={item.id} className="marketplace-notification">
                   <div className="marketplace-notification-copy">
@@ -739,6 +747,15 @@ export default function MarketplaceAlertsPage() {
                     <strong>{item.price.toLocaleString()}</strong>
                     <span>RAX</span>
                     <small>{formatAge(item.foundAt)}</small>
+                    {countdown ? (
+                      <time
+                        className={`marketplace-auction-countdown${countdown.ended ? ' ended' : ''}`}
+                        dateTime={item.endsAt ?? undefined}
+                        title={item.endsAt ? `Ends ${new Date(item.endsAt).toLocaleString()}` : undefined}
+                      >
+                        <i aria-hidden="true" />{countdown.label}
+                      </time>
+                    ) : null}
                     {auctionUrl ? (
                       <a
                         className="marketplace-auction-link"

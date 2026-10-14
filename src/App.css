@@ -5204,6 +5204,27 @@ button.linkish {
 .marketplace-notification-price strong { color: #d9fff5; font-size: 1.45rem; }
 .marketplace-notification-price span,
 .marketplace-notification-price small { color: var(--muted); font-size: 0.72rem; }
+.marketplace-notification-price .marketplace-auction-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  color: #68e2c3;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.marketplace-auction-countdown i {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0.18rem rgba(104, 226, 195, 0.1);
+}
+.marketplace-notification-price .marketplace-auction-countdown.ended {
+  color: #8f8f8b;
+}
 .marketplace-notification-price .marketplace-auction-link {
   display: inline-flex;
   align-items: center;
