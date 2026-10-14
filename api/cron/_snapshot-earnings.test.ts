@@ -43,7 +43,7 @@ describe('scheduled earnings snapshot window', () => {
     expect(isEasternFinalCheckTime(new Date('2026-01-15T10:59:00Z'))).toBe(false)
   })
 
-  it('accepts the intended EST and EDT routes and rejects inactive seasonal jobs', () => {
+  it('accepts every scheduled route throughout the delayed-cron recovery window', () => {
     expect(isScheduledSnapshotRouteTime(
       '/api/cron/snapshot-earnings-summer',
       new Date('2026-07-15T08:30:00Z'),
@@ -79,7 +79,7 @@ describe('scheduled earnings snapshot window', () => {
     expect(isScheduledSnapshotRouteTime(
       '/api/cron/snapshot-earnings-fallback',
       new Date('2026-07-15T10:30:00Z'),
-    )).toBe(false)
+    )).toBe(true)
     expect(isScheduledSnapshotRouteTime(
       '/api/cron/snapshot-earnings-final-check',
       new Date('2026-01-15T11:00:00Z'),
@@ -88,6 +88,10 @@ describe('scheduled earnings snapshot window', () => {
       '/api/cron/snapshot-earnings-final-check',
       new Date('2026-07-15T11:00:00Z'),
     )).toBe(false)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-summer',
+      new Date('2026-07-15T09:45:00Z'),
+    )).toBe(true)
   })
 })
 
@@ -131,8 +135,8 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
   })
 
   it('reserves enough invocation time to finish or defer cleanly', () => {
-    expect(hasSnapshotTimeBudget(1_000, 20_000, 5_000)).toBe(true)
-    expect(hasSnapshotTimeBudget(1_000, 40_000, 2_000)).toBe(false)
+    expect(hasSnapshotTimeBudget(1_000, 200_000, 5_000)).toBe(true)
+    expect(hasSnapshotTimeBudget(1_000, 230_000, 2_000)).toBe(false)
   })
 
   it('prioritizes the opposite end of the account list on the 6 AM fallback', () => {

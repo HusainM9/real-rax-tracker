@@ -18,8 +18,10 @@ import {
   type NodeResponse,
 } from '../../lib/nodeApiHandler.js'
 
-const SNAPSHOT_SOFT_BUDGET_MS = 48_000
-const SNAPSHOT_RETRY_RESERVE_MS = 8_000
+// Vercel gives this route 300 seconds. Leave a full minute for response flush and
+// platform overhead while allowing one invocation to cover the complete account list.
+const SNAPSHOT_SOFT_BUDGET_MS = 240_000
+const SNAPSHOT_RETRY_RESERVE_MS = 15_000
 const SNAPSHOT_RETRY_MIN_DELAY_MS = 2_500
 const SNAPSHOT_RETRY_JITTER_MS = 2_500
 
@@ -51,9 +53,8 @@ export function previousEasternDay(now = new Date()): string {
 export function isEasternSnapshotTime(now: Date): boolean {
   const parts = easternParts(now)
   const hour = Number(parts.hour)
-  // Hobby cron starts can land anywhere in their configured UTC hour. Accept the
-  // full local hour for the 4:30 and 5:30 schedules, then let the route-specific
-  // guard below reject inactive EST/EDT jobs.
+  // Hobby cron delivery can be delayed. Keep every idempotent snapshot attempt
+  // eligible throughout the complete pre-reset recovery window.
   return hour >= 4 && hour <= 6
 }
 
@@ -61,14 +62,10 @@ export function isEasternFinalCheckTime(now: Date): boolean {
   return Number(easternParts(now).hour) === 6
 }
 
-export function isScheduledSnapshotRouteTime(pathname: string, now: Date): boolean {
-  const hour = Number(easternParts(now).hour)
-  if (pathname.endsWith('/snapshot-earnings-summer')) return hour === 4
-  if (pathname.endsWith('/snapshot-earnings-after-six-summer')) return hour === 5
-  if (pathname.endsWith('/snapshot-earnings-winter')) return hour === 4 || hour === 5
-  if (pathname.endsWith('/snapshot-earnings-after-six-winter')) return hour === 5 || hour === 6
-  if (pathname.endsWith('/snapshot-earnings-fallback')) return hour === 5
-  if (pathname.endsWith('/snapshot-earnings-final-check')) return hour === 6
+export function isScheduledSnapshotRouteTime(_pathname: string, now: Date): boolean {
+  // Hobby cron delivery can be delayed well past the minute in vercel.json. Every
+  // snapshot route is idempotent, so accept any configured attempt throughout the
+  // recovery window instead of rejecting a valid delayed EDT/EST invocation.
   return isEasternSnapshotTime(now)
 }
 
@@ -257,13 +254,43 @@ async function handleSnapshot(request: Request): Promise<Response> {
     }
   }
 
-  const missingAccounts = missingSnapshotUsernames(
-    usernames,
-    completed.map(({ username }) => username),
-    skipped,
+  // A soft-budget exit can occur before the loop re-checks snapshots saved by an
+  // earlier invocation. Verify every unresolved username against KV so the coverage
+  // report never labels an already-saved account as missing.
+  const verifiedSaved = new Set([
+    ...completed.map(({ username }) => username.toLowerCase()),
+    ...skipped.map((username) => username.toLowerCase()),
+  ])
+  for (const username of usernames) {
+    if (verifiedSaved.has(username.toLowerCase())) continue
+    try {
+      if (await readPublicEarningsSnapshot(username, day)) {
+        verifiedSaved.add(username.toLowerCase())
+      }
+    } catch (error) {
+      errors.push({
+        username,
+        error: error instanceof Error ? error.message : 'Could not verify the saved snapshot.',
+      })
+    }
+  }
+  const missingAccounts = usernames.filter(
+    (username) => !verifiedSaved.has(username.toLowerCase()),
   )
   const finalCheck = !force && isEasternFinalCheckTime(now)
   const hasIncompleteAccounts = missingAccounts.length > 0
+  console.info('earnings-snapshot completed', {
+    route: url.pathname,
+    day,
+    totalAccounts: usernames.length,
+    completedAccounts: completed.length,
+    previouslySavedAccounts: verifiedSaved.size - completed.length,
+    missingAccounts: missingAccounts.length,
+    rateLimitedAccounts: rateLimited.length,
+    deferredAccounts: deferred.length,
+    errors: errors.length,
+    elapsedMs: Date.now() - startedAt,
+  })
   return Response.json({
     ok: !hasIncompleteAccounts,
     day,
