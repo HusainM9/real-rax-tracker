@@ -43,9 +43,13 @@ afterEach(() => {
 
 describe('marketplace notification delivery', () => {
   it('formats an owner-scoped alert without mentioning users', () => {
-    expect(formatMarketplaceNotificationMessage('husain', [notification])).toBe(
+    expect(formatMarketplaceNotificationMessage(
+      'husain',
+      [notification],
+      Date.parse('2026-10-12T09:50:00.000Z'),
+    )).toBe(
       'Marketplace match for husain\n' +
-      '• Trevor Lawrence — Bulk rating auction · 2,000 RAX · 0 bids · Legendary · #42 (Cheap QB)',
+      '• Trevor Lawrence — Bulk rating auction · 2,000 RAX · 0 bids · Legendary · #42 · 10m 0s remaining (Cheap QB)',
     )
   })
 
@@ -59,7 +63,7 @@ describe('marketplace notification delivery', () => {
       serialNumber: null,
       ruleName: 'NFL owned players',
     }])).toContain(
-      '• Kenneth Walker — Bulk rating auction · 280 RAX · 8 rating · 35 RAX/rating · 0 bids · Legendary (NFL owned players)',
+      '• Kenneth Walker — Bulk rating auction · 280 RAX · 8 rating · 35 RAX/rating · 0 bids · Legendary · Auction ended (NFL owned players)',
     )
   })
 
@@ -89,9 +93,28 @@ describe('marketplace notification delivery', () => {
       pricePerRating: 30,
       targetPrice: 4000,
       targetPricePerRating: 40,
+      startPrice: 3000,
+      maxPricePerRating: 35,
     }])
     expect(message).toContain('3,000 RAX · 100 rating · 30 RAX/rating')
-    expect(message).toContain('4,000 RAX target · 40 target RAX/rating')
+    expect(message).toContain(
+      '4,000 RAX target (1,000 above start; 5 RAX/rating above 35 limit) · 40 target RAX/rating',
+    )
+  })
+
+  it('labels a target below both the start and configured price limit', () => {
+    const message = formatMarketplaceNotificationMessage('husain', [{
+      ...notification,
+      price: 3000,
+      startPrice: 3000,
+      rating: 100,
+      targetPrice: 2500,
+      targetPricePerRating: 25,
+      maxPricePerRating: 30,
+    }])
+    expect(message).toContain(
+      '2,500 RAX target (500 below start; 5 RAX/rating below 30 limit)',
+    )
   })
 
   it('labels Iconic player overrides without showing an inapplicable price ceiling', () => {

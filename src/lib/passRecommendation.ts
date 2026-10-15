@@ -1600,6 +1600,7 @@ async function pickGreedyBundleAsync(
   analysisPool: CatalogImportProfile[],
   candidateByKey: Map<string, CatalogImportProfile>,
   pickCount: number,
+  initialRanking: PassRecommendationRow[],
   options?: {
     onProgress?: (progress: PassRecommendationProgress) => void
     signal?: AbortSignal
@@ -1618,13 +1619,14 @@ async function pickGreedyBundleAsync(
     const remainingProfiles = analysisPool.filter((profile) => !pickedKeys.has(profile.externalKey))
     if (remainingProfiles.length === 0) break
 
-    const reranked = await rankCandidatesAsync(workingData, remainingProfiles, {
-      ...options,
-      progressLabel:
-        pickIndex === 0
-          ? 'Ranking'
-          : `Bundle pick ${pickIndex + 1}/${pickCount}`,
-    })
+    // The page has already ranked this exact pool against the untouched collection. Reuse that
+    // work for pick one; only later picks need re-analysis after the previous card is added.
+    const reranked = pickIndex === 0
+      ? initialRanking
+      : await rankCandidatesAsync(workingData, remainingProfiles, {
+          ...options,
+          progressLabel: `Bundle pick ${pickIndex + 1}/${pickCount}`,
+        })
     const best = reranked[0]
     if (!best || best.netClaimableDelta <= 0) break
 
@@ -1907,6 +1909,7 @@ export async function rankAndRecommendAsync(
     analysisPool,
     candidateByKey,
     pickCount,
+    rankedRows,
     {
       onProgress: options?.onProgress,
       signal: options?.signal,

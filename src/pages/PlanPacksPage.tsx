@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import { createId } from '../lib/id'
+import type { CatalogSearchResult } from '../lib/catalogApi'
+import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 import {
   DEFAULT_PACK_RATING_INCREMENT,
   estimatePackProgress,
@@ -30,16 +33,6 @@ import type {
   PlannedPass,
   WeeklyPackOpen,
 } from '../types/rax'
-
-function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <article className="stat-card panel">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small className="table-sub">{hint}</small>
-    </article>
-  )
-}
 
 function formatDays(days: number | null): string {
   if (days === null) return '—'
@@ -160,39 +153,32 @@ function PackPassRow({
   // Yellow incomplete-ownership only for unfinished passes (collapsed).
   const showPassMissingWarn = hasIncompleteOwnership && !open && !isDone
 
-  const summary = !tracker
-    ? `${pass.passKind === 'team' ? 'Team' : 'Player'} · ${pass.sport} · ${pass.season} · Not tracking yet`
-    : [
-        `${pass.sport} · ${pass.season}`,
-        weeklyOnly ? 'Weekly packs' : null,
-        `${estimate.totalRating.toLocaleString()} / ${ICONIC_RATING_TARGET.toLocaleString()}`,
-        isDone
-          ? 'DONE'
-          : weeklyOnly
-            ? `${formatWeeks(estimate.weeksRemaining)} left`
-            : `${formatDays(estimate.daysRemaining)} left`,
-        `${accountCount} account${accountCount === 1 ? '' : 's'}`,
-        !weeklyOnly && estimate.dailySwaps > 0
-          ? `+${estimate.dailySwaps} swap${estimate.dailySwaps === 1 ? '' : 's'}/day`
-          : null,
-        weeklyOnly && estimate.weeklyExtraAccounts > 0
-          ? `+${estimate.weeklyExtraAccounts} extra/week`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+  const cadenceLabel = weeklyOnly ? 'Weekly packs' : 'Daily packs'
+  const timeLeftLabel = weeklyOnly
+    ? formatWeeks(estimate.weeksRemaining)
+    : formatDays(estimate.daysRemaining)
 
   return (
     <CollapsiblePanel
       className={`pack-tracker-row${isDone ? ' pack-tracker-row-done' : ''}${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
       title={
-        <PassIdentity
-          name={pass.name}
-          passKind={pass.passKind}
-          sport={pass.sport}
-          avatar={pass.avatar}
-          meta={summary}
-        />
+        <span className="pack-pass-heading">
+          <PassIdentity
+            name={pass.name}
+            passKind={pass.passKind}
+            sport={pass.sport}
+            avatar={pass.avatar}
+            meta={`${pass.sport} · ${pass.season}${tracker ? ` · ${cadenceLabel}` : ''}`}
+          />
+          {tracker ? (
+            <span className="pack-pass-glance">
+              <span><small>Rating</small><strong>{estimate.totalRating.toLocaleString()}</strong></span>
+              <span><small>{isDone ? 'Status' : 'Time left'}</small><strong>{isDone ? 'Complete' : timeLeftLabel}</strong></span>
+              <span><small>Accounts</small><strong>{accountCount}</strong></span>
+              <span className="pack-pass-mini-progress" aria-hidden="true"><i style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} /></span>
+            </span>
+          ) : <span className="pack-pass-untracked">Not tracking</span>}
+        </span>
       }
       defaultOpen={false}
       open={open}
@@ -642,6 +628,7 @@ export default function PlanPacksPage() {
     data,
     removePlannedPass,
     upsertPackTracker,
+    addPlannedPassFromCatalog,
     trackAllUntrackedPlayerPacks,
     updatePackTracker,
     addPackTrackerAccount,
@@ -665,6 +652,10 @@ export default function PlanPacksPage() {
   const [importBusyKey, setImportBusyKey] = useState('')
   const [importStatusByPass, setImportStatusByPass] = useState<Record<string, string>>({})
   const [passSortMode, setPassSortMode] = useState<PackPassSortMode>('soonest')
+  const [showQuickAdd, setShowQuickAdd] = useState(false)
+  const [quickAddLoadingKey, setQuickAddLoadingKey] = useState('')
+  const [quickAddStatus, setQuickAddStatus] = useState('')
+  const [pendingQuickTrackId, setPendingQuickTrackId] = useState<string | null>(null)
 
   const plannedPasses = data.plannedPasses ?? []
   const packTrackers = data.packTrackers ?? []
@@ -705,6 +696,33 @@ export default function PlanPacksPage() {
     }
     return map
   }, [packTrackers])
+
+  useEffect(() => {
+    if (!pendingQuickTrackId) return
+    if (!playerPasses.some((pass) => pass.id === pendingQuickTrackId)) return
+    upsertPackTracker(pendingQuickTrackId)
+    setPendingQuickTrackId(null)
+  }, [pendingQuickTrackId, playerPasses, upsertPackTracker])
+
+  const addPlayerFromCatalog = (result: CatalogSearchResult) => {
+    setQuickAddLoadingKey(result.externalKey)
+    setQuickAddStatus('')
+    try {
+      const id = addPlannedPassFromCatalog(
+        result,
+        result.rarityLabel || RECOMMENDATION_SIMULATED_RARITY,
+        'catalog',
+      )
+      if (!id) {
+        setQuickAddStatus(`${result.name} is already on the pack board.`)
+        return
+      }
+      setPendingQuickTrackId(id)
+      setQuickAddStatus(`Added ${result.name} and started pack tracking.`)
+    } finally {
+      setQuickAddLoadingKey('')
+    }
+  }
 
   const trackedEstimates = useMemo(() => {
     return packTrackers
@@ -761,6 +779,18 @@ export default function PlanPacksPage() {
       .sort((a, b) => a - b)[0]
     return { tracked, complete, soonest: soonest ?? null }
   }, [trackedEstimates])
+
+  const packDashboard = useMemo(() => {
+    const weekly = packTrackers.filter((tracker) => tracker.weeklyPacksOnly).length
+    const openingAccounts = packTrackers.reduce(
+      (sum, tracker) => sum + tracker.accounts.filter((account) => account.opensPacks).length,
+      0,
+    )
+    const attention = packTrackers.filter((tracker) => tracker.accounts.some(
+      (account) => account.ownershipStatus === 'missing' && !account.ignoredMissing,
+    )).length
+    return { weekly, openingAccounts, attention }
+  }, [packTrackers])
 
   const untrackedPlayerPasses = useMemo(
     () => playerPasses.filter((pass) => !trackerByPassId.has(pass.id)),
@@ -1301,25 +1331,47 @@ export default function PlanPacksPage() {
 
   return (
     <div className="page-stack plan-packs-page">
-      <section className="hero-card">
-        <p className="eyebrow">Player pack tracking</p>
-        <h1>Player packs</h1>
-        <p>
-          Track rating across accounts toward Iconic ({ICONIC_RATING_TARGET.toLocaleString()}). Use
-          weekly packs only for players without daily packs, log open dates, and estimate time to
-          Iconic. Sync a Real username to pull live play ratings for every tracked pass that account
-          owns.
-        </p>
-        <div className="button-row">
-          <Link className="button" to="/plan">
-            Back to purchase plan
-          </Link>
+      <section className="packs-command-hero">
+        <div className="packs-command-copy">
+          <div>
+            <p className="eyebrow">Player pack tracking</p>
+            <h1>Pack command center</h1>
+            <p>See what is closest to Iconic, which accounts need attention, and where every daily or weekly pack is going.</p>
+          </div>
+          <div className="packs-command-actions">
+            <button className="button primary compact" type="button" aria-expanded={showQuickAdd} onClick={() => setShowQuickAdd((current) => !current)}>
+              {showQuickAdd ? 'Close player search' : 'Add player'}
+            </button>
+            <Link className="button compact" to="/plan">Purchase plan</Link>
+          </div>
+        </div>
+        {showQuickAdd ? (
+          <div className="packs-quick-add">
+            <CatalogSearchPanel
+              embedded
+              passKind="player"
+              description="Search the shared catalog and add a player directly to pack tracking."
+              actionLabel="Add to packs"
+              loadingKey={quickAddLoadingKey}
+              loadingLabel="Adding…"
+              emptyHint="Type a player name to add it directly to this pack board."
+              onSelect={(result) => addPlayerFromCatalog(result)}
+            />
+            {quickAddStatus ? <p className="import-status">{quickAddStatus}</p> : null}
+          </div>
+        ) : null}
+        <div className="packs-command-metrics">
+          <div className="packs-command-metric is-primary"><span>Tracked players</span><strong>{summary.tracked}</strong><small>{summary.complete} complete</small></div>
+          <div className="packs-command-metric"><span>Soonest finish</span><strong>{formatDays(summary.soonest)}</strong><small>{summary.soonest === null ? 'No estimate yet' : formatProjectedFinishDate(summary.soonest)}</small></div>
+          <div className="packs-command-metric"><span>Opening accounts</span><strong>{packDashboard.openingAccounts}</strong><small>Across all players</small></div>
+          <div className={`packs-command-metric${packDashboard.attention > 0 ? ' needs-attention' : ''}`}><span>Needs attention</span><strong>{packDashboard.attention}</strong><small>{packDashboard.weekly} weekly tracker{packDashboard.weekly === 1 ? '' : 's'}</small></div>
         </div>
       </section>
 
-      <section className="panel pack-sync-panel">
+      <section className="panel pack-sync-panel pack-sync-dock">
         <div className="pack-sync-copy">
-          <h2>Sync all tracked</h2>
+          <span className="pack-sync-kicker">Live ratings</span>
+          <h2>Sync your pack board</h2>
           <p className="table-sub">
             Sync one Real account, or Sync all to walk each username one by one — pulls live ratings
             across every tracked player. Avg from plays pulls each player’s Real play ratings
@@ -1450,28 +1502,6 @@ export default function PlanPacksPage() {
         )}
         {applyTemplatesStatus ? <p className="import-status">{applyTemplatesStatus}</p> : null}
       </CollapsiblePanel>
-
-      <section className="stats-grid plan-summary-grid">
-        <StatCard
-          label="Planned players"
-          value={String(playerPasses.length)}
-          hint="From your purchase plan"
-        />
-        <StatCard
-          label="Tracking"
-          value={String(summary.tracked)}
-          hint={`${summary.complete} at Iconic target`}
-        />
-        <StatCard
-          label="Soonest finish"
-          value={formatDays(summary.soonest)}
-          hint={
-            summary.soonest === null
-              ? `Target ${ICONIC_RATING_TARGET.toLocaleString()} rating`
-              : formatProjectedFinishDate(summary.soonest)
-          }
-        />
-      </section>
 
       {finishOrder.length > 0 ? (
         <CollapsiblePanel

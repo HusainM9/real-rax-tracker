@@ -10,6 +10,8 @@ export type PublicBoxScoreCacheEntry = {
   id: string
   fingerprint: string
   baseEarnings: number
+  /** Detailed stats are required to reproduce card-booster earnings on cache hits. */
+  statValues?: RealPlayerBoxScore['statValues']
   cachedAt: string
 }
 

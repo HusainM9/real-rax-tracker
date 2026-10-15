@@ -574,6 +574,19 @@ describe('marketplace prices and notifications', () => {
     expect(marketplaceListingPrice({ ...listing, minBidPrice: null, buyNowPrice: null })).toBe(0)
   })
 
+  it('captures a seller target whenever it differs from the auction start', () => {
+    expect(createMarketplaceNotification(rule, {
+      ...listing,
+      minBidPrice: 2_000,
+      buyNowPrice: 3_500,
+    })).toMatchObject({
+      price: 2_000,
+      startPrice: 2_000,
+      targetPrice: 3_500,
+      maxPrice: 2_500,
+    })
+  })
+
   it('creates a complete notification with stable rule-listing identity', () => {
     expect(createMarketplaceNotification(rule, listing, '2026-10-12T09:50:00.000Z')).toEqual({
       id: 'rule-1:1457616609', ruleId: 'rule-1', ruleName: 'Cheap QB',

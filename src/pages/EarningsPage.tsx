@@ -375,9 +375,34 @@ export default function EarningsPage() {
 
       <section className="earnings-controls">
         <div className="earnings-account-picker">
-          <span className="earnings-control-label">Report scope</span>
+          <div className="earnings-account-picker-heading">
+            <div>
+              <span className="earnings-control-label">Report scope</span>
+              <strong>Choose whose earnings to review</strong>
+            </div>
+            <small>{linkedAccounts.length} linked account{linkedAccounts.length === 1 ? '' : 's'}</small>
+          </div>
           <div className="earnings-account-tabs">
-            {accounts.map((account) => <button className={`earnings-account-tab${selectedUsername === account.username ? ' is-active' : ''}`} type="button" key={account.id} onClick={() => setSelectedUsername(account.username)}><span>{account.username === ALL_ACCOUNTS ? 'Σ' : account.name.slice(0, 1).toUpperCase()}</span><strong>{account.name}</strong>{account.username !== ALL_ACCOUNTS ? <small>@{account.username}</small> : <small>{linkedAccounts.length} linked</small>}</button>)}
+            {accounts.map((account) => {
+              const active = selectedUsername === account.username
+              const combined = account.username === ALL_ACCOUNTS
+              return (
+                <button
+                  aria-pressed={active}
+                  className={`earnings-account-tab${active ? ' is-active' : ''}${combined ? ' is-combined' : ''}`}
+                  type="button"
+                  key={account.id}
+                  onClick={() => setSelectedUsername(account.username)}
+                >
+                  <span className="earnings-account-avatar">{combined ? 'Σ' : account.name.slice(0, 1).toUpperCase()}</span>
+                  <span className="earnings-account-copy">
+                    <strong>{account.name}</strong>
+                    <small>{combined ? `${linkedAccounts.length} accounts combined` : `@${account.username}`}</small>
+                  </span>
+                  <span className="earnings-account-state">{active ? 'Selected' : 'View'}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
         {!isDemo ? <label className="earnings-day-picker"><span className="earnings-control-label">Earnings day</span><select value={day} onChange={(event) => setDay(event.target.value)}>{reportDays.map((reportDay) => <option value={reportDay} key={reportDay}>{displayEarningsDay(reportDay)}{reportDay === latestDay ? ' · Current' : ' · Saved'}</option>)}</select></label> : null}

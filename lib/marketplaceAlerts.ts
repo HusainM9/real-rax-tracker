@@ -125,11 +125,15 @@ export type MarketplaceAlertNotification = {
   sport: string
   season: number
   price: number
+  /** Seller's opening bid, included when the auction also has a different target. */
+  startPrice?: number
   rating?: number | null
   pricePerRating?: number | null
-  /** Configured auction target used by target-price rules. */
+  /** Seller's auction target when it differs from the opening bid. */
   targetPrice?: number
   targetPricePerRating?: number | null
+  /** Absolute rule ceiling used to explain how the target compares with alert parameters. */
+  maxPrice?: number | null
   /** Configured rule limit before the standard +1 RAX/rating allowance. */
   maxPricePerRating?: number | null
   /** Highest valid bulk-auction price after applying the allowance. */
@@ -451,9 +455,11 @@ export function createMarketplaceNotification(
 ): MarketplaceAlertNotification {
   const listingId = String(listing.id)
   const price = marketplaceListingPrice(listing)
+  const startPrice = marketplaceListingOpeningPrice(listing)
   const rating = marketplaceListingRating(listing)
-  const targetPrice = rule.targetPriceLegendaryOrBelow
-    ? marketplaceListingTargetPrice(listing)
+  const listingTargetPrice = marketplaceListingTargetPrice(listing)
+  const targetPrice = listingTargetPrice !== null && listingTargetPrice !== startPrice
+    ? listingTargetPrice
     : null
   const player = matchingRulePlayer(rule, listing)
   const maxPricePerRating = player?.pricePerRatingMax ?? rule.pricePerRatingMax ?? null
@@ -473,8 +479,10 @@ export function createMarketplaceNotification(
     rating,
     pricePerRating: rating && rating > 0 ? price / rating : null,
     ...(targetPrice !== null ? {
+      startPrice,
       targetPrice,
       targetPricePerRating: rating && rating > 0 ? targetPrice / rating : null,
+      maxPrice: rule.priceMax,
     } : {}),
     maxPricePerRating,
     maxAuctionPrice: priceOverride

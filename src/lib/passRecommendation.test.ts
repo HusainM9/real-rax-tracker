@@ -24,6 +24,7 @@ import {
   rankCatalogRecommendations,
   rankCatalogRecommendationsForDay,
   rankCatalogRecommendationsForMonth,
+  rankAndRecommendAsync,
   RECOMMENDATION_SIMULATED_RARITY,
   recommendationAdjustmentFromPass,
   recommendationCapsForAllSports,
@@ -618,6 +619,22 @@ describe('passRecommendation', () => {
     expect(bundle.combinedNetDelta).toBe(
       bundle.picks.reduce((sum, row) => sum + row.netClaimableDelta, 0),
     )
+  })
+
+  it('reuses the initial ranking for the first async bundle pick', async () => {
+    const candidates = [
+      catalogProfile('one|2025|NBA', 'One', [{ claimDay: '2026-03-01', baseRaxEarned: 50 }]),
+      catalogProfile('two|2025|NBA', 'Two', [{ claimDay: '2026-04-01', baseRaxEarned: 40 }]),
+      catalogProfile('three|2025|NBA', 'Three', [{ claimDay: '2026-05-01', baseRaxEarned: 30 }]),
+    ]
+    const labels: string[] = []
+
+    await rankAndRecommendAsync(data, candidates, 2, {
+      batchSize: 1,
+      onProgress: (progress) => labels.push(progress.label),
+    })
+
+    expect(labels.filter((label) => label.startsWith('Ranking:'))).toHaveLength(candidates.length)
   })
 
   it('dedupes duplicate catalog identities and skips owned iconic players once', () => {

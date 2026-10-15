@@ -2,6 +2,7 @@ import {
   marketplaceListingUrl,
   type MarketplaceAlertNotification,
 } from './marketplaceAlerts.js'
+import { marketplaceAuctionCountdown } from './marketplaceAuctionCountdown.js'
 
 export type MarketplaceDeliveryResult = {
   configured: boolean
@@ -9,7 +10,41 @@ export type MarketplaceDeliveryResult = {
   delivered: number
 }
 
-function describeNotification(notification: MarketplaceAlertNotification): string {
+function signedDifference(value: number): string {
+  return Math.abs(value).toLocaleString('en-US', { maximumFractionDigits: 2 })
+}
+
+function describeTarget(notification: MarketplaceAlertNotification): string | null {
+  if (notification.targetPrice == null) return null
+  const startPrice = notification.startPrice ?? notification.price
+  const startDifference = notification.targetPrice - startPrice
+  const comparisons = startDifference === 0
+    ? ['same as start']
+    : [`${signedDifference(startDifference)} ${startDifference > 0 ? 'above' : 'below'} start`]
+
+  if (notification.targetPricePerRating != null && notification.maxPricePerRating != null) {
+    const limitDifference = notification.targetPricePerRating - notification.maxPricePerRating
+    comparisons.push(limitDifference === 0
+      ? `at ${notification.maxPricePerRating.toLocaleString('en-US')} RAX/rating limit`
+      : `${signedDifference(limitDifference)} RAX/rating ${limitDifference > 0 ? 'above' : 'below'} ` +
+        `${notification.maxPricePerRating.toLocaleString('en-US')} limit`)
+  } else if (notification.maxPrice != null) {
+    const limitDifference = notification.targetPrice - notification.maxPrice
+    comparisons.push(limitDifference === 0
+      ? `at ${notification.maxPrice.toLocaleString('en-US')} RAX limit`
+      : `${signedDifference(limitDifference)} RAX ${limitDifference > 0 ? 'above' : 'below'} ` +
+        `${notification.maxPrice.toLocaleString('en-US')} limit`)
+  }
+
+  const ratio = notification.targetPricePerRating != null
+    ? ` · ${notification.targetPricePerRating.toLocaleString('en-US', { maximumFractionDigits: 2 })} target RAX/rating`
+    : ''
+  return `${notification.targetPrice.toLocaleString('en-US')} RAX target (${comparisons.join('; ')})${ratio}`
+}
+
+function describeNotification(notification: MarketplaceAlertNotification, now: number): string {
+  const countdown = marketplaceAuctionCountdown(notification.endsAt, now)
+  const target = describeTarget(notification)
   const details = [
     'Bulk rating auction',
     `${notification.price.toLocaleString('en-US')} RAX`,
@@ -17,17 +52,13 @@ function describeNotification(notification: MarketplaceAlertNotification): strin
     notification.pricePerRating != null
       ? `${notification.pricePerRating.toLocaleString('en-US', { maximumFractionDigits: 2 })} RAX/rating`
       : null,
-    notification.targetPrice != null
-      ? `${notification.targetPrice.toLocaleString('en-US')} RAX target`
-      : null,
-    notification.targetPricePerRating != null
-      ? `${notification.targetPricePerRating.toLocaleString('en-US', { maximumFractionDigits: 2 })} target RAX/rating`
-      : null,
+    target,
     `${notification.numBids} bid${notification.numBids === 1 ? '' : 's'}`,
     notification.rarity || null,
     notification.iconicPriceOverride ? 'Iconic price override' : null,
     notification.mysticPriceOverride ? 'Mystic price override' : null,
     notification.serialNumber ? `#${notification.serialNumber}` : null,
+    countdown?.label ?? null,
   ].filter(Boolean)
   const auctionUrl = marketplaceListingUrl(notification.listingId)
   const summary = `• ${notification.playerName} — ${details.join(' · ')} (${notification.ruleName})`
@@ -41,12 +72,13 @@ function describeNotification(notification: MarketplaceAlertNotification): strin
 export function formatMarketplaceNotificationMessage(
   owner: string,
   notifications: MarketplaceAlertNotification[],
+  now = Date.now(),
 ): string {
   const visible = notifications.slice(0, 10)
   const remaining = notifications.length - visible.length
   const lines = [
     `Marketplace match${notifications.length === 1 ? '' : 'es'} for ${owner}`,
-    ...visible.map(describeNotification),
+    ...visible.map((notification) => describeNotification(notification, now)),
   ]
   if (remaining > 0) lines.push(`…and ${remaining} more. Open the Marketplace page for the full feed.`)
   return lines.join('\n')

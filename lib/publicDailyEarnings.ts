@@ -330,10 +330,19 @@ export async function reconstructPublicDailyEarnings(
   const cachedBoxes = context.forceFreshBoxScores
     ? new Map<string, PublicBoxScoreCacheEntry>()
     : await readPublicBoxScoreCache([...relevantBoxes.keys()])
+  const boostedPlayerIds = new Set(
+    passes
+      .filter((pass) => pass.boosterCardInfo && pass.boostInfo?.isCardBoosted)
+      .map((pass) => String(pass.entityId ?? '')),
+  )
   const detailInputs = [...relevantBoxes.entries()].flatMap(([id, summary]) => {
     const fingerprint = publicBoxScoreFingerprint(summary)
     const cached = cachedBoxes.get(id)
-    return cached?.fingerprint === fingerprint ? [] : [[id, summary, fingerprint] as const]
+    const needsUncachedBoosterStats =
+      boostedPlayerIds.has(String(summary.playerId ?? '')) && cached?.statValues === undefined
+    return cached?.fingerprint === fingerprint && !needsUncachedBoosterStats
+      ? []
+      : [[id, summary, fingerprint] as const]
   })
   // A small incremental refresh can safely use a wider pool. Cold scans and the forced scheduled
   // refresh keep the conservative limit that avoids sustained Real API rate limiting.
@@ -375,7 +384,11 @@ export async function reconstructPublicDailyEarnings(
     const fingerprint = publicBoxScoreFingerprint(summary)
     const cached = cachedBoxes.get(id)
     if (cached?.fingerprint === fingerprint) {
-      appendPerformance(summary, cached.baseEarnings)
+      appendPerformance(
+        summary,
+        cached.baseEarnings,
+        cached.statValues === undefined ? undefined : { ...summary, statValues: cached.statValues },
+      )
     }
   }
 
@@ -388,6 +401,7 @@ export async function reconstructPublicDailyEarnings(
       id,
       fingerprint,
       baseEarnings,
+      statValues: box.statValues ?? summary.statValues ?? [],
       cachedAt: new Date().toISOString(),
     })
   }

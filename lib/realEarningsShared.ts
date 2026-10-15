@@ -80,7 +80,7 @@ export type EarningsBackfillStats = {
  * progress between them. Kept modest so default upstream concurrency (2) stays well under Real's
  * rate limit — override via options on the client fetch helper.
  */
-export const REAL_EARNINGS_PASSES_MAX_REQUEST = 10
+export const REAL_EARNINGS_PASSES_MAX_REQUEST = 16
 
 /**
  * Batches in flight from the browser. Each one occupies a serverless invocation that itself runs

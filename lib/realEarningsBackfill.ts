@@ -16,6 +16,8 @@ import {
   catalogExternalKeyCandidates,
   filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
+  resolvePassSeasonDateWindow,
+  sportSkipsClaimDaySeasonFilter,
 } from './seasonClaimWindow'
 import {
   fetchCatalogImportProfilesBulk,
@@ -70,6 +72,8 @@ function seasonScopedDailyRows(
 }
 
 const DEFAULT_CACHE_TTL_MS = 12 * 60 * 60 * 1000
+const HISTORICAL_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+const SEASON_SETTLE_MS = 14 * 24 * 60 * 60 * 1000
 const DEFAULT_CONCURRENCY = 2
 
 export { REAL_EARNINGS_PASSES_MAX_REQUEST }
@@ -117,10 +121,27 @@ function cacheLookupKeys(pass: EarningsBackfillPass): string[] {
   })
 }
 
-function isFresh(profile: CatalogImportProfile, nowMs: number, ttlMs: number): boolean {
+function isFresh(
+  profile: CatalogImportProfile,
+  pass: EarningsBackfillPass,
+  nowMs: number,
+  ttlMs: number,
+): boolean {
   const cachedAt = Date.parse(profile.sourceUpdatedAt ?? profile.cachedAt ?? '')
   if (!Number.isFinite(cachedAt)) return false
-  return nowMs - cachedAt < ttlMs
+  if (ttlMs === 0) return false
+
+  let effectiveTtlMs = ttlMs
+  if (!sportSkipsClaimDaySeasonFilter(pass.sportRaw)) {
+    const window = resolvePassSeasonDateWindow(pass.seasonYear, pass.sportRaw, pass.seasonLabel)
+    const seasonEnd = window ? Date.parse(`${window.end}T23:59:59.999Z`) : Number.NaN
+    if (Number.isFinite(seasonEnd) && nowMs - seasonEnd > SEASON_SETTLE_MS) {
+      // Completed seasons no longer accumulate daily rows. Keeping them warm for a month avoids
+      // repeatedly asking Real for immutable history while still allowing late corrections.
+      effectiveTtlMs = Math.max(effectiveTtlMs, HISTORICAL_CACHE_TTL_MS)
+    }
+  }
+  return nowMs - cachedAt < effectiveTtlMs
 }
 
 function profileRows(profile: CatalogImportProfile): EarningsBackfillDailyRow[] {
@@ -234,7 +255,7 @@ export async function backfillRealPassEarnings(
     const knownEmpty = profiles.find((profile) => profile.hasEarnings === false)
     const usable = withRows ?? knownEmpty
 
-    if (usable && isFresh(usable, nowMs, ttlMs)) {
+    if (usable && isFresh(usable, pass, nowMs, ttlMs)) {
       const cachedRows = withRows ? profileRows(withRows) : []
       // Profiles may still contain prior-season days from merge-only upserts; trim before serving.
       const { rows } = seasonScopedDailyRows(cachedRows, pass)

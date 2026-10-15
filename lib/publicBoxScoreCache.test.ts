@@ -23,12 +23,14 @@ describe('public box-score cache', () => {
       id: 'box-1',
       fingerprint,
       baseEarnings: 21,
+      statValues: [{ type: 30, value: 2 }],
       cachedAt: '2026-10-12T10:30:00.000Z',
     }])
 
     expect((await readPublicBoxScoreCache(['box-1'])).get('box-1')).toMatchObject({
       fingerprint,
       baseEarnings: 21,
+      statValues: [{ type: 30, value: 2 }],
     })
   })
 

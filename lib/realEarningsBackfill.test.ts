@@ -87,6 +87,41 @@ describe('backfillRealPassEarnings', () => {
     })
   })
 
+  it('keeps completed-season earnings warm longer than active-season earnings', async () => {
+    const now = Date.parse('2026-10-15T12:00:00.000Z')
+    const historicalPass: EarningsBackfillPass = {
+      ...samplePass,
+      externalKey: '900|2025|NBA',
+      entityId: 900,
+      sportRaw: 'nba',
+      seasonYear: 2025,
+      seasonLabel: '2024-25',
+    }
+    const cachedAt = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const fetchEarnings = vi.fn()
+
+    const result = await backfillRealPassEarnings([historicalPass], {
+      fetchEarnings,
+      loadCachedProfiles: async () => ({
+        profiles: [freshProfile({
+          externalKey: historicalPass.externalKey,
+          entityId: historicalPass.entityId,
+          sport: 'NBA',
+          seasonYear: 2025,
+          seasonLabel: '2024-25',
+          cachedAt,
+          sourceUpdatedAt: cachedAt,
+        })],
+        storageConfigured: true,
+      }),
+      cacheTtlMs: 60_000,
+      now: () => now,
+    })
+
+    expect(fetchEarnings).not.toHaveBeenCalled()
+    expect(result.stats.cacheHits).toBe(1)
+  })
+
   it('fetches and upserts base RAX on a cache miss (never OTD/atRarity)', async () => {
     const fetchEarnings = vi.fn(async (query) => {
       expect(query).toMatchObject({
