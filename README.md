@@ -110,29 +110,6 @@ Unattended marketplace monitoring is triggered by a QStash schedule every two mi
 
 `Serial number` and `Bulk rating` are separate rule choices and feeds: serial-number rules request `listingType=userpassserial`, while bulk-rating rules request `listingType=userpassfull`. An `All` rule scans both pass feeds plus the card feed.
 
-## Shared catalog
-
-Create the catalog tables using [`supabase/meowbot_catalog.sql`](supabase/meowbot_catalog.sql). For existing installations, review and apply the relevant repair migration in [`supabase/catalog_season_repair.sql`](supabase/catalog_season_repair.sql).
-
-The catalog seed script is dry-run by default:
-
-```bash
-npm run seed:catalog -- --seasons=2026,2025 --types=players,teams --limit=250 --concurrency=8
-```
-
-Add `--write` to persist results. Use `--sport=nba` (or another supported sport) for a smaller run.
-
-## Deployment
-
-The production target is Vercel. It builds with `npm run build` and serves `dist/`; [`vercel.json`](vercel.json) configures SPA routing and security headers. Configure all secrets in the Vercel project rather than in the repository.
-
-Before sharing a deployment:
-
-1. Verify an incognito visit redirects to `/login`.
-2. Sign in and refresh several protected routes directly.
-3. Restrict preview deployments using [`scripts/PREVIEW_LOCKDOWN.md`](scripts/PREVIEW_LOCKDOWN.md).
-4. Follow [`scripts/PASSWORD_POLICY.md`](scripts/PASSWORD_POLICY.md) when distributing or rotating access.
-
 ## Data and privacy
 
 Tracker data can contain usernames, owned passes, notes, and earnings history. Synced accounts store this data in the configured server-side store; JSON exports contain it in plain text. Treat exports and infrastructure credentials as sensitive.
