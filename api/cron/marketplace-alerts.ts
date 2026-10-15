@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   acquireMarketplaceScanLease,
   listMarketplaceAlertOwners,
@@ -192,7 +194,7 @@ function streamedJson(work: () => Promise<MarketplaceScanResult>): Response {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
   if (!isAuthorizedMarketplaceScanRequest(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })

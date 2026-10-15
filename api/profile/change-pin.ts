@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { requireAppSession } from '../admin/_helpers'
 import { changeTrackerProfilePin, profileSyncConfigured } from '../../lib/trackerProfileStore'
 
@@ -13,7 +15,7 @@ type ChangePinBody = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const denied = await requireAppSession(request)

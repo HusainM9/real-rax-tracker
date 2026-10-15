@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { listAdminUsers } from '../../lib/adminEventStore'
 import { requireAdminSession } from './_helpers'
 
@@ -7,7 +9,7 @@ export const config = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const adminDenied = await requireAdminSession(request)

@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   adminDeleteAllTrackerProfiles,
   adminDeleteTrackerProfile,
@@ -139,5 +141,5 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ ok: true })
   }
 
-  return new Response('Method Not Allowed', { status: 405 })
+  return methodNotAllowed()
 }

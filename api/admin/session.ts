@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { adminConfigured } from '../../lib/adminAuth'
 import { authConfigured } from '../../lib/authCookie'
 import { hasAdminSession, requireAppSession } from './_helpers'
@@ -8,7 +10,7 @@ export const config = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const appDenied = await requireAppSession(request)

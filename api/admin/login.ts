@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   adminConfigured,
   buildAdminSessionCookieHeader,
@@ -17,7 +19,7 @@ type AdminLoginBody = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const appDenied = await requireAppSession(request)

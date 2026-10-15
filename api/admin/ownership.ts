@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { adminStorageConfigured } from '../../lib/adminEventStore'
 import { normalizeRealUsername, validateImportOwnershipSnapshot } from '../../lib/importOwnershipTypes'
 import {
@@ -59,5 +61,5 @@ export default async function handler(request: Request): Promise<Response> {
     })
   }
 
-  return new Response('Method Not Allowed', { status: 405 })
+  return methodNotAllowed()
 }

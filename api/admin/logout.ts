@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { clearAdminSessionCookieHeader } from '../../lib/adminAuth'
 import { requireAppSession } from './_helpers'
 
@@ -7,7 +9,7 @@ export const config = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const appDenied = await requireAppSession(request)

@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
@@ -138,7 +140,7 @@ function waitForSnapshotRetry(ms: number, signal: AbortSignal): Promise<void> {
 
 async function handleSnapshot(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
   if (!isAuthorizedSnapshotRequest(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 

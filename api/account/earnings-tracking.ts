@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   listPublicEarningsSnapshots,
   syncTrackedEarningsUsernames,
@@ -8,7 +10,7 @@ import { normalizeRealUsernameInput } from '../../lib/realApi'
 export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+  if (request.method !== 'POST') return methodNotAllowed()
   const denied = await requireEarningsSession(request)
   if (denied) return denied
 

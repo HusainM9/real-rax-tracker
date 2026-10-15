@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { requireAppSession } from '../admin/_helpers'
 import { resolveCatalogAvatars } from '../../lib/catalogAvatarResolve'
 import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
@@ -10,7 +12,7 @@ export const config = {
 export default async function handler(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 })
+      return methodNotAllowed()
     }
 
     const denied = await requireAppSession(request)

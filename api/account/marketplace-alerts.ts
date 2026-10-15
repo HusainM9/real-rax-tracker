@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   ignoreMarketplaceListing,
   marketplaceAlertStorageConfigured,
@@ -17,7 +19,7 @@ export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'PUT' && request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
   const accessError = await requireEarningsSession(request, 'Marketplace')
   if (accessError) return accessError
@@ -100,5 +102,5 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ ok: true, notifications, ignoredListingId: listingId })
   }
 
-  return new Response('Method Not Allowed', { status: 405 })
+  return methodNotAllowed()
 }

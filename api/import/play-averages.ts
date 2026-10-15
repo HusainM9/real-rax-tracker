@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   listPlayerPlaysForPackAverage,
   realImportConfigStatus,
@@ -104,7 +106,7 @@ function normalizePassInput(raw: PlayAveragePassInput): {
 export default async function handler(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 })
+      return methodNotAllowed()
     }
 
     const denied = await requireAppSession(request)

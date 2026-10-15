@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { readRequestJson } from '../../lib/cloudSyncCompression'
 import {
   accountsConfigured,
@@ -97,5 +99,5 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
-  return new Response('Method Not Allowed', { status: 405 })
+  return methodNotAllowed()
 }

@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   authConfigured,
   buildSessionCookieHeader,
@@ -34,7 +36,7 @@ function mergeSetCookieHeaders(...headerGroups: Record<string, string>[]): Heade
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   if (!authConfigured()) {

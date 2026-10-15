@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   RealApiError,
   getPassEarnings,
@@ -128,7 +130,7 @@ function errorResponse(error: unknown): Response {
 
 async function handleShopEarningsCrawl(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const denied = await requireAdminSession(request)

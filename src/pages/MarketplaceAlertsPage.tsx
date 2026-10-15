@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import './MarketplaceAlertsPage.css'
 import {
   MARKETPLACE_RARITIES,
   marketplaceListingUrl,

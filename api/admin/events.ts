@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { adminStorageConfigured, appendAdminEvents, listAdminEvents } from '../../lib/adminEventStore'
 import {
   isAdminEventType,
@@ -68,5 +70,5 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json(result)
   }
 
-  return new Response('Method Not Allowed', { status: 405 })
+  return methodNotAllowed()
 }

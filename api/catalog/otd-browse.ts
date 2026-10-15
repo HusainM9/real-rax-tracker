@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { requireAppSession } from '../admin/_helpers'
 import { browseCatalogPasses, type CatalogPassKind } from '../../lib/meowbotCatalogStore'
 
@@ -23,7 +25,7 @@ function parseSeasonYears(value: string | null): number[] {
 export default async function handler(request: Request): Promise<Response> {
   try {
     if (request.method !== 'GET') {
-      return new Response('Method Not Allowed', { status: 405 })
+      return methodNotAllowed()
     }
 
     const denied = await requireAppSession(request)

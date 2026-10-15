@@ -41,119 +41,23 @@ import {
   type ShopCrawlResumeConfig,
   type ShopCrawlResumeCursor,
 } from '../lib/shopCrawlClient'
+import {
+  CURRENT_SPLIT_SEASON_SPORTS,
+  CURRENT_SPLIT_SEASON_YEAR,
+  EVENT_TYPE_LABELS,
+  LIVE_SHOP_CRAWL_SPORTS,
+  type CatalogImportResponse,
+  type EventsResponse,
+  type OwnershipLookupResponse,
+  type OwnershipSnapshotSummary,
+  type OwnershipSnapshotsResponse,
+  type ShopCrawlLogEvent,
+  type ShopCrawlLogLine,
+  type ShopEarningsCrawlResponse,
+  type TrackerProfileLookupResponse,
+  type UsersResponse,
+} from './admin/adminPageTypes'
 
-type EventsResponse = {
-  events: AdminEvent[]
-  total: number
-  storageConfigured: boolean
-}
-
-type UsersResponse = {
-  users: AdminUserSummary[]
-  storageConfigured: boolean
-}
-
-type OwnershipSnapshotSummary = {
-  realUsername: string
-  importedAt: string
-  updatedAt: string
-  passCount: number
-  legendaryPlusCount: number
-  raxRowCount: number
-}
-
-type OwnershipSnapshotsResponse = {
-  snapshots: OwnershipSnapshotSummary[]
-  storageConfigured: boolean
-}
-
-type OwnershipLookupResponse = {
-  ownership: {
-    realUsername: string
-    importedAt: string
-    updatedAt: string
-    passes: Array<{ rarityLabel?: string; earnings?: Array<{ claimDay: string; baseRaxEarned: number }> }>
-  } | null
-  storageConfigured: boolean
-}
-
-type CatalogImportResponse = {
-  ok: boolean
-  mode: 'manual-upsert'
-  passesUpserted?: number
-  rowsUpserted?: number
-  skippedRows?: number
-  error?: string
-}
-
-type TrackerProfileLookupResponse = {
-  profile: {
-    username: string
-    updatedAt: string
-    cardCount: number
-    performanceCount: number
-  } | null
-  storageConfigured: boolean
-  error?: string
-}
-
-type ShopCrawlLogEvent = {
-  type: string
-  message: string
-}
-
-type ShopCrawlLogLine = {
-  id: number
-  type: string
-  message: string
-}
-
-type ShopEarningsCrawlResponse = {
-  ok: boolean
-  upserted: number
-  pagesFetched: number
-  earningsFetched: number
-  earningsFailed: number
-  dailyRowsUpserted: number
-  nextBefore: number
-  done: boolean
-  jobsTotal: number
-  maxPages?: number
-  delayMs?: number
-  earningsConcurrency?: number
-  cursor: {
-    jobIndex: number
-    before: number
-    sport: string
-    season: number
-    entityType: 'player' | 'team'
-  }
-  skipped?: Array<{ sport: string; season: number; entityType: string; reason: string }>
-  failures?: string[]
-  log?: ShopCrawlLogEvent[]
-  error?: string
-}
-
-const LIVE_SHOP_CRAWL_SPORTS = [
-  { label: 'NBA', value: 'nba' },
-  { label: 'WNBA', value: 'wnba' },
-  { label: 'NFL', value: 'nfl' },
-  { label: 'CFB', value: 'ncaaf' },
-  { label: 'MLB', value: 'mlb' },
-  { label: 'NHL', value: 'nhl' },
-  { label: 'CBB', value: 'ncaam' },
-  { label: 'Golf', value: 'golf' },
-  { label: 'FC', value: 'soccer' },
-] as const
-
-const CURRENT_SPLIT_SEASON_YEAR = '2026'
-const CURRENT_SPLIT_SEASON_SPORTS = ['nfl', 'ncaaf', 'soccer'] as const
-
-const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
-  import_complete: 'Import complete',
-  pass_no_earnings: 'No earnings',
-  pass_fetch_error: 'Fetch error',
-}
 
 export default function AdminPage() {
   const { logout, devBypass } = useAdminAuth()

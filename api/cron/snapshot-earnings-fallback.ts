@@ -1,3 +1,1 @@
-import snapshotEarnings from './snapshot-earnings.js'
-
-export default snapshotEarnings
+export { default } from './snapshot-earnings.js'

@@ -11,7 +11,6 @@ import {
   buildSavedCardProfile,
   removeCardFromCollection,
   restoreSavedCardProfile,
-  type RemoveCardFromCollectionOptions,
   upsertSavedCardProfile,
 } from '../lib/cardProfile'
 import { ignorePassOnImport, removeIgnoredPassKey } from '../lib/ignoredPasses'
@@ -32,35 +31,19 @@ import { useAccountAuth } from './AccountAuthContext'
 import {
   importFromUsername as runUsernameImport,
   retryFailedEarnings as runRetryFailedEarnings,
-  type UsernameImportOptions,
   type UsernameImportResult,
 } from '../lib/usernameImport'
-import type { EarningsBackfillPass } from '../lib/realEarningsImport'
 import { createId } from '../lib/id'
 import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from '../lib/realMedia'
-import type { BulkSellRankResult } from '../lib/removeCardAnalysis'
 import { buildSavedSellRankings } from '../lib/sellRankings'
 import {
   importCatalogProfileIntoData,
   type CatalogProfileImportResult,
 } from '../lib/catalogImport'
-import { fetchCatalogAvatars, type CatalogImportProfile } from '../lib/catalogApi'
+import { fetchCatalogAvatars } from '../lib/catalogApi'
 import { applyCardRarityChange } from '../lib/cardRarity'
-import type {
-  AppSettings,
-  PackAccountTemplate,
-  PackTracker,
-  PackTrackerAccount,
-  PlayerCard,
-  PotentialRaxRow,
-  RaxPerformance,
-  RaxTrackerData,
-  SavedPotentialCard,
-  PlannedPass,
-  Sport,
-} from '../types/rax'
-import type { CatalogSearchResult } from '../lib/catalogApi'
-import { plannedPassFromCatalogResult, syncPlanProgressFromPackTrackers, type PlannedPassInput } from '../lib/plannedPasses'
+import type { PackTracker, RaxTrackerData, Sport } from '../types/rax'
+import { plannedPassFromCatalogResult, syncPlanProgressFromPackTrackers } from '../lib/plannedPasses'
 import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 import {
   accountsFromPackTemplates,
@@ -73,142 +56,8 @@ import {
   removeFinishedPlannedPass,
   renamePackUsernameInAccounts,
 } from '../lib/packTracker'
+import type { RaxDataContextValue } from './raxDataContextTypes'
 
-type CardInput = Pick<
-  PlayerCard,
-  | 'name'
-  | 'sport'
-  | 'season'
-  | 'notes'
-  | 'rarityLabel'
-  | 'passKind'
-  | 'simulatedRarityLabel'
-  | 'avatar'
->
-type PerformanceInput = Pick<
-  RaxPerformance,
-  'cardId' | 'claimDay' | 'raxEarned' | 'baseRaxEarned' | 'note'
->
-type PotentialCardInput = Pick<
-  SavedPotentialCard,
-  'name' | 'sport' | 'season' | 'notes' | 'rawJson' | 'simulatedRarityLabel'
-> & {
-  rows: PotentialRaxRow[]
-}
-
-type ImportFromUsernameOptions = UsernameImportOptions
-
-type RaxDataContextValue = {
-  data: RaxTrackerData
-  storageReady: boolean
-  storageWarning: string | null
-  setSettings: (patch: Partial<AppSettings>) => void
-  addCard: (input: CardInput) => string
-  upsertCard: (externalKey: string, input: CardInput) => string
-  updateCard: (id: string, patch: Partial<CardInput>) => void
-  setCardRarity: (id: string, targetRarity: string) => void
-  deleteCard: (id: string) => void
-  removeCardFromCollection: (id: string, options?: RemoveCardFromCollectionOptions) => boolean
-  ignorePassOnImport: (id: string) => boolean
-  unignorePassKey: (externalKey: string) => void
-  addPerformance: (input: PerformanceInput) => void
-  addPerformances: (inputs: PerformanceInput[]) => void
-  updatePerformance: (id: string, patch: Partial<PerformanceInput>) => void
-  deletePerformance: (id: string) => void
-  addPotentialCard: (input: PotentialCardInput) => string
-  updatePotentialCard: (id: string, input: PotentialCardInput) => void
-  deletePotentialCard: (id: string) => void
-  addPlannedPass: (input: PlannedPassInput) => string | null
-  removePlannedPass: (id: string) => void
-  updatePlannedPass: (id: string, patch: Partial<PlannedPassInput>) => void
-  addPlannedPassFromCatalog: (
-    result: CatalogSearchResult,
-    simulatedRarityLabel?: string,
-    source?: PlannedPass['source'],
-  ) => string | null
-  setPlanSoldCardIds: (ids: string[]) => void
-  togglePlanSoldCard: (cardId: string) => void
-  clearPlanSoldCardIds: () => void
-  toggleSellExcludedCard: (cardId: string) => void
-  upsertPackTracker: (plannedPassId: string) => string
-  /** Start tracking every untracked planned player pass (same seeding as upsertPackTracker). */
-  trackAllUntrackedPlayerPacks: () => { tracked: number }
-  updatePackTracker: (
-    id: string,
-    patch: Partial<
-      Pick<
-        PackTracker,
-        | 'accounts'
-        | 'ratingPerPack'
-        | 'dailySwaps'
-        | 'weeklyPacksOnly'
-        | 'weeklyExtraAccounts'
-        | 'weeklyPackOpens'
-        | 'averagePlayRating'
-        | 'playCount'
-        | 'lastPlaysImportedAt'
-      >
-    >,
-  ) => void
-  addPackTrackerAccount: (trackerId: string, input?: Partial<PackTrackerAccount>) => string | null
-  updatePackTrackerAccount: (
-    trackerId: string,
-    accountId: string,
-    patch: Partial<
-      Pick<
-        PackTrackerAccount,
-        | 'name'
-        | 'rating'
-        | 'opensPacks'
-        | 'username'
-        | 'rarityLabel'
-        | 'lastImportedAt'
-        | 'ownershipStatus'
-        | 'ignoredMissing'
-      >
-    >,
-  ) => void
-  applyPackRatingsFromImport: (
-    username: string,
-    ratingsByExternalKey: Record<string, { rating: number; rarityLabel?: string }>,
-    options?: { plannedPassId?: string; accountId?: string; ensureAccounts?: boolean },
-  ) => { updatedAccounts: number; missingPasses: number }
-  removePackTrackerAccount: (trackerId: string, accountId: string) => void
-  addPackAccountTemplate: (input?: Partial<PackAccountTemplate>) => string
-  updatePackAccountTemplate: (
-    id: string,
-    patch: Partial<Pick<PackAccountTemplate, 'name' | 'username' | 'opensPacks'>>,
-  ) => void
-  removePackAccountTemplate: (id: string) => void
-  applyPackAccountTemplatesToTracked: () => {
-    trackersTouched: number
-    accountsAdded: number
-    accountsUpdated: number
-    accountsRemoved: number
-  }
-  saveCardProfile: (cardId: string, rawJson?: string) => void
-  restoreCardProfile: (profileId: string) => { cardId: string; rowsRestored: number } | null
-  deleteCardProfile: (profileId: string) => void
-  saveSellRankings: (result: BulkSellRankResult) => void
-  clearSellRankings: () => void
-  exportJson: () => string
-  importJson: (json: string) => void
-  replaceData: (next: RaxTrackerData) => void
-  importFromUsername: (
-    username: string,
-    options?: ImportFromUsernameOptions,
-  ) => Promise<UsernameImportResult>
-  retryFailedEarnings: (
-    passes: EarningsBackfillPass[],
-    options?: ImportFromUsernameOptions,
-  ) => Promise<UsernameImportResult>
-  importCatalogProfile: (profile: CatalogImportProfile) => CatalogProfileImportResult
-  /** Backfill missing card/planned-pass avatars from catalog rows (by externalKey). */
-  enrichAvatarsFromCatalog: (
-    items: Array<{ externalKey: string; avatar?: string | null }>,
-  ) => void
-  resetAll: () => void
-}
 
 const RaxDataContext = createContext<RaxDataContextValue | null>(null)
 

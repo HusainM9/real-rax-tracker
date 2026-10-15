@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import {
   buildAccountSessionCookieHeader,
   createAccountSessionToken,
@@ -37,7 +39,7 @@ function mergeSetCookieHeaders(...headerGroups: Record<string, string>[]): Heade
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const denied = await requireAppSession(request)

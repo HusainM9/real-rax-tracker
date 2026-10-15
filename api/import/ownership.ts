@@ -1,3 +1,5 @@
+import { methodNotAllowed } from '../../lib/httpResponses'
+
 import { adminStorageConfigured } from '../../lib/adminEventStore'
 import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression'
 import { getImportOwnershipSnapshot } from '../../lib/importOwnershipStore'
@@ -14,7 +16,7 @@ export const config = {
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 })
+    return methodNotAllowed()
   }
 
   const denied = await requireAppSession(request)
