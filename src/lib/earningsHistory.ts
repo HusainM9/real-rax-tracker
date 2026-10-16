@@ -60,17 +60,18 @@ export function saveEarningsHistoryEntries(entries: EarningsHistoryEntry[]): Ear
   return next
 }
 
-/** Replaces local rows for linked accounts with the authoritative scheduled server snapshots. */
+/**
+ * Merges authoritative scheduled snapshots into local history. Matching account/day rows are
+ * replaced, while locally refreshed days that the server has not captured are preserved.
+ */
 export function replaceEarningsHistoryForUsernames(
   entries: EarningsHistoryEntry[],
   usernames: string[],
 ): EarningsHistoryEntry[] {
-  const replaced = new Set(usernames.map((username) => username.toLowerCase()))
-  const retained = readEarningsHistory().filter(
-    (row) => !replaced.has(row.username.toLowerCase()),
+  const linked = new Set(usernames.map((username) => username.toLowerCase()))
+  return saveEarningsHistoryEntries(
+    entries.filter((entry) => linked.has(entry.username.toLowerCase())),
   )
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(retained))
-  return saveEarningsHistoryEntries(entries)
 }
 
 export function sumHistory(entries: EarningsHistoryEntry[]): number {

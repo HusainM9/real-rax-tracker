@@ -115,7 +115,7 @@ describe('earnings report statistics', () => {
     ])
   })
 
-  it('replaces live local rows with authoritative scheduled snapshots', () => {
+  it('merges authoritative snapshots without deleting locally refreshed days', () => {
     saveEarningsHistoryEntries([
       history[0]!,
       { ...history[1]!, username: 'beta' },
@@ -125,6 +125,7 @@ describe('earnings report statistics', () => {
     replaceEarningsHistoryForUsernames([scheduled], ['alpha'])
 
     expect(readEarningsHistory()).toEqual([
+      history[0]!,
       { ...history[1]!, username: 'beta' },
       scheduled,
     ])

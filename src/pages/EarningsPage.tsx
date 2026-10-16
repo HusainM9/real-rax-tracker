@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import { cacheDailyEarningsResult, DailyEarningsRequestError, fetchAccountDailyEarnings, readCachedDailyEarningsResults, syncLinkedEarningsTracking, type DailyEarningsResult, type DailyEarningsResultCache } from '../lib/dailyEarnings'
-import { highestAverageWeekday, highestEarningDay, rankEarningPasses, rankEarningSports, readEarningsHistory, replaceEarningsHistoryForUsernames, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
+import { highestAverageWeekday, highestEarningDay, rankEarningPasses, rankEarningSports, readEarningsHistory, replaceEarningsHistoryForUsernames, saveEarningsHistoryEntry, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
 
 function currentRealEarningsDay(now = new Date()): string {
@@ -348,6 +348,7 @@ export default function EarningsPage() {
 
         if (!loaded) continue
         setAccountResults((current) => cacheDailyEarningsResult(current, loaded))
+        setHistory(saveEarningsHistoryEntry(historyEntry(loaded)))
         const seconds = Math.max(1, Math.round((performance.now() - startedAt) / 1000))
         updateLog(username, {
           status: 'complete',
