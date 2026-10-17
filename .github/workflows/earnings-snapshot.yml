@@ -44,15 +44,19 @@ jobs:
             query="?test=1"
           fi
 
-          curl \
+          status=$(curl \
             --silent \
             --show-error \
-            --fail-with-body \
             --max-time 290 \
             --request POST \
             --header "Authorization: Bearer $CRON_SECRET" \
             --output response.json \
-            "https://real-rax-tracker.vercel.app/api/cron/$route$query"
+            --write-out '%{http_code}' \
+            "https://real-rax-tracker.vercel.app/api/cron/$route$query")
 
           cat response.json
+          if [[ "$status" != 2* ]]; then
+            echo "::error::Earnings endpoint returned HTTP $status."
+            exit 1
+          fi
           jq --exit-status '.ok == true' response.json >/dev/null

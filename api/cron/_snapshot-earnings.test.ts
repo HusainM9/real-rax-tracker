@@ -189,6 +189,14 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
     expect(workflow).toContain('secrets.CRON_SECRET')
     expect(workflow).toContain('/api/cron/$route')
     expect(workflow).toContain('query="?test=1"')
+    expect(workflow).toContain("--write-out '%{http_code}'")
     expect(workflow).toContain("jq --exit-status '.ok == true'")
+  })
+
+  it('uses production-resolvable ESM imports in the Node cron function', () => {
+    const source = readFileSync('api/cron/snapshot-earnings.ts', 'utf8')
+
+    expect(source).toContain("from '../../lib/httpResponses.js'")
+    expect(source).not.toContain("from '../../lib/httpResponses'\n")
   })
 })
