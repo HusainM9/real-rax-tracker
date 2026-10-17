@@ -78,6 +78,11 @@ export function isAuthorizedSnapshotRequest(request: Request): boolean {
   return request.headers.get('user-agent') === 'vercel-cron/1.0'
 }
 
+export function hasSnapshotBearerAuthorization(request: Request): boolean {
+  const secret = process.env.CRON_SECRET?.trim()
+  return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`)
+}
+
 export function isSnapshotRateLimit(error: unknown): boolean {
   if (error instanceof RealApiError) {
     return error.kind === 'rate_limited' || error.status === 429
@@ -145,9 +150,13 @@ async function handleSnapshot(request: Request): Promise<Response> {
   if (!isAuthorizedSnapshotRequest(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const url = new URL(request.url)
+  const testMode = url.searchParams.get('test') === '1'
+  if (testMode && process.env.NODE_ENV !== 'development' && !hasSnapshotBearerAuthorization(request)) {
+    return Response.json({ error: 'A configured CRON_SECRET is required for test runs.' }, { status: 403 })
+  }
   const force = process.env.NODE_ENV === 'development' && url.searchParams.get('force') === '1'
   const now = new Date()
-  if (!force && !isScheduledSnapshotRouteTime(url.pathname, now)) {
+  if (!force && !testMode && !isScheduledSnapshotRouteTime(url.pathname, now)) {
     return Response.json({ ok: true, skipped: true, reason: 'Outside this route\'s 4:00-6:59 AM Eastern snapshot window.' })
   }
 
@@ -166,6 +175,42 @@ async function handleSnapshot(request: Request): Promise<Response> {
     prioritizeTail,
   )
   const day = url.searchParams.get('day') ?? currentRealEarningsDay(now)
+  if (testMode) {
+    const username = usernames[0]
+    if (!username) {
+      return Response.json({
+        ok: false,
+        test: true,
+        error: 'No linked earnings accounts are registered in storage.',
+      }, { status: 503 })
+    }
+    try {
+      const result = await reconstructPublicDailyEarnings(username, day, {
+        config: realConfig,
+        signal: request.signal,
+        publicCacheNamespace: `snapshot-test:${now.toISOString()}:${username}`,
+        forceFreshBoxScores: true,
+      })
+      return Response.json({
+        ok: true,
+        test: true,
+        day,
+        totalAccounts: usernames.length,
+        sample: {
+          username: result.username,
+          total: result.dailyTotal,
+          passes: result.earnings.length,
+        },
+        saved: false,
+      })
+    } catch (error) {
+      return Response.json({
+        ok: false,
+        test: true,
+        error: error instanceof Error ? error.message : 'Snapshot test failed.',
+      }, { status: 502 })
+    }
+  }
   const startedAt = Date.now()
   const snapshotSignal = force
     ? request.signal

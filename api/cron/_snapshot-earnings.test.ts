@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { RealApiError } from '../../lib/realApi'
 import {
   hasSnapshotTimeBudget,
+  hasSnapshotBearerAuthorization,
   isAuthorizedSnapshotRequest,
   isEasternFinalCheckTime,
   isEasternSnapshotTime,
@@ -115,6 +116,12 @@ describe('scheduled earnings snapshot authorization', () => {
     expect(isAuthorizedSnapshotRequest(new Request('https://example.com/api/cron', {
       headers: { authorization: 'Bearer snapshot-secret' },
     }))).toBe(true)
+    expect(hasSnapshotBearerAuthorization(new Request('https://example.com/api/cron', {
+      headers: { authorization: 'Bearer snapshot-secret' },
+    }))).toBe(true)
+    expect(hasSnapshotBearerAuthorization(new Request('https://example.com/api/cron', {
+      headers: { 'user-agent': 'vercel-cron/1.0' },
+    }))).toBe(false)
   })
 })
 
@@ -172,5 +179,16 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
       { path: '/api/cron/snapshot-earnings-fallback', schedule: '30 10 * * *' },
       { path: '/api/cron/snapshot-earnings-final-check', schedule: '0 11 * * *' },
     ]))
+  })
+
+  it('configures an independent GitHub Actions fallback across EDT and EST', () => {
+    const workflow = readFileSync('.github/workflows/earnings-snapshot.yml', 'utf8')
+
+    expect(workflow).toContain("cron: '35 8-11 * * *'")
+    expect(workflow).toContain("cron: '55 8-11 * * *'")
+    expect(workflow).toContain('secrets.CRON_SECRET')
+    expect(workflow).toContain('/api/cron/$route')
+    expect(workflow).toContain('query="?test=1"')
+    expect(workflow).toContain("jq --exit-status '.ok == true'")
   })
 })
