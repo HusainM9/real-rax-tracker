@@ -11,6 +11,7 @@ import {
   isSnapshotRateLimit,
   missingSnapshotUsernames,
   orderSnapshotUsernames,
+  snapshotPublicCacheNamespace,
   snapshotRetryDelayMs,
 } from './snapshot-earnings'
 
@@ -141,6 +142,13 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
     expect(snapshotRetryDelayMs(() => 1)).toBe(5_000)
   })
 
+  it('shares fresh public game data across accounts in one snapshot invocation', () => {
+    const now = new Date('2026-10-18T10:30:00Z')
+    expect(snapshotPublicCacheNamespace('2026-10-17', now, 1)).toBe(
+      'snapshot:2026-10-17:2026-10-18T10:30:00.000Z:attempt:1',
+    )
+  })
+
   it('reserves enough invocation time to finish or defer cleanly', () => {
     expect(hasSnapshotTimeBudget(1_000, 200_000, 5_000)).toBe(true)
     expect(hasSnapshotTimeBudget(1_000, 230_000, 2_000)).toBe(false)
@@ -179,6 +187,15 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
       { path: '/api/cron/snapshot-earnings-fallback', schedule: '30 10 * * *' },
       { path: '/api/cron/snapshot-earnings-final-check', schedule: '0 11 * * *' },
     ]))
+  })
+
+  it('allows complete active-pass scans enough time in manual and scheduled runs', () => {
+    const config = JSON.parse(
+      readFileSync('vercel.json', 'utf8'),
+    ) as { functions: Record<string, { maxDuration: number }> }
+
+    expect(config.functions['api/account/earnings.ts']?.maxDuration).toBe(300)
+    expect(config.functions['api/cron/snapshot-earnings*.ts']?.maxDuration).toBe(300)
   })
 
   it('configures an independent GitHub Actions fallback across EDT and EST', () => {

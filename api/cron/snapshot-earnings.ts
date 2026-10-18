@@ -97,6 +97,10 @@ export function snapshotRetryDelayMs(random: () => number = Math.random): number
   return SNAPSHOT_RETRY_MIN_DELAY_MS + Math.floor(sample * SNAPSHOT_RETRY_JITTER_MS)
 }
 
+export function snapshotPublicCacheNamespace(day: string, now: Date, attempt: number): string {
+  return `snapshot:${day}:${now.toISOString()}:attempt:${attempt}`
+}
+
 export function hasSnapshotTimeBudget(
   startedAt: number,
   now: number,
@@ -249,7 +253,9 @@ async function handleSnapshot(request: Request): Promise<Response> {
         const context: RealApiContext = {
           config: realConfig,
           signal: snapshotSignal,
-          publicCacheNamespace: `snapshot:${day}:${now.toISOString()}:${username}:attempt:${attempt + 1}`,
+          // Public game and box-score responses are identical for every account. Reuse them
+          // within this invocation so a complete-collection scan remains comfortably in budget.
+          publicCacheNamespace: snapshotPublicCacheNamespace(day, now, attempt + 1),
           forceFreshBoxScores: true,
         }
         const result = await reconstructPublicDailyEarnings(username, day, context)

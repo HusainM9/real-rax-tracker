@@ -197,6 +197,17 @@ function passTeamId(pass: RealPass): string {
   return String(nested ?? pass.teamId ?? '')
 }
 
+export function selectActivePlayerPasses(passes: RealPass[]): RealPass[] {
+  return passes.filter((pass) => (
+    pass.entityType === 'player'
+    && pass.isActive === true
+    && !pass.isRefunded
+    && typeof pass.sport === 'string'
+    && pass.sport.length > 0
+    && Number.isFinite(Number(pass.season))
+  ))
+}
+
 function formatDay(day: string): string {
   const parsed = new Date(`${day}T12:00:00Z`)
   return Number.isNaN(parsed.getTime())
@@ -223,40 +234,10 @@ export async function reconstructPublicDailyEarnings(
   const username = normalizeRealUsernameInput(usernameInput)
   const user = await getUserByUsername(username, context)
   const allPasses = await listPasses({ userId: user.id }, context)
-  const activePairs = new Map<string, { sport: string; season: number }>()
-  for (const pass of allPasses) {
-    const sport = typeof pass.sport === 'string' ? pass.sport : ''
-    const season = Number(pass.season)
-    if (
-      pass.entityType === 'player' &&
-      pass.isActive === true &&
-      !pass.isRefunded &&
-      sport &&
-      Number.isFinite(season)
-    ) {
-      activePairs.set(`${sport}|${season}`, { sport, season })
-    }
-  }
-
-  const pairs = [...activePairs.values()]
-  const todayPages = await mapLimit(pairs, discoveryConcurrency, (pair) =>
-    listPasses(
-      {
-        userId: user.id,
-        entityType: 'player',
-        sport: pair.sport,
-        season: pair.season,
-        filter: 'playstoday',
-      },
-      context,
-    ),
-  )
-  const passById = new Map<string, RealPass>()
-  for (const pass of todayPages.flat()) {
-    if (pass.isActive !== true || pass.isRefunded) continue
-    passById.set(String(pass.id ?? `${pass.sport}:${pass.season}:${pass.entityId}`), pass)
-  }
-  const passes = [...passById.values()]
+  // Real's `playstoday` collection filter can omit valid active passes. Start from the complete
+  // collection instead; the game/box-score intersection below cheaply removes players who did
+  // not play on the requested day.
+  const passes = selectActivePlayerPasses(allPasses)
   const passesBySport = new Map<string, RealPass[]>()
   for (const pass of passes) {
     const sport = String(pass.sport ?? '')

@@ -3,6 +3,7 @@ import {
   calculatePublicPassEarnings,
   currentRealEarningsDay,
   parsePassEarningsMultiplier,
+  selectActivePlayerPasses,
 } from './publicDailyEarnings'
 import type { RealBoosterRarityGroup, RealPass } from './realApi'
 
@@ -19,6 +20,18 @@ function boostedPass(multiplier: string, rarity: number, statBoostKey: string): 
 }
 
 describe('public daily earnings calculation', () => {
+  it('keeps every active player pass without relying on Real playstoday filtering', () => {
+    const passes: RealPass[] = [
+      { id: 1, entityType: 'player', entityId: 10, sport: 'ncaaf', season: 2026, isActive: true, isRefunded: false },
+      { id: 2, entityType: 'player', entityId: 11, sport: 'ncaaf', season: 2026, isActive: true, isRefunded: false },
+      { id: 3, entityType: 'player', entityId: 12, sport: 'ncaaf', season: 2026, isActive: false, isRefunded: false },
+      { id: 4, entityType: 'team', entityId: 13, sport: 'ncaaf', season: 2026, isActive: true, isRefunded: false },
+      { id: 5, entityType: 'player', entityId: 14, sport: 'ncaaf', season: 2026, isActive: true, isRefunded: true },
+    ]
+
+    expect(selectActivePlayerPasses(passes).map((pass) => pass.id)).toEqual([1, 2])
+  })
+
   it('keeps the prior Eastern day active until the morning reset', () => {
     expect(currentRealEarningsDay(new Date('2026-10-11T10:30:00Z'))).toBe('2026-10-10')
     expect(currentRealEarningsDay(new Date('2026-10-11T11:30:00Z'))).toBe('2026-10-11')
