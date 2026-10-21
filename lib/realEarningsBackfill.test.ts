@@ -445,4 +445,295 @@ describe('backfillRealPassEarnings', () => {
       seasonLabel: '2024-25',
     })
   })
+
+  it('skips a prior CBB season key and uses the profile matching the split label', async () => {
+    const now = Date.parse('2026-09-15T00:00:00.000Z')
+    const pass: EarningsBackfillPass = {
+      externalKey: '5107782|2025|CBB',
+      entityId: 5107782,
+      passKind: 'player',
+      sportRaw: 'ncaam',
+      seasonYear: 2025,
+      seasonLabel: '2025-26',
+      name: 'Donovan Dent',
+    }
+    const fetchEarnings = vi.fn(async () => earningsResponse([]))
+
+    const result = await backfillRealPassEarnings([pass], {
+      now: () => now,
+      fetchEarnings,
+      loadCachedProfiles: async () => ({
+        profiles: [
+          freshProfile({
+            externalKey: '5107782|2025|CBB',
+            entityId: 5107782,
+            sport: 'CBB',
+            seasonYear: 2025,
+            seasonLabel: '2024-25',
+            name: 'Donovan Dent',
+            rows: [{ claimDay: '2025-03-15', baseRaxEarned: 12 }],
+            cachedAt: new Date(now).toISOString(),
+            sourceUpdatedAt: new Date(now).toISOString(),
+          }),
+          freshProfile({
+            externalKey: '5107782|2026|CBB',
+            entityId: 5107782,
+            sport: 'CBB',
+            seasonYear: 2026,
+            seasonLabel: '2025-26',
+            name: 'Donovan Dent',
+            rows: [{ claimDay: '2025-11-03', baseRaxEarned: 13 }],
+            cachedAt: new Date(now).toISOString(),
+            sourceUpdatedAt: new Date(now).toISOString(),
+          }),
+        ],
+        storageConfigured: true,
+      }),
+    })
+
+    expect(fetchEarnings).not.toHaveBeenCalled()
+    expect(result.passes).toEqual([
+      {
+        externalKey: '5107782|2025|CBB',
+        source: 'cache',
+        rows: [{ claimDay: '2025-11-03', baseRaxEarned: 13, playerBoxScoreId: null }],
+        cachedRowCount: 1,
+        newRowCount: 0,
+      },
+    ])
+  })
+
+  it.each([
+    ['NBA', 'nba', 2025, 2026, '2024-25', '2025-03-15', '2025-11-03'],
+    ['NHL', 'nhl', 2025, 2026, '2024-25', '2025-03-15', '2025-11-03'],
+    ['CBB', 'ncaam', 2025, 2026, '2024-25', '2025-03-15', '2025-11-03'],
+    ['NFL', 'nfl', 2026, 2025, '2026-27', '2026-11-03', '2025-11-03'],
+    ['CFB', 'ncaaf', 2026, 2025, '2026-27', '2026-11-03', '2025-11-03'],
+    ['FC', 'fc', 2026, 2025, '2026-27', '2026-11-03', '2025-11-03'],
+  ])(
+    'selects the matching $0 cache season when neighboring $0 keys both exist',
+    async (
+      catalogSport,
+      sportRaw,
+      inputYear,
+      catalogYear,
+      neighboringLabel,
+      neighboringDay,
+      expectedDay,
+    ) => {
+      const now = Date.parse('2026-01-15T00:00:00.000Z')
+      const entityId = 8100
+      const pass: EarningsBackfillPass = {
+        externalKey: `${entityId}|${inputYear}|${catalogSport}`,
+        entityId,
+        passKind: 'player',
+        sportRaw,
+        seasonYear: inputYear,
+        seasonLabel: '2025-26',
+        name: `${catalogSport} player`,
+      }
+      const fetchEarnings = vi.fn()
+
+      const result = await backfillRealPassEarnings([pass], {
+        now: () => now,
+        fetchEarnings,
+        loadCachedProfiles: async () => ({
+          profiles: [
+            freshProfile({
+              externalKey: `${entityId}|${inputYear}|${catalogSport}`,
+              entityId,
+              sport: catalogSport,
+              seasonYear: inputYear,
+              seasonLabel: neighboringLabel,
+              rows: [{ claimDay: neighboringDay, baseRaxEarned: 4 }],
+              cachedAt: new Date(now).toISOString(),
+              sourceUpdatedAt: new Date(now).toISOString(),
+            }),
+            freshProfile({
+              externalKey: `${entityId}|${catalogYear}|${catalogSport}`,
+              entityId,
+              sport: catalogSport,
+              seasonYear: catalogYear,
+              seasonLabel: '2025-26',
+              rows: [{ claimDay: expectedDay, baseRaxEarned: 9 }],
+              cachedAt: new Date(now).toISOString(),
+              sourceUpdatedAt: new Date(now).toISOString(),
+            }),
+          ],
+          storageConfigured: true,
+        }),
+      })
+
+      expect(fetchEarnings).not.toHaveBeenCalled()
+      expect(result.passes[0]).toMatchObject({
+        externalKey: pass.externalKey,
+        source: 'cache',
+        rows: [{ claimDay: expectedDay, baseRaxEarned: 9 }],
+      })
+    },
+  )
+
+  it.each([
+    {
+      sportRaw: 'nba',
+      inputYear: 2025,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'nba',
+      requestYear: 2026,
+      catalogSport: 'NBA',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'nhl',
+      inputYear: 2025,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'nhl',
+      requestYear: 2025,
+      catalogSport: 'NHL',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'ncaam',
+      inputYear: 2025,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'ncaam',
+      requestYear: 2026,
+      catalogSport: 'CBB',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'nfl',
+      inputYear: 2026,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'nfl',
+      requestYear: 2025,
+      catalogSport: 'NFL',
+      catalogYear: 2025,
+    },
+    {
+      sportRaw: 'ncaaf',
+      inputYear: 2026,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'ncaaf',
+      requestYear: 2025,
+      catalogSport: 'CFB',
+      catalogYear: 2025,
+    },
+    {
+      sportRaw: 'fc',
+      inputYear: 2026,
+      seasonLabel: '2025-26',
+      claimDay: '2025-11-01',
+      requestSport: 'soccer',
+      requestYear: 2025,
+      catalogSport: 'FC',
+      catalogYear: 2025,
+    },
+    {
+      sportRaw: 'mlb',
+      inputYear: 2026,
+      seasonLabel: '2026',
+      claimDay: '2026-05-01',
+      requestSport: 'mlb',
+      requestYear: 2026,
+      catalogSport: 'MLB',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'wnba',
+      inputYear: 2026,
+      seasonLabel: '2026',
+      claimDay: '2026-05-01',
+      requestSport: 'wnba',
+      requestYear: 2026,
+      catalogSport: 'WNBA',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'golf',
+      inputYear: 2026,
+      seasonLabel: '2026',
+      claimDay: '2026-05-01',
+      requestSport: 'golf',
+      requestYear: 2026,
+      catalogSport: 'Golf',
+      catalogYear: 2026,
+    },
+    {
+      sportRaw: 'ufc',
+      inputYear: 2023,
+      seasonLabel: 'All-time',
+      claimDay: '2020-05-01',
+      requestSport: 'ufc',
+      requestYear: 2023,
+      catalogSport: 'UFC',
+      catalogYear: 2023,
+    },
+  ])(
+    'fetches and stores $sportRaw earnings with the correct season convention',
+    async ({
+      sportRaw,
+      inputYear,
+      seasonLabel,
+      claimDay,
+      requestSport,
+      requestYear,
+      catalogSport,
+      catalogYear,
+    }) => {
+      const entityId = 9001
+      const pass: EarningsBackfillPass = {
+        externalKey: `${entityId}|${inputYear}|${catalogSport}`,
+        entityId,
+        passKind: 'player',
+        sportRaw,
+        seasonYear: inputYear,
+        seasonLabel,
+        name: `${catalogSport} player`,
+      }
+      const savedPasses: CatalogPassInput[] = []
+      const savedRows: Array<{ externalKey: string; claimDay: string }> = []
+      const fetchEarnings = vi.fn(async (query) => {
+        expect(query).toMatchObject({
+          sport: requestSport,
+          season: requestYear,
+          entityType: 'player',
+          entityId,
+        })
+        return earningsResponse([{ day: claimDay, earnings: 9 }])
+      })
+
+      const result = await backfillRealPassEarnings([pass], {
+        fetchEarnings,
+        loadCachedProfiles: async () => ({ profiles: [], storageConfigured: true }),
+        savePasses: async (passes) => {
+          savedPasses.push(...passes)
+          return passes.length
+        },
+        saveDailyEarnings: async (rows) => {
+          savedRows.push(...rows)
+          return rows.length
+        },
+      })
+
+      const expectedExternalKey = `${entityId}|${catalogYear}|${catalogSport}`
+      expect(fetchEarnings).toHaveBeenCalledTimes(1)
+      expect(savedPasses[0]).toMatchObject({
+        externalKey: expectedExternalKey,
+        sport: catalogSport,
+        seasonYear: catalogYear,
+      })
+      expect(savedRows).toMatchObject([{ externalKey: expectedExternalKey, claimDay }])
+      expect(result.passes[0]).toMatchObject({
+        externalKey: pass.externalKey,
+        source: 'real',
+        rows: [{ claimDay, baseRaxEarned: 9 }],
+      })
+    },
+  )
 })

@@ -16,6 +16,7 @@ import {
   catalogExternalKeyCandidates,
   filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
+  resolveCatalogPassSeasonYear,
   resolvePassSeasonDateWindow,
   sportSkipsClaimDaySeasonFilter,
 } from './seasonClaimWindow'
@@ -93,10 +94,18 @@ export function resolveEarningsCacheTtlMs(
 }
 
 function catalogPassInput(pass: EarningsBackfillPass): CatalogPassInput {
+  // The collection endpoint may use a start-year beside an authoritative split label even for
+  // catalog end-year sports (for example CBB 2025 + "2025-26"). Resolve the label before applying
+  // catalog repair rules so we do not accidentally load the real prior-season key.
+  const resolvedSeasonYear = resolveCatalogPassSeasonYear(
+    pass.seasonYear,
+    pass.seasonLabel,
+    pass.sportRaw,
+  )
   const canonical = canonicalCatalogPassMetadata({
     entityId: pass.entityId,
     sport: pass.sportRaw,
-    seasonYear: pass.seasonYear,
+    seasonYear: resolvedSeasonYear,
     seasonLabel: pass.seasonLabel,
   })
   return {
@@ -150,6 +159,48 @@ function profileRows(profile: CatalogImportProfile): EarningsBackfillDailyRow[] 
     baseRaxEarned: row.baseRaxEarned,
     playerBoxScoreId: row.playerBoxScoreId ?? null,
   }))
+}
+
+function profileMatchesPassSeason(
+  profile: CatalogImportProfile,
+  pass: EarningsBackfillPass,
+): boolean {
+  const profileWindow = resolvePassSeasonDateWindow(
+    profile.seasonYear,
+    profile.sport,
+    profile.seasonLabel,
+  )
+  const passWindow = resolvePassSeasonDateWindow(
+    pass.seasonYear,
+    pass.sportRaw,
+    pass.seasonLabel,
+  )
+  if (profileWindow && passWindow) {
+    return profileWindow.start === passWindow.start && profileWindow.end === passWindow.end
+  }
+  return profile.externalKey === pass.externalKey
+}
+
+function selectUsableCachedProfile(
+  profiles: CatalogImportProfile[],
+  pass: EarningsBackfillPass,
+): { profile: CatalogImportProfile; cachedRows: EarningsBackfillDailyRow[]; rows: EarningsBackfillDailyRow[] } | null {
+  const matchingProfiles = profiles.filter((profile) => profileMatchesPassSeason(profile, pass))
+  for (const profile of matchingProfiles) {
+    const cachedRows = profileRows(profile)
+    const { rows } = seasonScopedDailyRows(cachedRows, pass)
+    if (rows.length > 0) return { profile, cachedRows, rows }
+  }
+
+  const knownEmpty = matchingProfiles.find((profile) => profile.hasEarnings === false)
+  return knownEmpty ? { profile: knownEmpty, cachedRows: profileRows(knownEmpty), rows: [] } : null
+}
+
+function selectMatchingCachedProfile(
+  profiles: CatalogImportProfile[],
+  pass: EarningsBackfillPass,
+): CatalogImportProfile | undefined {
+  return profiles.find((profile) => profileMatchesPassSeason(profile, pass))
 }
 
 function errorKind(error: unknown): string {
@@ -251,20 +302,15 @@ export async function backfillRealPassEarnings(
     const profiles = candidates
       .map((key) => profilesByKey.get(key))
       .filter((profile): profile is CatalogImportProfile => Boolean(profile))
-    const withRows = profiles.find((profile) => profile.rows.length > 0)
-    const knownEmpty = profiles.find((profile) => profile.hasEarnings === false)
-    const usable = withRows ?? knownEmpty
+    const usable = selectUsableCachedProfile(profiles, pass)
 
-    if (usable && isFresh(usable, pass, nowMs, ttlMs)) {
-      const cachedRows = withRows ? profileRows(withRows) : []
-      // Profiles may still contain prior-season days from merge-only upserts; trim before serving.
-      const { rows } = seasonScopedDailyRows(cachedRows, pass)
+    if (usable && isFresh(usable.profile, pass, nowMs, ttlMs)) {
       cacheHits += 1
       results.push({
         externalKey: pass.externalKey,
         source: 'cache',
-        rows,
-        cachedRowCount: cachedRows.length,
+        rows: usable.rows,
+        cachedRowCount: usable.cachedRows.length,
         newRowCount: 0,
       })
       continue
@@ -282,9 +328,10 @@ export async function backfillRealPassEarnings(
     if (authError) return
 
     const candidates = lookupKeys.get(pass.externalKey) ?? []
-    const cachedProfile = candidates
+    const candidateProfiles = candidates
       .map((key) => profilesByKey.get(key))
-      .find((profile): profile is CatalogImportProfile => Boolean(profile))
+      .filter((profile): profile is CatalogImportProfile => Boolean(profile))
+    const cachedProfile = selectMatchingCachedProfile(candidateProfiles, pass)
     const cachedRowCount = cachedProfile?.rows.length ?? 0
 
     try {

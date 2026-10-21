@@ -141,6 +141,50 @@ describe('normalizeRealPass', () => {
     })
   })
 
+  it('normalizes current CBB start-years from the authoritative split label', () => {
+    expect(
+      normalizeRealPass(
+        realPass({
+          entityId: 5107782,
+          label: 'Donovan Dent',
+          sport: 'ncaam',
+          season: 2025,
+          seasonDisplay: '2025-26',
+        }),
+      ),
+    ).toMatchObject({
+      entityId: 5107782,
+      season: 2026,
+      seasonLabel: '2025-26',
+      pair: '5107782:2026:ncaam',
+    })
+  })
+
+  it.each([
+    { sport: 'nba', sourceSeason: 2025, display: '2025-26', expectedSeason: 2026 },
+    { sport: 'nhl', sourceSeason: 2025, display: '2025-26', expectedSeason: 2026 },
+    { sport: 'ncaam', sourceSeason: 2025, display: '2025-26', expectedSeason: 2026 },
+    { sport: 'nfl', sourceSeason: 2026, display: '2025-26', expectedSeason: 2025 },
+    { sport: 'ncaaf', sourceSeason: 2026, display: '2025-26', expectedSeason: 2025 },
+    { sport: 'soccer', sourceSeason: 2026, display: '2025-26', expectedSeason: 2025 },
+    { sport: 'mlb', sourceSeason: 2026, display: '2026', expectedSeason: 2026 },
+    { sport: 'wnba', sourceSeason: 2026, display: '2026', expectedSeason: 2026 },
+    { sport: 'golf', sourceSeason: 2026, display: '2026', expectedSeason: 2026 },
+    { sport: 'ufc', sourceSeason: 2023, display: 'All-time', expectedSeason: 2023 },
+  ])(
+    'aligns $sport pass keys to its season convention',
+    ({ sport, sourceSeason, display, expectedSeason }) => {
+      const pass = normalizeRealPass(
+        realPass({ sport, season: sourceSeason, seasonDisplay: display }),
+      )
+
+      expect(pass).toMatchObject({
+        season: expectedSeason,
+        pair: `551:${expectedSeason}:${canonicalRealSport(sport)}`,
+      })
+    },
+  )
+
   it('keeps calendar-year labels for calendar-year sports', () => {
     const pass = normalizeRealPass(
       realPass({ sport: 'mlb', season: 2026, seasonDisplay: '2026' }),

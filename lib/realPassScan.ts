@@ -1,6 +1,7 @@
 import { parseBoosterCardMultiplier } from './passEarningsBoost'
 import { RARITY_TIERS, passRarityLookupKey } from './rarityFilter'
 import { runWithConcurrency } from './runWithConcurrency'
+import { resolveCatalogPassSeasonYear } from './seasonClaimWindow'
 import { seasonLabelFromSportRaw } from './usernameImportShared'
 import type { RealPass, RealPassQuery } from './realApi'
 
@@ -123,9 +124,19 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
   if (!Number.isFinite(entityId) || entityId <= 0) return null
   if (!Number.isInteger(sourceSeason) || sourceSeason <= 0) return null
   if (!sportRaw) return null
-  // Real's NHL /userpasses response uses start-year (2025 = "2025-26"), while the catalog and
-  // the rest of the app use end-year for NHL. Normalize at the provider boundary.
-  const season = sportRaw === 'nhl' ? sourceSeason + 1 : sourceSeason
+  const normalizedSeasonDisplay = String(raw.seasonDisplay ?? '')
+    .replace(/\u2013|\u2014/g, '-')
+    .trim()
+  const hasAuthoritativeSeasonDisplay = /^\d{4}(-\d{2})?$/.test(normalizedSeasonDisplay)
+  // Real's collection response can use a start-year beside an authoritative split label even
+  // when the catalog uses an end-year (NHL and current CBB are confirmed examples). Align the
+  // numeric key to the label at the provider boundary. Preserve the NHL fallback when the label
+  // is missing because that endpoint is known to use start-year consistently.
+  const season = hasAuthoritativeSeasonDisplay
+    ? resolveCatalogPassSeasonYear(sourceSeason, normalizedSeasonDisplay, sportRaw)
+    : sportRaw === 'nhl'
+      ? sourceSeason + 1
+      : sourceSeason
 
   const rarityLabel = normalizeRealRarityLabel(String(raw.boostInfo?.rarityLabel ?? ''))
   const playerName = String(raw.label ?? '').trim()
@@ -151,7 +162,7 @@ export function normalizeRealPass(raw: RealPass): NormalizedRealPass | null {
     passKind: String(raw.entityType ?? '').trim().toLowerCase() === 'team' ? 'team' : 'player',
     rarityLabel: rarityLabel || undefined,
     playerName: playerName || undefined,
-    seasonLabel: seasonLabelForPass(season, sportRaw, String(raw.seasonDisplay ?? '')),
+    seasonLabel: seasonLabelForPass(season, sportRaw, normalizedSeasonDisplay),
     avatar,
     earned: Number.isFinite(earned) && earned > 0 ? earned : undefined,
     isActive: typeof raw.isActive === 'boolean' ? raw.isActive : undefined,
