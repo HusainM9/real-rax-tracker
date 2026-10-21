@@ -2,8 +2,8 @@ name: Marketplace monitor
 
 on:
   schedule:
-    # QStash is the primary two-minute scheduler. This is an independent fallback.
-    - cron: '3-59/5 * * * *'
+    # QStash is the primary two-minute scheduler. This is a ten-minute fallback.
+    - cron: '3-59/10 * * * *'
   workflow_dispatch:
 
 permissions: {}

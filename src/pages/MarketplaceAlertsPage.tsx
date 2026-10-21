@@ -22,7 +22,6 @@ import {
 } from '../lib/marketplaceAlertsApi'
 import { realOwnedMarketplacePlayers } from '../lib/marketplaceOwnedPlayers'
 import { getCachedMarketplacePlayers, saveCachedMarketplacePlayers } from '../lib/marketplacePlayerCache'
-import { marketplacePageScanKey, startMarketplacePageScanner } from '../lib/marketplacePageScanner'
 import { marketplaceAuctionCountdown } from '../lib/marketplaceAuctionCountdown'
 import { marketplaceRuleTrackingDetails } from '../lib/marketplaceRuleDetails'
 import {
@@ -210,7 +209,6 @@ export default function MarketplaceAlertsPage() {
   const [playersLoadedAt, setPlayersLoadedAt] = useState<string | null>(null)
   const [expandedRuleIds, setExpandedRuleIds] = useState<string[]>([])
   const [auctionClock, setAuctionClock] = useState(() => Date.now())
-  const activeScanKey = marketplacePageScanKey(rules)
   const [realUsername, setRealUsername] = useState(
     () => (data.settings.savedUsername || accountUsername || '').replace(/^@/, '').trim(),
   )
@@ -434,11 +432,6 @@ export default function MarketplaceAlertsPage() {
     }, 60_000)
     return () => window.clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    if (import.meta.env.DEV || !activeScanKey) return
-    return startMarketplacePageScanner(() => void scan('page'))
-  }, [activeScanKey])
 
   const enableBrowserNotifications = async () => {
     if (!('Notification' in window)) {
@@ -711,10 +704,10 @@ export default function MarketplaceAlertsPage() {
             )}
           </section>
           <section className="panel marketplace-scan-log-panel">
-            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>The hosted monitor runs with the page closed. While open, this page also checks every two minutes.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Hosted + page · 2 min'}</span></div>
+            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>The hosted monitor runs every two minutes with the page open or closed.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Hosted · 2 min'}</span></div>
             {busy ? <div className="marketplace-scan-live"><i aria-hidden="true" /><span>Requesting the latest bulk-rating feeds…</span></div> : null}
             {scanLog.length === 0 ? (
-              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The next hosted or page check will appear here.</span></div>
+              <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The next hosted or manual check will appear here.</span></div>
             ) : (
               <ol className="marketplace-scan-log">
                 {scanLog.slice(0, 8).map((entry) => (

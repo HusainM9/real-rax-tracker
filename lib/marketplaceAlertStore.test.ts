@@ -4,18 +4,35 @@ import type { MarketplaceAlertNotification, MarketplaceAlertRule } from './marke
 const values = new Map<string, unknown>()
 const sets = new Map<string, Set<string>>()
 const lists = new Map<string, unknown[]>()
+const calls = {
+  get: [] as string[],
+  mget: [] as string[][],
+  set: [] as string[],
+  lpush: [] as string[],
+}
 
 vi.mock('@vercel/kv', () => ({
   kv: {
-    get: async (key: string) => values.get(key) ?? null,
+    get: async (key: string) => {
+      calls.get.push(key)
+      return values.get(key) ?? null
+    },
+    mget: async (...keys: string[]) => {
+      calls.mget.push(keys)
+      return keys.map((key) => values.get(key) ?? null)
+    },
     set: async (key: string, value: unknown, options?: { nx?: boolean }) => {
+      calls.set.push(key)
       if (options?.nx && values.has(key)) return null
       values.set(key, value)
       return 'OK'
     },
-    del: async (key: string) => {
-      const removed = values.delete(key) || sets.delete(key) || lists.delete(key)
-      return Number(removed)
+    del: async (...keys: string[]) => {
+      let removed = 0
+      for (const key of keys) {
+        removed += Number(values.delete(key) || sets.delete(key) || lists.delete(key))
+      }
+      return removed
     },
     sadd: async (key: string, ...members: string[]) => {
       const target = sets.get(key) ?? new Set<string>()
@@ -32,6 +49,7 @@ vi.mock('@vercel/kv', () => ({
     },
     smembers: async (key: string) => [...(sets.get(key) ?? [])],
     lpush: async (key: string, value: unknown) => {
+      calls.lpush.push(key)
       const target = lists.get(key) ?? []
       target.unshift(value)
       lists.set(key, target)
@@ -85,6 +103,10 @@ beforeEach(() => {
   values.clear()
   sets.clear()
   lists.clear()
+  calls.get.length = 0
+  calls.mget.length = 0
+  calls.set.length = 0
+  calls.lpush.length = 0
 })
 
 describe('marketplace alert storage', () => {
@@ -155,6 +177,25 @@ describe('marketplace alert storage', () => {
     expect(await readMarketplaceNotifications('husain')).toEqual([])
   })
 
+  it('checks a full unchanged feed with bulk reads and one snapshot write', async () => {
+    const notifications = Array.from({ length: 200 }, (_, index) => ({
+      ...notification,
+      id: `rule-1:listing-${index}`,
+      listingId: `listing-${index}`,
+    }))
+    await saveNewMarketplaceNotifications('husain', notifications)
+    calls.get.length = 0
+    calls.mget.length = 0
+    calls.set.length = 0
+    calls.lpush.length = 0
+
+    expect(await saveNewMarketplaceNotifications('husain', notifications)).toEqual([])
+    expect(calls.get).toEqual([])
+    expect(calls.mget).toHaveLength(2)
+    expect(calls.set).toEqual(['rax:marketplace-alerts:notification-snapshot:husain'])
+    expect(calls.lpush).toEqual([])
+  })
+
   it('queues new matches until successful external delivery', async () => {
     await saveNewMarketplaceNotifications('husain', [notification])
     expect(await readPendingMarketplaceNotifications('husain')).toEqual([notification])
@@ -162,6 +203,21 @@ describe('marketplace alert storage', () => {
     await markMarketplaceNotificationsDelivered('husain', [notification.id])
     expect(await readPendingMarketplaceNotifications('husain')).toEqual([])
     expect(await readMarketplaceNotifications('husain')).toEqual([notification])
+  })
+
+  it('loads a pending delivery batch with one bulk read', async () => {
+    const notifications = Array.from({ length: 25 }, (_, index) => ({
+      ...notification,
+      id: `rule-1:pending-${index}`,
+      listingId: `pending-${index}`,
+    }))
+    await saveNewMarketplaceNotifications('husain', notifications)
+    calls.get.length = 0
+    calls.mget.length = 0
+
+    expect(await readPendingMarketplaceNotifications('husain')).toHaveLength(25)
+    expect(calls.get).toEqual([])
+    expect(calls.mget).toHaveLength(1)
   })
 
   it('cleans orphaned pending ids instead of returning invalid items', async () => {

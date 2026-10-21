@@ -9,6 +9,7 @@ import {
 const OWNERS_KEY = 'rax:marketplace-alerts:owners'
 const RULES_PREFIX = 'rax:marketplace-alerts:rules:'
 const NOTIFICATIONS_PREFIX = 'rax:marketplace-alerts:notifications:'
+const NOTIFICATION_SNAPSHOT_PREFIX = 'rax:marketplace-alerts:notification-snapshot:'
 const SEEN_PREFIX = 'rax:marketplace-alerts:seen:'
 const PENDING_PREFIX = 'rax:marketplace-alerts:pending:'
 const PENDING_IDS_PREFIX = 'rax:marketplace-alerts:pending-ids:'
@@ -57,6 +58,10 @@ function rulesKey(owner: string): string {
 
 function notificationsKey(owner: string): string {
   return `${NOTIFICATIONS_PREFIX}${ownerKey(owner)}`
+}
+
+function notificationSnapshotKey(owner: string): string {
+  return `${NOTIFICATION_SNAPSHOT_PREFIX}${ownerKey(owner)}`
 }
 
 function seenKey(owner: string, notificationId: string): string {
@@ -201,6 +206,15 @@ export async function readMarketplaceNotifications(
   limit = 100,
 ): Promise<MarketplaceAlertNotification[]> {
   if (!marketplaceAlertStorageConfigured()) return []
+  const snapshot = await kv.get<unknown[]>(notificationSnapshotKey(owner))
+  if (Array.isArray(snapshot)) {
+    return snapshot.slice(0, Math.max(0, limit)).flatMap((entry) => {
+      const parsed = parseNotification(entry)
+      return parsed ? [parsed] : []
+    })
+  }
+
+  // Read the former list format until this owner's next scan writes a snapshot.
   const raw = await kv.lrange<string>(notificationsKey(owner), 0, Math.max(0, limit - 1))
   return raw.flatMap((entry) => {
     const parsed = parseNotification(entry)
@@ -263,20 +277,26 @@ export async function readPendingMarketplaceNotifications(
 ): Promise<MarketplaceAlertNotification[]> {
   if (!marketplaceAlertStorageConfigured()) return []
   const ids = (await kv.smembers(pendingIdsKey(owner))).slice(0, Math.max(0, limit))
+  if (ids.length === 0) return []
+  const storedValues = await kv.mget<Array<MarketplaceAlertNotification | string | null>>(
+    ...ids.map((id) => pendingKey(owner, id)),
+  )
   const pending: MarketplaceAlertNotification[] = []
-  for (const id of ids) {
-    const stored = await kv.get<MarketplaceAlertNotification | string>(pendingKey(owner, id))
+  const staleIds: string[] = []
+  for (const [index, id] of ids.entries()) {
+    const stored = storedValues[index]
     if (!stored) {
-      await kv.srem(pendingIdsKey(owner), id)
+      staleIds.push(id)
       continue
     }
     try {
       const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored
       if (parsed && typeof parsed === 'object') pending.push(parsed as MarketplaceAlertNotification)
     } catch {
-      await kv.srem(pendingIdsKey(owner), id)
+      staleIds.push(id)
     }
   }
+  if (staleIds.length > 0) await kv.srem(pendingIdsKey(owner), ...staleIds)
   return pending
 }
 
@@ -284,11 +304,11 @@ export async function markMarketplaceNotificationsDelivered(
   owner: string,
   notificationIds: string[],
 ): Promise<void> {
-  if (!marketplaceAlertStorageConfigured()) return
-  for (const id of notificationIds) {
-    await kv.srem(pendingIdsKey(owner), id)
-    await kv.del(pendingKey(owner, id))
-  }
+  if (!marketplaceAlertStorageConfigured() || notificationIds.length === 0) return
+  await Promise.all([
+    kv.srem(pendingIdsKey(owner), ...notificationIds),
+    kv.del(...notificationIds.map((id) => pendingKey(owner, id))),
+  ])
 }
 
 export async function saveNewMarketplaceNotifications(
@@ -296,27 +316,33 @@ export async function saveNewMarketplaceNotifications(
   notifications: MarketplaceAlertNotification[],
 ): Promise<MarketplaceAlertNotification[]> {
   if (!marketplaceAlertStorageConfigured()) return notifications
+  const unique = [...new Map(notifications.map((notification) => [notification.id, notification])).values()]
+  const listingIds = [...new Set(unique.map((notification) => notification.listingId))]
+  const ignoredValues = listingIds.length > 0
+    ? await kv.mget<unknown[]>(...listingIds.map((listingId) => ignoredListingKey(owner, listingId)))
+    : []
+  const ignoredListingIds = new Set(
+    listingIds.filter((_, index) => Boolean(ignoredValues[index])),
+  )
+  const visible = unique.filter((notification) => !ignoredListingIds.has(notification.listingId))
+  const seenValues = visible.length > 0
+    ? await kv.mget<unknown[]>(...visible.map((notification) => seenKey(owner, notification.id)))
+    : []
   const saved: MarketplaceAlertNotification[] = []
-  const visible: MarketplaceAlertNotification[] = []
-  for (const notification of notifications) {
-    if (await kv.get(ignoredListingKey(owner, notification.listingId))) continue
-    visible.push(notification)
+  for (const [index, notification] of visible.entries()) {
+    if (seenValues[index]) continue
     const key = seenKey(owner, notification.id)
     const claimed = await kv.set(key, '1', { ex: SEEN_TTL_SECONDS, nx: true })
     if (!claimed) continue
-    await kv.lpush(notificationsKey(owner), JSON.stringify(notification))
     await kv.set(pendingKey(owner, notification.id), notification, { ex: SEEN_TTL_SECONDS })
     await kv.sadd(pendingIdsKey(owner), notification.id)
     saved.push(notification)
   }
 
-  // The page is a snapshot of the latest scan, not an activity history. Keep
-  // seen/pending keys separately so replacing this list does not re-notify old matches.
+  // This is a latest-scan snapshot, so store the whole bounded feed in one KV
+  // command. The former list rewrite used hundreds of commands every two minutes.
   const current = visible.slice(0, MAX_NOTIFICATIONS)
-  await kv.del(notificationsKey(owner))
-  for (const notification of [...current].reverse()) {
-    await kv.lpush(notificationsKey(owner), JSON.stringify(notification))
-  }
+  await kv.set(notificationSnapshotKey(owner), current)
   return saved
 }
 
@@ -335,17 +361,22 @@ export async function ignoreMarketplaceListing(
 
   const notifications = await readMarketplaceNotifications(owner, MAX_NOTIFICATIONS)
   const remaining = notifications.filter((item) => item.listingId !== normalizedListingId)
-  await kv.del(notificationsKey(owner))
-  for (const notification of [...remaining].reverse()) {
-    await kv.lpush(notificationsKey(owner), JSON.stringify(notification))
-  }
+  await kv.set(notificationSnapshotKey(owner), remaining)
 
   const pendingIds = await kv.smembers(pendingIdsKey(owner))
-  for (const id of pendingIds) {
-    const pending = parseNotification(await kv.get<MarketplaceAlertNotification | string>(pendingKey(owner, id)))
-    if (pending?.listingId !== normalizedListingId) continue
-    await kv.srem(pendingIdsKey(owner), id)
-    await kv.del(pendingKey(owner, id))
+  if (pendingIds.length > 0) {
+    const storedPending = await kv.mget<Array<MarketplaceAlertNotification | string | null>>(
+      ...pendingIds.map((id) => pendingKey(owner, id)),
+    )
+    const matchingIds = pendingIds.filter((_, index) => (
+      parseNotification(storedPending[index])?.listingId === normalizedListingId
+    ))
+    if (matchingIds.length > 0) {
+      await Promise.all([
+        kv.srem(pendingIdsKey(owner), ...matchingIds),
+        kv.del(...matchingIds.map((id) => pendingKey(owner, id))),
+      ])
+    }
   }
 
   return remaining
