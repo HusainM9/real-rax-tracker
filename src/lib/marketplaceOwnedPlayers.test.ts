@@ -30,6 +30,28 @@ describe('realOwnedMarketplacePlayers', () => {
     ])
   })
 
+  it('loads UFC fighters even though Real returns them as team passes', () => {
+    const withFighter: RealPassImportResult = {
+      ...payload,
+      teamPasses: [
+        ...payload.teamPasses,
+        {
+          entityId: 3072,
+          playerName: 'Jalin Turner',
+          season: 2023,
+          sportRaw: 'ufc',
+          pair: '',
+          passKind: 'team',
+          rarityLabel: 'Legendary 2',
+        },
+      ],
+    }
+
+    expect(realOwnedMarketplacePlayers(withFighter, 'ufc', 2023)).toEqual([
+      { entityId: 3072, name: 'Jalin Turner', rarityLabel: 'Legendary 2' },
+    ])
+  })
+
   it('sorts higher rarity tiers and levels first, then uses player name', () => {
     const sorted = realOwnedMarketplacePlayers({
       ...payload,

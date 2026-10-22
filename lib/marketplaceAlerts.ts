@@ -364,9 +364,14 @@ function matchingRulePlayer(
 }
 
 function listingMatchesEntity(rule: MarketplaceAlertRule, listing: MarketplaceListing): boolean {
-  if (rule.entityScope === 'ownedPlayers' && listing.entityType !== 'player') return false
+  const entityType = listing.entityType?.trim().toLowerCase() ?? ''
+  // Real exposes UFC fighters through marketplace entity/team while the app intentionally treats
+  // them as player-like athletes. Keep ordinary team listings excluded from owned-player rules.
+  const isUfcFighter = marketplaceApiSport(rule.sport) === 'ufc' &&
+    (entityType === 'team' || entityType === 'fighter')
+  if (rule.entityScope === 'ownedPlayers' && entityType !== 'player' && !isUfcFighter) return false
   if (rule.entityScope === 'ownedTeams' && listing.entityType !== 'team') return false
-  if (rule.entityScope === 'player' && listing.entityType !== 'player') return false
+  if (rule.entityScope === 'player' && entityType !== 'player' && !isUfcFighter) return false
   if (rule.entityScope === 'team' && listing.entityType !== 'team') return false
   const ids = listingEntityIds(listing)
   if ((rule.players?.length ?? 0) > 0) {

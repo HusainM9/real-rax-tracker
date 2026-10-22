@@ -18,9 +18,14 @@ type ScanGroup = {
   sport: string
   season: number
   filterCustomType: 'all' | 'ownedPlayers' | 'ownedTeams'
-  filterEntityType?: 'player'
+  filterEntityType?: 'player' | 'team'
   filterEntityId?: number
   rules: MarketplaceAlertRule[]
+}
+
+/** Real models UFC fighters as team entities in targeted marketplace filters. */
+function marketplaceEntityTypeForTrackedAthlete(apiSport: string): 'player' | 'team' {
+  return apiSport === 'ufc' ? 'team' : 'player'
 }
 
 function groupRules(rules: MarketplaceAlertRule[]): ScanGroup[] {
@@ -37,14 +42,15 @@ function groupRules(rules: MarketplaceAlertRule[]): ScanGroup[] {
     // pagination inside the serverless execution window.
     if ((bulkRule.players?.length ?? 0) > 0) {
       for (const player of bulkRule.players!) {
-        const key = [apiSport, bulkRule.season, 'player', player.entityId].join('|')
+        const filterEntityType = marketplaceEntityTypeForTrackedAthlete(apiSport)
+        const key = [apiSport, bulkRule.season, filterEntityType, player.entityId].join('|')
         const existing = groups.get(key)
         if (existing) existing.rules.push(bulkRule)
         else groups.set(key, {
           sport: apiSport,
           season: bulkRule.season,
           filterCustomType: 'all',
-          filterEntityType: 'player',
+          filterEntityType,
           filterEntityId: player.entityId,
           rules: [bulkRule],
         })

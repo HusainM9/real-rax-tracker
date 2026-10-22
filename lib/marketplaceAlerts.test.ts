@@ -193,6 +193,32 @@ describe('marketplace listing matching', () => {
     expect(marketplaceListingMatchesRule({ ...rule, entityScope: 'all', entityId: null }, teamListing)).toBe(true)
   })
 
+  it('treats UFC team entities as fighters for owned-player alerts only', () => {
+    const fighterListing: MarketplaceListing = {
+      ...listing,
+      sport: 'ufc',
+      season: 2023,
+      entityType: 'team',
+      entityId: 3072,
+      teamId: 3072,
+      card: { label: 'Jalin Turner', boostInfo: { rarityLabel: 'Rare' } },
+    }
+    const fighterRule: MarketplaceAlertRule = {
+      ...rule,
+      sport: 'ufc',
+      season: 2023,
+      entityScope: 'ownedPlayers',
+      entityId: null,
+      players: [{ entityId: 3072, name: 'Jalin Turner' }],
+    }
+
+    expect(marketplaceListingMatchesRule(fighterRule, fighterListing)).toBe(true)
+    expect(marketplaceListingMatchesRule(
+      { ...fighterRule, sport: 'nba' },
+      { ...fighterListing, sport: 'nba' },
+    )).toBe(false)
+  })
+
   it('finds entity ids in nested card payloads', () => {
     const nested = {
       ...listing,

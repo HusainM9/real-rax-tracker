@@ -117,6 +117,48 @@ describe('marketplace monitor', () => {
     )
   })
 
+  it('targets UFC fighters through Real team filters and accepts team-typed listings', async () => {
+    const ufcListing: MarketplaceListing = {
+      ...bulkListing,
+      id: 'ufc-3072',
+      sport: 'ufc',
+      season: 2023,
+      entityType: 'team',
+      entityId: 3072,
+      teamId: 3072,
+      card: { label: 'Jalin Turner', boostInfo: { rarityLabel: 'Rare' } },
+    }
+    mocks.realGetJson.mockResolvedValue({ listings: [ufcListing] })
+
+    const result = await scanMarketplaceAlerts({
+      owner: 'husain',
+      rules: [{
+        ...baseRule,
+        sport: 'ufc',
+        season: 2023,
+        entityScope: 'ownedPlayers',
+        itemType: 'bulk',
+        players: [{ entityId: 3072, name: 'Jalin Turner' }],
+      }],
+      context,
+    })
+
+    expect(mocks.realGetJson).toHaveBeenCalledWith(
+      '/cardmarketplacelistings',
+      context,
+      expect.objectContaining({
+        sport: 'ufc',
+        season: 2023,
+        filterCustomType: 'all',
+        filterEntityType: 'team',
+        filterEntityId: 3072,
+      }),
+    )
+    expect(result.notifications).toEqual([
+      expect.objectContaining({ listingId: 'ufc-3072', playerName: 'Jalin Turner' }),
+    ])
+  })
+
   it('routes tracker sport labels to verified Real marketplace slugs', async () => {
     await scanMarketplaceAlerts({
       owner: 'husain',
