@@ -44,6 +44,26 @@ function displayEarningsDay(day: string): string {
   })
 }
 
+function earningsChartDayLabel(day: string): { weekday: string; date: string; full: string } {
+  const parsed = new Date(`${day}T12:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return { weekday: '', date: day, full: day }
+  return {
+    weekday: parsed.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+    date: parsed.toLocaleDateString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      timeZone: 'UTC',
+    }),
+    full: parsed.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }),
+  }
+}
+
 function earningsChartCeiling(maximum: number): number {
   const paddedMaximum = Math.max(1, maximum) * 1.1
   const magnitude = 10 ** Math.floor(Math.log10(paddedMaximum))
@@ -165,13 +185,13 @@ function EarningsBarChart({
         <span>0</span>
       </div>
       <div className={`earnings-chart${entries.length <= 7 ? ' is-sparse' : ''}`} role="img" aria-label="Daily earnings over the last 30 tracked days">
-        {entries.map((entry, index) => {
-          const showDateLabel = entries.length <= 7 || index === 0 || index === entries.length - 1 || index % 5 === 0
+        {entries.map((entry) => {
+          const dayLabel = earningsChartDayLabel(entry.day)
           return (
-            <div className="earnings-chart-column" key={entry.day} title={`${entry.day}: ${formatRax(entry.dailyTotal)} RAX`}>
+            <div className="earnings-chart-column" key={entry.day} title={`${dayLabel.full}: ${formatRax(entry.dailyTotal)} RAX`}>
               <strong>{formatRax(entry.dailyTotal)}</strong>
               <div className="earnings-chart-track"><span style={{ height: `${Math.max(3, (entry.dailyTotal / ceiling) * 100)}%` }} /></div>
-              <small className={showDateLabel ? '' : 'is-hidden'}>{entry.day.slice(5)}</small>
+              <small><span>{dayLabel.weekday}</span><span>{dayLabel.date}</span></small>
             </div>
           )
         })}
