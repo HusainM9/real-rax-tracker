@@ -166,12 +166,12 @@ function EarningsBarChart({
       </div>
       <div className={`earnings-chart${entries.length <= 7 ? ' is-sparse' : ''}`} role="img" aria-label="Daily earnings over the last 30 tracked days">
         {entries.map((entry, index) => {
-          const showLabel = entries.length <= 7 || index === 0 || index === entries.length - 1 || index % 5 === 0
+          const showDateLabel = entries.length <= 7 || index === 0 || index === entries.length - 1 || index % 5 === 0
           return (
             <div className="earnings-chart-column" key={entry.day} title={`${entry.day}: ${formatRax(entry.dailyTotal)} RAX`}>
-              <strong className={showLabel ? '' : 'is-hidden'}>{formatRax(entry.dailyTotal)}</strong>
+              <strong>{formatRax(entry.dailyTotal)}</strong>
               <div className="earnings-chart-track"><span style={{ height: `${Math.max(3, (entry.dailyTotal / ceiling) * 100)}%` }} /></div>
-              <small className={showLabel ? '' : 'is-hidden'}>{entry.day.slice(5)}</small>
+              <small className={showDateLabel ? '' : 'is-hidden'}>{entry.day.slice(5)}</small>
             </div>
           )
         })}

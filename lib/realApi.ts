@@ -596,14 +596,57 @@ export async function getRealHomeDayGames(
   day: string,
   context: RealApiContext,
 ): Promise<RealHomeGame[]> {
-  const data = await realGetJson<{ content?: { games?: unknown; replayGames?: unknown } }>(
-    `/home/${encodeURIComponent(sport)}/day/next`,
+  const data = await realGetJson<{
+    content?: {
+      games?: unknown
+      replayGames?: unknown
+      plays?: unknown
+      playerBoxScores?: unknown
+    }
+  }>(
+    `/home/${encodeURIComponent(sport)}/day`,
     context,
     { day },
   )
   const games = Array.isArray(data.content?.games) ? data.content.games : []
   const replayGames = Array.isArray(data.content?.replayGames) ? data.content.replayGames : []
-  return [...games, ...replayGames] as RealHomeGame[]
+  const plays = Array.isArray(data.content?.plays) ? data.content.plays : []
+  const playerBoxScores = Array.isArray(data.content?.playerBoxScores)
+    ? data.content.playerBoxScores
+    : []
+  const byId = new Map<string, RealHomeGame>()
+
+  const remember = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    const row = value as Record<string, unknown>
+    const scalar = (candidate: unknown): string | number | undefined => (
+      typeof candidate === 'string' || typeof candidate === 'number' ? candidate : undefined
+    )
+    const id = scalar(row.id) ?? scalar(row.gameId)
+    if (id == null) return
+    const key = String(id)
+    const existing = byId.get(key)
+    byId.set(key, {
+      ...(existing ?? {}),
+      id,
+      sport: String(row.sport ?? existing?.sport ?? sport),
+      day: String(row.day ?? existing?.day ?? day),
+      status: String(row.status ?? row.gameStatus ?? existing?.status ?? ''),
+      homeTeamId: scalar(row.homeTeamId) ?? existing?.homeTeamId,
+      awayTeamId: scalar(row.awayTeamId) ?? existing?.awayTeamId,
+    })
+  }
+
+  // For non-featured CFB slates Real can leave `games` empty while still returning the day's
+  // plays and player boxes. Those rows carry the same game/team ids needed for the full stats
+  // request, so retain their games instead of treating the home payload as an empty day.
+  for (const game of [...games, ...replayGames]) remember(game)
+  for (const activity of [...plays, ...playerBoxScores]) {
+    if (!activity || typeof activity !== 'object') continue
+    const row = activity as Record<string, unknown>
+    remember({ ...row, id: row.gameId })
+  }
+  return [...byId.values()]
 }
 
 export type RealStatValue = {

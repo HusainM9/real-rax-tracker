@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  getRealHomeDayGames,
   getRealSportEntity,
   getShopEarningsTotal,
   realApiRetryDelayMs,
@@ -158,6 +159,64 @@ describe('realGetJson rate-limit retries', () => {
     const second = await realGetJson(path, context, { day: '2026-10-12' })
 
     expect(second).toEqual(first)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('discovers non-featured games from activity embedded in the same home response', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('https://web.realapp.com/home/ncaaf/day?day=2026-10-23')
+      return Response.json({
+        content: {
+          games: [],
+          replayGames: [],
+          plays: [{
+            id: 2035399273,
+            gameId: 44627,
+            day: '2026-10-23',
+            sport: 'ncaaf',
+            homeTeamId: 602,
+            awayTeamId: 165,
+          }],
+          playerBoxScores: [{
+            id: 2055242113,
+            gameId: 44627,
+            sport: 'ncaaf',
+            teamId: 165,
+            homeTeamId: 602,
+            awayTeamId: 165,
+          }, {
+            id: 2055242487,
+            gameId: 44409,
+            sport: 'ncaaf',
+            teamId: 591,
+            homeTeamId: 585,
+            awayTeamId: 591,
+          }],
+        },
+      })
+    }) as unknown as typeof fetch
+
+    const games = await getRealHomeDayGames(
+      'ncaaf',
+      '2026-10-23',
+      { config: testConfig() },
+    )
+
+    expect(games).toEqual([{
+      id: 44627,
+      sport: 'ncaaf',
+      day: '2026-10-23',
+      status: '',
+      homeTeamId: 602,
+      awayTeamId: 165,
+    }, {
+      id: 44409,
+      sport: 'ncaaf',
+      day: '2026-10-23',
+      status: '',
+      homeTeamId: 585,
+      awayTeamId: 591,
+    }])
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
   })
 

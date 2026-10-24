@@ -4060,16 +4060,21 @@ button.calendar-day {
 
 .earnings-chart-column {
   display: grid;
-  flex: 1 0 34px;
+  flex: 1 0 50px;
   gap: 0.35rem;
   justify-items: center;
-  max-width: 52px;
+  max-width: 64px;
 }
 
 .earnings-chart-column strong,
 .earnings-chart-column small {
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.earnings-chart-column strong {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 .earnings-chart-column small { color: var(--muted); }
