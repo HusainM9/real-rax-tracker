@@ -673,13 +673,51 @@ export async function getRealGamePlayerBoxScores(
   gameId: string | number,
   context: RealApiContext,
 ): Promise<RealPlayerBoxScore[]> {
-  const data = await realGetJson<{ playerBoxScores?: unknown }>(
+  const data = await realGetJson<{ playerBoxScores?: unknown; leaderboard?: unknown }>(
     `/games/${encodeURIComponent(String(gameId))}/sport/${encodeURIComponent(sport)}/stats`,
     context,
   )
-  return Array.isArray(data.playerBoxScores)
+  const summaries = Array.isArray(data.playerBoxScores)
     ? (data.playerBoxScores as RealPlayerBoxScore[])
     : []
+  const byId = new Map(
+    summaries.flatMap((box) => box.id == null ? [] : [[String(box.id), box] as const]),
+  )
+
+  // Golf's normal stats payload only exposes the top 20 rows in `playerBoxScores`, while the
+  // complete tournament field (including each exact box-score id) lives in `leaderboard`.
+  // Convert those leaderboard entries into summaries so owned golfers outside the top 20 are
+  // still resolved through the same exact `/playerboxscores/{id}` detail endpoint.
+  if (sport.toLowerCase() === 'golf' && Array.isArray(data.leaderboard)) {
+    for (const value of data.leaderboard) {
+      if (!value || typeof value !== 'object') continue
+      const row = value as Record<string, unknown>
+      const id = row.playerBoxScoreId
+      const playerId = row.playerId
+      if (
+        (typeof id !== 'string' && typeof id !== 'number') ||
+        (typeof playerId !== 'string' && typeof playerId !== 'number')
+      ) continue
+      const player = row.player && typeof row.player === 'object'
+        ? row.player as Record<string, unknown>
+        : null
+      const existing = byId.get(String(id))
+      byId.set(String(id), {
+        ...(existing ?? {}),
+        id,
+        playerId,
+        gameId,
+        sport,
+        teamId:
+          typeof player?.teamId === 'string' || typeof player?.teamId === 'number'
+            ? player.teamId
+            : existing?.teamId,
+        value: row.value ?? existing?.value,
+      })
+    }
+  }
+
+  return [...byId.values()]
 }
 
 export type RealPlayerBoxScoreDetail = {

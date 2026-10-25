@@ -7,6 +7,9 @@ on:
     # and EST; the endpoint rejects calls outside its Eastern recovery window.
     - cron: '35 8-11 * * *'
     - cron: '55 8-11 * * *'
+    # Golf payouts finalize at 7 AM Eastern but stay attached to the prior tournament day.
+    # Both UTC hours cover EDT/EST; the endpoint accepts only the matching Eastern hour.
+    - cron: '5,25,45 11-12 * * *'
   workflow_dispatch:
 
 permissions: {}
@@ -34,6 +37,8 @@ jobs:
           # starve accounts at the same end of the linked-account list.
           if [[ "${{ github.event.schedule }}" == 55\ * ]]; then
             route="snapshot-earnings-final-check"
+          elif [[ "${{ github.event.schedule }}" == "5,25,45 11-12 * * *" ]]; then
+            route="snapshot-earnings-golf-final-summer"
           else
             route="snapshot-earnings-fallback"
           fi

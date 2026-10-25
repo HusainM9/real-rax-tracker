@@ -4,6 +4,7 @@ import {
   currentRealEarningsDay,
   parsePassEarningsMultiplier,
   selectActivePlayerPasses,
+  selectGamesForOwnedPasses,
 } from './publicDailyEarnings'
 import type { RealBoosterRarityGroup, RealPass } from './realApi'
 
@@ -35,6 +36,37 @@ describe('public daily earnings calculation', () => {
   it('keeps the prior Eastern day active until the morning reset', () => {
     expect(currentRealEarningsDay(new Date('2026-10-11T10:30:00Z'))).toBe('2026-10-10')
     expect(currentRealEarningsDay(new Date('2026-10-11T11:30:00Z'))).toBe('2026-10-11')
+  })
+
+  it('does not treat golfer country ids as tournament home/away team ids', () => {
+    const golfPasses: RealPass[] = [{
+      entityType: 'player',
+      entityId: 28252,
+      sport: 'golf',
+      teamId: 192822,
+    }]
+    const tournament = {
+      id: 12026440,
+      sport: 'golf',
+      homeTeamId: 1,
+      awayTeamId: 2,
+    }
+
+    expect(selectGamesForOwnedPasses('golf', golfPasses, [tournament])).toEqual([tournament])
+  })
+
+  it('retains team filtering for ordinary team sports', () => {
+    const passes: RealPass[] = [{
+      entityType: 'player',
+      entityId: 554879,
+      sport: 'ncaaf',
+      teamId: 165,
+    }]
+
+    expect(selectGamesForOwnedPasses('ncaaf', passes, [
+      { id: 44627, homeTeamId: 602, awayTeamId: 165 },
+      { id: 44409, homeTeamId: 585, awayTeamId: 591 },
+    ])).toEqual([{ id: 44627, homeTeamId: 602, awayTeamId: 165 }])
   })
 
   it('reads the combined card and booster multiplier from Real display text', () => {

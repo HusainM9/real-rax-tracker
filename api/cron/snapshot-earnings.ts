@@ -64,7 +64,26 @@ export function isEasternFinalCheckTime(now: Date): boolean {
   return Number(easternParts(now).hour) === 6
 }
 
-export function isScheduledSnapshotRouteTime(_pathname: string, now: Date): boolean {
+export function isGolfFinalSnapshotRoute(pathname: string): boolean {
+  return pathname.includes('snapshot-earnings-golf-final')
+}
+
+export function snapshotDayForRoute(pathname: string, now: Date): string {
+  return isGolfFinalSnapshotRoute(pathname)
+    ? previousEasternDay(now)
+    : currentRealEarningsDay(now)
+}
+
+export function shouldSkipSavedSnapshot(pathname: string, force: boolean): boolean {
+  return !force && !isGolfFinalSnapshotRoute(pathname)
+}
+
+export function isScheduledSnapshotRouteTime(pathname: string, now: Date): boolean {
+  // Golf tournament earnings are confirmed at Real's 7 AM reset but remain attached to the
+  // tournament's prior-day box score. Only the dedicated finalizer is allowed in that hour.
+  if (isGolfFinalSnapshotRoute(pathname)) {
+    return Number(easternParts(now).hour) === 7
+  }
   // Hobby cron delivery can be delayed well past the minute in vercel.json. Every
   // snapshot route is idempotent, so accept any configured attempt throughout the
   // recovery window instead of rejecting a valid delayed EDT/EST invocation.
@@ -161,7 +180,10 @@ async function handleSnapshot(request: Request): Promise<Response> {
   const force = process.env.NODE_ENV === 'development' && url.searchParams.get('force') === '1'
   const now = new Date()
   if (!force && !testMode && !isScheduledSnapshotRouteTime(url.pathname, now)) {
-    return Response.json({ ok: true, skipped: true, reason: 'Outside this route\'s 4:00-6:59 AM Eastern snapshot window.' })
+    const window = isGolfFinalSnapshotRoute(url.pathname)
+      ? '7:00-7:59 AM Eastern golf finalization window'
+      : '4:00-6:59 AM Eastern snapshot window'
+    return Response.json({ ok: true, skipped: true, reason: `Outside this route's ${window}.` })
   }
 
   const realConfig = resolveRealApiConfig()
@@ -178,7 +200,7 @@ async function handleSnapshot(request: Request): Promise<Response> {
     await listTrackedEarningsUsernames(),
     prioritizeTail,
   )
-  const day = url.searchParams.get('day') ?? currentRealEarningsDay(now)
+  const day = url.searchParams.get('day') ?? snapshotDayForRoute(url.pathname, now)
   if (testMode) {
     const username = usernames[0]
     if (!username) {
@@ -233,7 +255,7 @@ async function handleSnapshot(request: Request): Promise<Response> {
       break
     }
 
-    if (!force) {
+    if (shouldSkipSavedSnapshot(url.pathname, force)) {
       try {
         if (await readPublicEarningsSnapshot(username, day)) {
           skipped.push(username)

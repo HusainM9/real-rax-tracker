@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  getRealGamePlayerBoxScores,
   getRealHomeDayGames,
   getRealSportEntity,
   getShopEarningsTotal,
@@ -218,6 +219,51 @@ describe('realGetJson rate-limit retries', () => {
       awayTeamId: 591,
     }])
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('includes the complete golf leaderboard beyond the top-20 box-score summary', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({
+      playerBoxScores: [{
+        id: 2055240337,
+        playerId: 28252,
+        gameId: 12026440,
+        sport: 'golf',
+        value: '6.47',
+      }],
+      leaderboard: [{
+        playerBoxScoreId: 2055240337,
+        playerId: 28252,
+        value: '6.47',
+        player: { teamId: 192822 },
+      }, {
+        playerBoxScoreId: 2055240387,
+        playerId: 61410,
+        value: '-3.55',
+        player: { teamId: 321524 },
+      }],
+    })) as unknown as typeof fetch
+
+    const rows = await getRealGamePlayerBoxScores(
+      'golf',
+      12026440,
+      { config: testConfig() },
+    )
+
+    expect(rows).toEqual([{
+      id: 2055240337,
+      playerId: 28252,
+      gameId: 12026440,
+      sport: 'golf',
+      teamId: 192822,
+      value: '6.47',
+    }, {
+      id: 2055240387,
+      playerId: 61410,
+      gameId: 12026440,
+      sport: 'golf',
+      teamId: 321524,
+      value: '-3.55',
+    }])
   })
 
   it('does not reuse public game responses without an explicit scan namespace', async () => {

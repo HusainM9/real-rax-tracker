@@ -9,6 +9,7 @@ import {
   normalizeRealUsernameInput,
   type RealApiContext,
   type RealBoosterRarityGroup,
+  type RealHomeGame,
   type RealPass,
   type RealPlayerBoxScore,
   type RealStatValue,
@@ -197,6 +198,25 @@ function passTeamId(pass: RealPass): string {
   return String(nested ?? pass.teamId ?? '')
 }
 
+export function selectGamesForOwnedPasses(
+  sport: string,
+  passes: RealPass[],
+  games: RealHomeGame[],
+): RealHomeGame[] {
+  // A golfer's teamId is their country, while a tournament uses placeholder home/away ids.
+  // Team intersection is therefore meaningful for team sports but invalid for golf.
+  if (sport.toLowerCase() === 'golf') return games
+  const teamIds = new Set(passes.map(passTeamId).filter(Boolean))
+  const canFilterTeams = teamIds.size > 0 && passes.every((pass) => passTeamId(pass))
+  return canFilterTeams
+    ? games.filter(
+        (game) =>
+          teamIds.has(String(game.homeTeamId ?? '')) ||
+          teamIds.has(String(game.awayTeamId ?? '')),
+      )
+    : games
+}
+
 export function selectActivePlayerPasses(passes: RealPass[]): RealPass[] {
   return passes.filter((pass) => (
     pass.entityType === 'player'
@@ -252,15 +272,7 @@ export async function reconstructPublicDailyEarnings(
   }))
   const relevantGames = homePages.flatMap(({ sport, games }) => {
     const sportPasses = passesBySport.get(sport) ?? []
-    const teamIds = new Set(sportPasses.map(passTeamId).filter(Boolean))
-    const canFilterTeams = teamIds.size > 0 && sportPasses.every((pass) => passTeamId(pass))
-    const selected = canFilterTeams
-      ? games.filter(
-          (game) =>
-            teamIds.has(String(game.homeTeamId ?? '')) ||
-            teamIds.has(String(game.awayTeamId ?? '')),
-        )
-      : games
+    const selected = selectGamesForOwnedPasses(sport, sportPasses, games)
     return selected.flatMap((game) => {
       const status = String(game.status ?? '').toLowerCase()
       if (game.id == null || status === 'scheduled') return []

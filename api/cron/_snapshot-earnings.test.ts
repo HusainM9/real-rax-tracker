@@ -7,11 +7,14 @@ import {
   isAuthorizedSnapshotRequest,
   isEasternFinalCheckTime,
   isEasternSnapshotTime,
+  isGolfFinalSnapshotRoute,
   isScheduledSnapshotRouteTime,
   isSnapshotRateLimit,
   missingSnapshotUsernames,
   orderSnapshotUsernames,
   snapshotPublicCacheNamespace,
+  snapshotDayForRoute,
+  shouldSkipSavedSnapshot,
   snapshotRetryDelayMs,
 } from './snapshot-earnings'
 
@@ -94,6 +97,23 @@ describe('scheduled earnings snapshot window', () => {
       '/api/cron/snapshot-earnings-summer',
       new Date('2026-07-15T09:45:00Z'),
     )).toBe(true)
+  })
+
+  it('runs only the dedicated golf finalizer at 7 AM Eastern and targets the prior day', () => {
+    const summerSevenAm = new Date('2026-10-26T11:05:00Z')
+    const winterSevenAm = new Date('2026-12-15T12:05:00Z')
+    const path = '/api/cron/snapshot-earnings-golf-final-summer'
+
+    expect(isGolfFinalSnapshotRoute(path)).toBe(true)
+    expect(isScheduledSnapshotRouteTime(path, summerSevenAm)).toBe(true)
+    expect(isScheduledSnapshotRouteTime(path, winterSevenAm)).toBe(true)
+    expect(isScheduledSnapshotRouteTime(
+      '/api/cron/snapshot-earnings-final-check',
+      summerSevenAm,
+    )).toBe(false)
+    expect(snapshotDayForRoute(path, summerSevenAm)).toBe('2026-10-25')
+    expect(shouldSkipSavedSnapshot(path, false)).toBe(false)
+    expect(shouldSkipSavedSnapshot('/api/cron/snapshot-earnings-summer', false)).toBe(true)
   })
 })
 
@@ -186,6 +206,8 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
       { path: '/api/cron/snapshot-earnings-after-six-winter', schedule: '0 10 * * *' },
       { path: '/api/cron/snapshot-earnings-fallback', schedule: '30 10 * * *' },
       { path: '/api/cron/snapshot-earnings-final-check', schedule: '0 11 * * *' },
+      { path: '/api/cron/snapshot-earnings-golf-final-summer', schedule: '5 11 * * *' },
+      { path: '/api/cron/snapshot-earnings-golf-final-winter', schedule: '5 12 * * *' },
     ]))
   })
 
@@ -203,9 +225,11 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
 
     expect(workflow).toContain("cron: '35 8-11 * * *'")
     expect(workflow).toContain("cron: '55 8-11 * * *'")
+    expect(workflow).toContain("cron: '5,25,45 11-12 * * *'")
     expect(workflow).toContain('secrets.CRON_SECRET')
     expect(workflow).toContain('/api/cron/$route')
     expect(workflow).toContain('query="?test=1"')
+    expect(workflow).toContain('route="snapshot-earnings-golf-final-summer"')
     expect(workflow).toContain("--write-out '%{http_code}'")
     expect(workflow).toContain("jq --exit-status '.ok == true'")
   })
