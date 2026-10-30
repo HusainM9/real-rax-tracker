@@ -35,9 +35,18 @@ function paused(incidentId?: string): RequestSafetyError {
   return new RequestSafetyError(`Real returned HTTP 500. This endpoint is paused and will not be repeated.${reference}`, 'real_http_500', 500, false, 'real')
 }
 
+function refuseRedirect(response: Response): Response {
+  if ((response.status >= 300 && response.status < 400) || response.type === 'opaqueredirect') {
+    throw new Error('Upstream redirect was not followed. This operation stopped without retrying.')
+  }
+  return response
+}
+
 /** Only confirmed Real HTTP 500 is durable. Other services have no circuit latch. */
 export async function guardedUpstreamFetch(provider: string, url: string, init: RequestInit = {}, store: RequestSafetyStore = requestSafetyStore): Promise<Response> {
-  if (provider !== 'real') return fetch(url, { ...init, redirect: 'error' })
+  // Vercel Edge rejects redirect:"error" before dispatch. Manual mode prevents a
+  // follow-up request (or credential forwarding); inspect and reject 3xx ourselves.
+  if (provider !== 'real') return refuseRedirect(await fetch(url, { ...init, redirect: 'manual' }))
   if (/\/home\/ufc\/day\/?$/i.test(new URL(url).pathname)) throw paused()
   const method = (init.method ?? 'GET').toUpperCase()
   const key = await familyKey(url, method)
@@ -54,10 +63,11 @@ export async function guardedUpstreamFetch(provider: string, url: string, init: 
 
     // One dispatch only. Unknown responses and other statuses never become permanent bans.
     let response: Response
-    try { response = await fetch(url, { ...init, redirect: 'error' }) } catch (error) {
+    try { response = await fetch(url, { ...init, redirect: 'manual' }) } catch (error) {
       if (init.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw new DOMException('Request cancelled.', 'AbortError')
       throw new Error('The Real response was not received. This operation stopped without retrying.')
     }
+    refuseRedirect(response)
     if (response.status !== 500) return response
     const owner = crypto.randomUUID()
     const record = { owner, provider: 'real', method, status: 500, outcome: 'http_500' as const, incidentId: owner, recordedAt: new Date().toISOString() }

@@ -6,6 +6,32 @@ const store = memoryRequestSafetyStore()
 beforeEach(() => { store.clear(); vi.spyOn(console, 'error').mockImplementation(() => {}) })
 afterEach(() => vi.restoreAllMocks())
 
+it.each(['real', 'supabase-catalog', 'marketplace-notification'])('works with Edge redirect constraints for %s without weakening redirect handling', async provider => {
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.redirect === 'error') throw new TypeError('Invalid redirect value, must be one of "follow" or "manual"')
+    // A caller cannot request automatic redirects and forward credentials to another host.
+    if (init?.redirect !== 'manual') throw new Error('Automatic redirect mode is unsafe')
+    return Response.json({ items: [{ id: 'available' }] })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  const response = await guardedUpstreamFetch(provider, 'https://provider.test/edge-compatible', { redirect: 'follow' }, store)
+  expect(await response.json()).toEqual({ items: [{ id: 'available' }] })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})
+
+it.each(['real', 'supabase-catalog', 'marketplace-notification'])('refuses redirects for %s without following, retrying or storing a false 500', async provider => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(null, { status: 302, headers: { Location: 'https://private.test/destination?token=secret' } }))
+  vi.stubGlobal('fetch', fetcher)
+  const write = vi.spyOn(store, 'recordFailure')
+  const error = await guardedUpstreamFetch(provider, 'https://provider.test/edge-redirect', {}, store).catch(error => error)
+  expect(error).toBeInstanceOf(Error)
+  expect(error.message).toMatch(/redirect.*not followed/i)
+  expect(error.message).not.toMatch(/private.test|token|secret/)
+  expect(error.upstreamStatus).toBeUndefined()
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(write).not.toHaveBeenCalled()
+})
+
 it('logs one redacted confirmed Real 500 and records the original family key', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response('private body', { status: 500 }))
   vi.stubGlobal('fetch', fetcher)

@@ -2,6 +2,8 @@
 
 October 31, 2026. Current policy, superseding the older broad safety reports. Implemented solo on `codex/performance-phase-two`, preserving the approved UI/performance work and saved data.
 
+Follow-up: production exposed an Edge-incompatible redirect option that the Node test runtime accepted. See [the Edge redirect correction](edge-redirect-fix-2026-10-31.md). It fixes transport compatibility, without changing the Real-500-only policy below.
+
 ## What changed
 
 - Only an actual HTTP **500 from Real** is immediately logged and durably pauses its endpoint family. Query/date/account variants and later deployments do not bypass it. The existing key namespace, old confirmed-500 records and UFC day-endpoint block remain.

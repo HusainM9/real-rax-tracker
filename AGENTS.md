@@ -17,6 +17,7 @@ This policy **supersedes the earlier blanket 500–599 / site-wide permanent-blo
 - Work solo: **no subagents**. Keep the current checkout and `codex/performance-phase-two` branch; preserve approved UI/performance work and user data.
 - The owner authorized commit/deploy and restoring usability. Run full offline tests, TypeScript, the request-boundary audit and `npm run build` (including mandatory safety tests/native ESM loading) before release. Never deploy older unguarded source or bypass a failing gate.
 - Keep audited runtime HTTP/SDK boundaries. Persistent pauses apply only to confirmed Real HTTP 500, not every boundary.
+- Server outbound fetch must use Edge-compatible `redirect: 'manual'` and explicitly refuse 3xx without following. Vercel Edge rejects `redirect: 'error'` before dispatch; Node-only success is not evidence of Edge compatibility. Never reintroduce that option in the shared server transport.
 - No new volume caps or burst/scraping benchmarks. Retain four-minute Marketplace checks, cache-only faces and retirement of Boosts, individual player listings and standalone Earnings.
 - Keep private access, security headers, account rate limits and denial of unsafe legacy deployment hosts. Retired endpoints stay retired; their old internal-500 firewall pause is not a substitute for a normal retirement response.
 - The separate port-5175 development copy stays stopped. No scheduling changes or restored retired features as part of authentication repair.
