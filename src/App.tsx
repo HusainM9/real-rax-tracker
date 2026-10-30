@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AdminProvider } from './context/AdminAuthContext'
 import { AccountProvider } from './context/AccountAuthContext'
 import { AuthProvider } from './context/AuthContext'
@@ -10,6 +10,7 @@ import RequireAdmin from './components/RequireAdmin'
 import RequireAuth from './components/RequireAuth'
 import RequireEarnings from './components/RequireEarnings'
 import './App.css'
+import './UIRefresh.css'
 
 const AccountPage = lazy(() => import('./pages/AccountPage'))
 const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage'))
@@ -17,8 +18,6 @@ const AdminPage = lazy(() => import('./pages/AdminPage'))
 const CalendarPage = lazy(() => import('./pages/CalendarPage'))
 const CardsPage = lazy(() => import('./pages/CardsPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
-const EntryPage = lazy(() => import('./pages/EntryPage'))
-const EarningsPage = lazy(() => import('./pages/EarningsPage'))
 const HelpPage = lazy(() => import('./pages/HelpPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const MarketplaceAlertsPage = lazy(() => import('./pages/MarketplaceAlertsPage'))
@@ -26,9 +25,11 @@ const OtdPage = lazy(() => import('./pages/OtdPage'))
 const OverlapsPage = lazy(() => import('./pages/OverlapsPage'))
 const PlanPacksPage = lazy(() => import('./pages/PlanPacksPage'))
 const PlanPage = lazy(() => import('./pages/PlanPage'))
-const PotentialPage = lazy(() => import('./pages/PotentialPage'))
+const OptimizationPage = lazy(() => import('./pages/OptimizationPage'))
 const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 const SellPage = lazy(() => import('./pages/SellPage'))
+const PreviewPerformancePage = import.meta.env.VITE_PREVIEW_PERF_LAB === '1'
+  ? lazy(() => import('./pages/PreviewPerformancePage')) : null
 
 function AccountScope() {
   return (
@@ -44,6 +45,11 @@ function TrackerLayout() {
       <Layout />
     </RaxDataProvider>
   )
+}
+
+function LegacyEntryRedirect() {
+  const location = useLocation()
+  return <Navigate to={`/?import=1${location.hash}`} replace />
 }
 
 function RouteLoadingFallback() {
@@ -67,14 +73,15 @@ function createAccountRoutes() {
     <Route element={<AccountScope />}>
       <Route path="/account" element={<AccountPage />} />
       <Route element={<RequireAccount />}>
+        {PreviewPerformancePage ? <Route path="/performance-check" element={<PreviewPerformancePage />} /> : null}
         <Route element={<TrackerLayout />}>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/entry" element={<EntryPage />} />
+          <Route path="/entry" element={<LegacyEntryRedirect />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/otd" element={<OtdPage />} />
           <Route path="/overlap" element={<OverlapsPage />} />
           <Route path="/overlaps" element={<OverlapsPage />} />
-          <Route path="/potential" element={<PotentialPage />} />
+          <Route path="/potential" element={<OptimizationPage />} />
           <Route path="/plan" element={<PlanPage />} />
           <Route path="/packs" element={<PlanPacksPage />} />
           <Route path="/plan/packs" element={<Navigate to="/packs" replace />} />
@@ -90,16 +97,6 @@ function createAccountRoutes() {
   )
 }
 
-function createPublicEarningsRoutes() {
-  return (
-    <Route element={<AccountScope />}>
-      <Route element={<TrackerLayout />}>
-        <Route path="/earnings" element={<RequireEarnings><EarningsPage /></RequireEarnings>} />
-      </Route>
-    </Route>
-  )
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -107,8 +104,8 @@ export default function App() {
         <Suspense fallback={<RouteLoadingFallback />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/earnings/access" element={<Navigate to="/earnings" replace />} />
-            {createPublicEarningsRoutes()}
+            <Route path="/earnings" element={<Navigate to="/" replace />} />
+            <Route path="/earnings/access" element={<Navigate to="/" replace />} />
             <Route element={<RequireAuth />}>
               {createAdminRoutes()}
               {createAccountRoutes()}

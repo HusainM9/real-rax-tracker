@@ -1,5 +1,7 @@
 import Hashids from 'hashids'
 import { getRealAppToolsRows } from './realAppToolsPaste.js'
+import { guardedUpstreamFetch } from './guardedUpstreamFetch.js'
+import { isHttp5xx, isTerminalRequestFailure, failureStatus, isPendingRequest } from './httpFailurePolicy.js'
 
 const DEFAULT_BASE_URL = 'https://web.realapp.com'
 const DEFAULT_DEVICE_TYPE = 'desktop_web'
@@ -60,12 +62,18 @@ export type RealApiErrorKind =
 export class RealApiError extends Error {
   readonly kind: RealApiErrorKind
   readonly status?: number
+  readonly upstreamStatus?: number
+  readonly retryable?: boolean
+  readonly pending: boolean
 
-  constructor(kind: RealApiErrorKind, message: string, status?: number) {
+  constructor(kind: RealApiErrorKind, message: string, status?: number, retryable?: boolean, pending = false) {
     super(message)
     this.name = 'RealApiError'
     this.kind = kind
     this.status = status
+    this.upstreamStatus = status
+    this.retryable = isHttp5xx(status) ? false : retryable
+    this.pending = pending
   }
 }
 
@@ -316,12 +324,16 @@ export async function realGetJson<T>(
 
     let response: Response
     try {
-      response = await fetch(url, {
+      response = await guardedUpstreamFetch('real', url, {
         method: 'GET',
         headers: buildRealHeaders(config),
         signal: timeout.signal,
       })
     } catch (error) {
+      if (isTerminalRequestFailure(error)) {
+        if (timeout.timedOut()) throw new RealApiError('timeout', `Real API request timed out after ${config.timeoutMs}ms. Further calls to this endpoint are blocked.`, failureStatus(error), false)
+        throw new RealApiError('upstream', error instanceof Error ? error.message : 'Request stopped for safety.', failureStatus(error), false, isPendingRequest(error))
+      }
       if (timeout.timedOut()) {
         throw new RealApiError('timeout', `Real API request timed out after ${config.timeoutMs}ms.`)
       }
@@ -578,7 +590,10 @@ export async function listPasses(query: RealPassQuery, context: RealApiContext):
       filter: query.filter,
     },
   )
-  return Array.isArray(data.passes) ? (data.passes as RealPass[]) : []
+  if (!Array.isArray(data.passes)) {
+    throw new RealApiError('invalid_response', 'Real returned an invalid pass collection response.')
+  }
+  return data.passes as RealPass[]
 }
 
 export type RealHomeGame = {
@@ -904,6 +919,7 @@ export async function listTeamRecentPlays(
     })
     return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
   } catch (error) {
+    if (isTerminalRequestFailure(error)) throw error
     if (error instanceof RealApiError && (error.kind === 'not_found' || error.kind === 'upstream')) {
       return []
     }
@@ -972,8 +988,9 @@ export async function listPlayerPlaysForPackAverage(
     if (topPlays.length > 0) {
       return { plays: topPlays, source: 'top' }
     }
-  } catch {
-    // Top can 500 with viewFrame=default; season usually works, but never block recent fallback.
+  } catch (error) {
+    if (isTerminalRequestFailure(error)) throw error
+    // Only non-terminal failures may use the legacy recent-play fallback.
   }
 
   const recentPlays = await listPlayerRecentPlays(

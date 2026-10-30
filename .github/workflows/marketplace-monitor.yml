@@ -2,7 +2,7 @@ name: Marketplace monitor
 
 on:
   schedule:
-    # QStash is the primary two-minute scheduler. This is a ten-minute fallback.
+    # QStash primary: every four minutes, delivery retries disabled. Ten-minute fallback.
     - cron: '3-59/10 * * * *'
   workflow_dispatch:
 

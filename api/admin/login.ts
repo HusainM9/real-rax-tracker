@@ -1,13 +1,13 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   adminConfigured,
   buildAdminSessionCookieHeader,
   createAdminSessionToken,
   readAdminPasswordEnv,
-} from '../../lib/adminAuth'
-import { authConfigured } from '../../lib/authCookie'
-import { requireAppSession } from './_helpers'
+} from '../../lib/adminAuth.js'
+import { authConfigured } from '../../lib/authCookie.js'
+import { requireAppSession } from './_helpers.js'
 
 export const config = {
   runtime: 'edge',

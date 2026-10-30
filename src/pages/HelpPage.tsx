@@ -1,203 +1,37 @@
 import { Link } from 'react-router-dom'
-import { realProviderImportEnabled } from '../lib/importShutdown'
 
 export default function HelpPage() {
-  const realImportActive = realProviderImportEnabled()
-
-  return (
-    <div className="page-stack">
-      <section className="hero-card">
-        <div>
-          <p className="eyebrow">Guide</p>
-          <h2>How this tracker works</h2>
-          <p>Plan OTD claims before overlaps waste RAX. Data stays in this browser unless you export or sync.</p>
-        </div>
-        <Link className="button primary" to="/entry">
-          Import or add cards
-        </Link>
-      </section>
-
-      <section className="panel help-section">
-        <h2>What is RAX On This Day?</h2>
-        <p>
-          Each calendar day you can claim player cards for RAX based on historical performances on
-          that same month/day.
-        </p>
-        <ul className="help-list">
-          <li>
-            <strong>Guaranteed</strong> — top two player cards per sport per day.
-          </li>
-          <li>
-            <strong>Overlap</strong> — third-or-later same sport/day; not claimable.
-          </li>
-          <li>
-            <strong>Pro bonus</strong> — optional third claim across sports (Dashboard toggle).
-          </li>
-        </ul>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Getting your data in</h2>
-        <ol className="help-list ordered">
-          {realImportActive ? (
-            <li>
-              <strong>Username import</strong> (Entry, primary) — Real @username recovers Legendary+
-              passes; daily RAX may load in stages.
-            </li>
-          ) : (
-            <li>
-              <strong>Username import</strong> — closed. Use Quick add, Manual add, or a backup.
-            </li>
-          )}
-          <li>
-            <strong>Quick add</strong> — catalog search on Entry for one-off passes.
-          </li>
-          <li>
-            <strong>Manual add</strong> — paste daily RAX JSON or enter a single day.
-          </li>
-        </ol>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Manual earnings JSON</h2>
-        <p>
-          When daily rows are missing, paste JSON from{' '}
-          <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-            realapp.com
-          </a>{' '}
-          (desktop, Real Pro).
-        </p>
-        <details className="help-details">
-          <summary>How to copy earnings JSON</summary>
-          <ol className="help-list ordered">
-            <li>
-              Open{' '}
-              <a href="https://www.realapp.com" target="_blank" rel="noreferrer">
-                realapp.com
-              </a>{' '}
-              and log in.
-            </li>
-            <li>
-              DevTools (<kbd>F12</kbd>) → <strong>Network</strong> before loading earnings.
-            </li>
-            <li>
-              Open the player season and click the <strong>RAX icon</strong> on a performance.
-            </li>
-            <li>
-              Filter for <code>userpassearnings</code>, copy the Response JSON.
-            </li>
-            <li>
-              On <Link to="/entry">Entry</Link> → <strong>Manual add</strong>, paste and save.
-            </li>
-          </ol>
-          <p className="import-hint">
-            Older <code>rows</code> JSON still works. Pastes also save under Saved earnings profiles.
-          </p>
-        </details>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Saved earnings profiles</h2>
-        <p>
-          Pasted or imported earnings auto-save per player. Re-import replaces earnings on imported
-          passes but keeps saved profiles.
-        </p>
-        <ul className="help-list">
-          <li>
-            <strong>Restore</strong> — re-applies saved RAX onto the matching pass.
-          </li>
-          <li>
-            <strong>JSON</strong> — fills the paste box without importing yet.
-          </li>
-        </ul>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Pages at a glance</h2>
-        <dl className="help-dl">
-          <div>
-            <dt>Dashboard</dt>
-            <dd>Totals, best days, JSON backup; collection saves to your account.</dd>
-          </div>
-          <div>
-            <dt>Entry</dt>
-            <dd>Username import (primary), Quick add, Manual add, edit RAX.</dd>
-          </div>
-          <div>
-            <dt>Calendar</dt>
-            <dd>Month/day OTD view.</dd>
-          </div>
-          <div>
-            <dt>Overlaps</dt>
-            <dd>Days and cards wasting RAX.</dd>
-          </div>
-          <div>
-            <dt>Potential</dt>
-            <dd>Rank OTD Net, Check one pass, collection what-ifs.</dd>
-          </div>
-          <div>
-            <dt>Plan</dt>
-            <dd>Catalog passes you are considering before buying.</dd>
-          </div>
-          <div>
-            <dt>Cards</dt>
-            <dd>Per-card totals, sorting, rarity edits.</dd>
-          </div>
-          <div>
-            <dt>If sold</dt>
-            <dd>Lost vs freed claimable RAX if you sell a pass.</dd>
-          </div>
-          <div>
-            <dt>Plan to sell</dt>
-            <dd>
-              On Plan only: mark owned passes as planned sells (simulation). Plan nets score planned
-              buys at Iconic 1 after those sells; optional “Assume collection Iconic 1” upgrades the
-              whole collection for that sim. If sold (/sell) stays collection-only.
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="panel help-section">
-        <h2>OTD dates &amp; rarity</h2>
-        <p>
-          Rules apply per month/day across years. Each card uses its best performance that day,
-          except UFC: if a fighter fought more than once on that month/day, those fights are
-          combined into one claim.
-          Change rarity on Cards or Entry after a merge — earnings recalculate and save with your
-          collection.
-        </p>
-      </section>
-
-      <section className="panel help-section">
-        <h2>Backup and privacy</h2>
-        <p>
-          Data saves to your signed-in account. Export JSON on Dashboard for an extra backup.
-          Collection recovery is username import on Entry. Clearing site data removes local cache
-          only.
-        </p>
-        <details className="help-details">
-          <summary>Privacy notes</summary>
-          <ul className="help-list">
-            <li>
-              <strong>Exports</strong> — plain JSON with username, cards, and RAX. Do not share
-              publicly.
-            </li>
-            <li>
-              <strong>Device access</strong> — anyone with this browser or an unlocked export can
-              read your data.
-            </li>
-            <li>
-              <strong>Site password</strong> — gates the app URL only; each browser keeps its own
-              collection.
-            </li>
-            <li>
-              <strong>Operator cache</strong> — imports may report a minimal username/pass snapshot.
-              Notes and full backups are not uploaded.
-            </li>
-          </ul>
-        </details>
-      </section>
-    </div>
-  )
+  return <div className="page-stack">
+    <section className="hero-card"><div><p className="eyebrow">Guide</p><h2>How this tracker works</h2>
+      <p>Import your collection, review daily claims, and compare upgrades before changing your Plan.</p>
+    </div><Link className="button primary" to="/#dashboard-import">Import collection</Link></section>
+    <section className="panel help-section"><h2>Import your collection</h2>
+      <ol className="help-list ordered">
+        <li>Open Dashboard and enter your Real username in the import tools.</li>
+        <li>Legendary, Mystic, and Iconic passes are included. Optionally include Rare or Epic.</li>
+        <li>Import replaces the collection with current ownership. Export a backup first if you need one.</li>
+        <li>Use Retry failed earnings for temporary failures without scanning ownership again. Passes with no earnings remain in your collection; import again when data is available.</li>
+      </ol>
+      <p>Collection entry is import-only. JSON backup and restore remain under Dashboard's backup controls.</p>
+    </section>
+    <section className="panel help-section"><h2>OTD claims</h2><ul className="help-list">
+      <li><strong>Guaranteed:</strong> top two cards per sport on each recurring month/day, pooling years.</li>
+      <li><strong>Pro:</strong> one additional claim across sports, when enabled.</li>
+      <li><strong>Overlap:</strong> remaining performances that cannot be claimed that day.</li>
+      <li>Each card uses its best performance on that month/day. UFC combines the fighter's same-day fights.</li>
+      <li>Use Cards for rarity changes and collection review.</li>
+    </ul></section>
+    <section className="panel help-section"><h2>Choose a tool</h2><dl className="help-dl">
+      <div><dt>Dashboard</dt><dd>Collection import, totals, and backups.</dd></div>
+      <div><dt>Calendar, OTD, and Overlaps</dt><dd>Inspect claim days, opportunities, and unclaimable earnings.</dd></div>
+      <div><dt>Optimization</dt><dd>Find the best upgrades ranks passes by net collection gain and calculates a greedy bundle. You can optionally assume upgrades for selected Plan cards.</dd></div>
+      <div><dt>Plan</dt><dd>Compare intended acquisitions and simulated sells without changing your collection.</dd></div>
+      <div><dt>Packs</dt><dd>Track rating progress across accounts. Successful scans may be reused for 30 seconds; enable Always refresh from Real to bypass that snapshot.</dd></div>
+      <div><dt>If sold</dt><dd>Compare lost and newly freed claims when selling a pass.</dd></div>
+    </dl></section>
+    <section className="panel help-section"><h2>Backup and privacy</h2>
+      <p>Your signed-in tracker account syncs collection data to server storage. The browser also keeps a local cache. Export JSON from Dashboard for an independent backup; exports contain usernames, cards, notes, and earnings in plain text.</p>
+      <p>The site password controls app access; it is separate from your tracker account. Imports use the operator's server-configured Real session, not a Real password entered by you. Shared catalog data and minimal import diagnostics may also be stored.</p>
+    </section>
+  </div>
 }

@@ -1,3 +1,6 @@
+import { waitWithAbort } from '../../lib/abortablePromise'
+import { safeImportFetch } from './safeImportFetch'
+
 export type PackRatingPass = {
   externalKey: string
   name: string
@@ -15,6 +18,8 @@ export type PackRatingsResult = {
   username: string
   passCount: number
   passes: PackRatingPass[]
+  fetchedAt?: string
+  source?: 'real' | 'cache'
 }
 
 export const PACK_RATINGS_ENDPOINT = '/api/import/pack-ratings'
@@ -26,25 +31,19 @@ type PackRatingsResponse = {
   username?: string
   passCount?: number
   passes?: PackRatingPass[]
+  fetchedAt?: string
+  source?: 'real' | 'cache'
 }
 
 /**
  * Fetches Real play ratings for a username (rarity floor + boostInfo.progress).
  */
-export async function fetchPackRatings(
-  username: string,
-  signal?: AbortSignal,
-): Promise<PackRatingsResult> {
-  const trimmed = username.replace(/^@/, '').trim()
-  if (!trimmed) {
-    throw new Error('Enter a Real username.')
-  }
-
-  const response = await fetch(PACK_RATINGS_ENDPOINT, {
+async function requestPackRatings(trimmed: string, forceRefresh: boolean): Promise<PackRatingsResult> {
+  const response = await safeImportFetch(PACK_RATINGS_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: trimmed }),
-    signal,
+    body: JSON.stringify({ username: trimmed, ...(forceRefresh ? { forceRefresh: true } : {}) }),
+    signal: AbortSignal.timeout(60_000),
   })
 
   const text = await response.text()
@@ -69,12 +68,38 @@ export async function fetchPackRatings(
     throw new Error(`Pack rating import returned an empty response (${response.status}).`)
   }
 
-  const passes = Array.isArray(body.passes) ? body.passes : []
+  if (!Array.isArray(body.passes) || (body.passCount !== undefined && body.passCount !== body.passes.length)) {
+    throw new Error('Pack rating import returned invalid or missing ownership data.')
+  }
+  const passes = body.passes
   return {
     username: body.username || trimmed,
     passCount: body.passCount ?? passes.length,
     passes,
+    fetchedAt: body.fetchedAt,
+    source: body.source === 'cache' || body.source === 'real' ? body.source : undefined,
   }
+}
+
+const pendingImports = new Map<string, Promise<PackRatingsResult>>()
+
+export async function fetchPackRatings(
+  username: string,
+  signal?: AbortSignal,
+  options?: { forceRefresh?: boolean },
+): Promise<PackRatingsResult> {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  const normalized = username.trim().replace(/^@/, '').trim().toLowerCase()
+  if (!normalized) throw new Error('Enter a Real username.')
+  const force = options?.forceRefresh === true
+  const key = `${normalized}|${force ? 'fresh' : 'recent'}`
+  let pending = pendingImports.get(`${normalized}|fresh`) ?? pendingImports.get(key)
+  if (!pending) {
+    pending = requestPackRatings(normalized, force).finally(() => pendingImports.delete(key))
+    pendingImports.set(key, pending)
+  }
+  const result = await waitWithAbort(pending, signal)
+  return { ...result, passes: result.passes.map((pass) => ({ ...pass })) }
 }
 
 export function findPackRatingForExternalKey(

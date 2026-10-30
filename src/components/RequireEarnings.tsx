@@ -1,3 +1,4 @@
+import { safeFetch } from "../lib/safeImportFetch"
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 type Status = 'loading' | 'locked' | 'authenticated'
@@ -45,7 +46,7 @@ export default function RequireEarnings({
 
   useEffect(() => {
     const controller = new AbortController()
-    void fetch('/api/earnings/session', {
+    void safeFetch('/api/earnings/session', {
       credentials: 'include',
       signal: controller.signal,
     })
@@ -68,7 +69,7 @@ export default function RequireEarnings({
     setSubmitting(true)
     setError('')
     try {
-      const response = await fetch('/api/earnings/login', {
+      const response = await safeFetch('/api/earnings/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

@@ -3,16 +3,16 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import StorageWarningBanner from './StorageWarningBanner'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useAuth } from '../context/AuthContext'
+import './Layout.css'
 
 const MOBILE_NAV_QUERY = '(max-width: 1024px)'
 
 const links = [
   { to: '/', label: 'Dashboard', end: true },
-  { to: '/entry', label: 'Entry' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/otd', label: 'OTD' },
   { to: '/overlaps', label: 'Overlaps' },
-  { to: '/potential', label: 'Potential' },
+  { to: '/potential', label: 'Optimization' },
   { to: '/plan', label: 'Plan' },
   { to: '/packs', label: 'Packs' },
   { to: '/cards', label: 'Cards' },
@@ -96,7 +96,8 @@ export default function Layout() {
       <header className={`site-header${menuOpen ? ' menu-open' : ''}`}>
         <div className="site-header-inner">
           <NavLink className="brand" to="/" end onClick={() => setMenuOpen(false)}>
-            RAX OTD Tracker
+            <span className="brand-mark" aria-hidden="true">R</span>
+            <span>RAX <span className="brand-secondary">OTD Tracker</span></span>
           </NavLink>
 
           <nav

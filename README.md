@@ -29,7 +29,7 @@ npm ci
 npm run dev
 ```
 
-Vite normally serves the app at `http://localhost:5173`. The Vite development server does not execute the Vercel functions under `api/`; use Vercel's local development tooling when testing complete authentication, import, or account-sync flows.
+Vite normally serves the app at `http://localhost:5173`. The custom development plugin in `vite.config.ts` also runs compatible routes under `api/` using local environment settings. Development authentication bypasses and this local adapter are not a replacement for testing production middleware, cookies, cron delivery, or Vercel runtime limits.
 
 Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Never commit `.env.local` or place private credentials in `VITE_*` variables—Vite exposes those values to the browser bundle.
 
@@ -43,8 +43,12 @@ Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Nev
 | `npm run build` | Type-check and create the production bundle in `dist/` |
 | `npm run preview` | Preview the production bundle locally |
 | `npm run seed:catalog` | Run the shared-catalog seed script |
+| `npm run bench:collection -- gordon --live --label repeat` | Benchmark an isolated import against the local API on port 5174 |
+| `node scripts/audit-runtime-modules.mjs` | Report conservative dependency-cleanup candidates |
 
 GitHub Actions runs lint, tests, and the production build for pushes and pull requests.
+
+See [the codebase review](docs/codebase-review.md) for measured import/calculation results, remaining correctness and data-safety findings, and benchmark privacy/limitations. Private benchmark fixtures stay in ignored `.benchmarks/` and must not be published.
 
 ## Application structure
 
@@ -68,14 +72,14 @@ The app has three access layers:
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Dashboard and summary |
-| `/entry` | Import passes and edit cards or earnings |
-| `/earnings` | View daily active-season player-card earnings and account totals |
-| `/marketplace` | Create marketplace listing alerts and review matched listings |
+| `/` | Dashboard, collection import, backup controls, and summary |
+| `/entry` | Legacy import link; redirects to Dashboard's import section |
+| `/earnings`, `/earnings/access` | Retired; redirect to Dashboard |
+| `/marketplace` | Marketplace alerts and player listings; currently hidden from the navbar |
 | `/calendar` | Calendar view of claimable and overlapping RAX |
 | `/otd` | Browse OTD opportunities |
 | `/overlaps` | Analyze overlap days and unclaimable RAX |
-| `/potential` | Evaluate passes not currently owned |
+| `/potential` | Optimization: compare upgrades/new passes and selected Plan upgrade assumptions |
 | `/plan` | Plan future claims and acquisitions |
 | `/packs` | Track pack plans |
 | `/cards` | Review and sort cards |
@@ -92,8 +96,8 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 - `BASIC_AUTH_PASSWORD` and `AUTH_SESSION_SECRET` for the deployment gate
 - `KV_REST_API_URL`, `KV_REST_API_TOKEN`, and optional `TRACKER_SYNC_SECRET` for accounts and sync
 - `REAL_*` server variables for Real pass and earnings import
-- `CRON_SECRET` for bearer-token protection on scheduled public earnings snapshots. Add the same value as a GitHub Actions repository secret so the independent morning fallback can invoke the endpoint. When omitted in Vercel, the endpoint accepts only Vercel's native `vercel-cron/1.0` invocation marker and still enforces the snapshot-time window.
-- `MARKETPLACE_QSTASH_SECRET` for the primary two-minute QStash marketplace schedule
+- `CRON_SECRET` remains an optional legacy secret/fallback for Marketplace authorization. Standalone Earnings snapshots are retired; do not configure or resume their schedules.
+- `MARKETPLACE_QSTASH_SECRET` for the primary four-minute QStash marketplace schedule
 - `MARKETPLACE_SCAN_SECRET` for the GitHub Actions marketplace fallback (falls back to `CRON_SECRET`)
 - One optional marketplace delivery channel: private Discord DMs with `MARKETPLACE_DISCORD_BOT_TOKEN`; a Discord channel webhook with `MARKETPLACE_DISCORD_WEBHOOK_URL`; or Telegram with `MARKETPLACE_TELEGRAM_BOT_TOKEN` plus `MARKETPLACE_TELEGRAM_CHAT_ID`. Each signed-in marketplace account can save its own Discord User ID. `MARKETPLACE_DISCORD_USER_ID` remains a legacy single-user fallback only until account routing is enabled.
 - `VITE_REAL_IMPORT_ENABLED` for the corresponding browser UI switch
@@ -102,11 +106,13 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 
 `REAL_AUTH_INFO`, `REAL_SESSION_TOKEN`, and `REAL_DEVICE_UUID` are live credentials. Keep them in local or Vercel environment settings only.
 
-The Earnings page reconstructs daily totals from Real's public active-pass, booster, and box-score data. The complete linked-account list is synchronized to server storage and refreshed every morning before Real's reset. DST-aware Vercel cron jobs attempt snapshots at 4:30, 5:00, and 5:30 AM Eastern, followed by verification and recovery attempts through the 6:00 AM hour. Because Hobby cron delivery can be delayed by nearly an hour, `.github/workflows/earnings-snapshot.yml` independently retries the endpoint at :35 and :55 throughout the EDT/EST recovery range. Every configured route accepts runs throughout the full 4:00–6:59 AM Eastern window, and successful account/day snapshots are never overwritten. A manual workflow dispatch performs an authenticated end-to-end test against one linked account without saving an early snapshot. Each invocation uses up to four minutes of its five-minute function allowance so the complete linked-account list can finish in one run. Alternating retries process accounts from the opposite end of the linked-account list, preventing later accounts from repeatedly being starved if Real rate-limits an earlier run. Coverage is rechecked against saved KV snapshots before every response so deferred accounts already saved by another invocation are not falsely reported missing. If Real continues returning `429` after its request-level backoff, the job makes one bounded account-level retry, stops before the serverless deadline, and defers all remaining unsaved accounts to the next invocation.
+The standalone Earnings page was removed on October 31. Its manual/tracking APIs return HTTP 410 and snapshot endpoints acknowledge stale scheduled requests without provider or storage work, including forced requests. Earnings Vercel schedules are removed and the GitHub fallback job is disabled in source. Saved history is preserved; collection-import earnings backfill and all OTD/optimization calculations remain supported. The private earnings-named access helpers are retained because Marketplace shares them. These local edits do not change old deployments or remote schedules until a separately approved rollout.
 
 Marketplace alerts use Real's authenticated listing feed and the shared catalog for sport-aware player selection. Rules, Discord recipients, deduplicated matches, pending deliveries, and the last scan result are stored in KV per tracker account. The page can scan on demand and refreshes its saved feed once per minute without making another Real request. Discord DM delivery opens a private channel with that account's saved Discord user and sends from the installed bot; the bot token remains server-side and never enters the browser bundle. Once any account saves a Discord recipient, accounts without one keep their matches pending rather than falling back to another user's DMs.
 
-Unattended marketplace monitoring is triggered by a QStash schedule every two minutes, even when the site is closed. QStash forwards `MARKETPLACE_QSTASH_SECRET` as an `Authorization: Bearer` header to `/api/cron/marketplace-alerts`. The endpoint scans every account that has at least one saved marketplace rule, loads that account's saved Discord recipient, deduplicates matches, and retries undelivered Discord or Telegram alerts on the next run. `.github/workflows/marketplace-monitor.yml` remains as an independent ten-minute fallback using `MARKETPLACE_SCAN_SECRET`; it also supports manual dispatch for verification. Do not add the rapid schedule to `vercel.json` on a Vercel Hobby project because Hobby cron frequency is too limited for auction monitoring.
+Marketplace monitoring is configured in code for a four-minute interval, even when the page is closed. On a separately approved rollout, set the primary QStash schedule to `*/4 * * * *`, with delivery retries disabled, forwarding `MARKETPLACE_QSTASH_SECRET` as an `Authorization: Bearer` header to `/api/cron/marketplace-alerts`. The server enforces one scan start per four minutes across scheduled/manual requests, including arrivals from an old two-minute trigger. It loads each account's rules and Discord recipient and deduplicates matches. HTTP 500–599 or an uncertain notification outcome is blocked, not retried on the next run. Non-terminal undelivered alerts remain pending. The repository workflow retains its independent ten-minute fallback using `MARKETPLACE_SCAN_SECRET`; neither it nor this local configuration change is permission to resume the paused live site. Remote scheduler settings have not been changed by these edits.
+
+Every release must use `npm run build`, whose `prebuild` runs the request-boundary audit and offline 5xx safety regressions. The rule is site-wide: shared browser transport, guarded server outbound HTTP, and no-retry KV access. No deployment, live probe or known-failure reproduction is authorized by a green build. See `AGENTS.md` and the request-safety reports for shutdown state and control-plane limitations.
 
 `Serial number` and `Bulk rating` are separate rule choices and feeds: serial-number rules request `listingType=userpassserial`, while bulk-rating rules request `listingType=userpassfull`. An `All` rule scans both pass feeds plus the card feed.
 
@@ -115,3 +121,15 @@ Unattended marketplace monitoring is triggered by a QStash schedule every two mi
 Tracker data can contain usernames, owned passes, notes, and earnings history. Synced accounts store this data in the configured server-side store; JSON exports contain it in plain text. Treat exports and infrastructure credentials as sensitive.
 
 Operational imports may also store minimal ownership metadata and catalog earnings when their backing services are configured. The project is not affiliated with Real Sports, Real, or Meowbot.
+
+Successful raw ownership scans can be reused for 30 seconds within the same provider-session scope. Packs shows the original scan time and offers forced refresh. Collection replacement requests fresh ownership by default. Failed scans are never reused as empty ownership.
+
+Signed-in browser caches are account-specific. Unassigned legacy browser data is retained but never automatically assigned to a signed-in account. An offline bootstrap or save conflict pauses cloud writes; export a Dashboard backup before explicitly reloading the server copy.
+
+### Catalog range migration (not applied)
+
+`supabase/migrations/20261030_catalog_range_totals.sql` is a restricted service-role-only aggregate draft. Keep `CATALOG_RANGE_RPC_ENABLED` unset until authorized SQL execution, permission tests, representative EXPLAIN plans, Unicode/name-order parity and JSON result parity are verified. The fallback reports partial results when its 80,000-row scan cap is reached. No production database DDL is authorized by the performance plan.
+
+### Legacy sync deprecation
+
+`GET /api/profile/sync` remains only for unknown external compatibility callers. Its PIN query parameter can appear in history/proxy logs even with `no-store`; this risk is not fixed by caching headers. Current browser code uses session-based `/api/account/data` instead. Do not build new callers of query-credential sync. Remove it only after external usage and a migration window are confirmed. The old PUT remains compatible during that window.

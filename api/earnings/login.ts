@@ -1,10 +1,10 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   buildEarningsCookieHeader,
   createEarningsSessionToken,
   earningsPasswordMatches,
-} from '../../lib/earningsAuth'
+} from '../../lib/earningsAuth.js'
 
 export const config = { runtime: 'edge' }
 

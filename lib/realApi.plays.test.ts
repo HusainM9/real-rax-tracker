@@ -129,7 +129,7 @@ describe('listPlayerPlaysForPackAverage', () => {
     expect(urls.some((url) => url.includes('/sport/nfl/plays/recent'))).toBe(true)
   })
 
-  it('falls back to /plays/recent when top errors', async () => {
+  it('stops without /plays/recent fallback when top returns 500', async () => {
     const urls: string[] = []
     globalThis.fetch = vi.fn(async (input) => {
       const url = String(input)
@@ -143,12 +143,11 @@ describe('listPlayerPlaysForPackAverage', () => {
       )
     }) as typeof fetch
 
-    const result = await listPlayerPlaysForPackAverage(
+    await expect(listPlayerPlaysForPackAverage(
       { entityId: 20001874, sport: 'nba', season: 2025, limit: 25 },
       { config: testConfig() },
-    )
-    expect(result.source).toBe('recent')
-    expect(result.plays[0]?.value).toBe('4.2')
+    )).rejects.toMatchObject({ status: 500, retryable: false })
+    expect(urls).toHaveLength(1)
   })
 })
 

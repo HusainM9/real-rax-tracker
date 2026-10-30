@@ -289,13 +289,13 @@ export default function SellPage() {
         : `Showing first ${Math.min(sortedCards.length, CARD_SEARCH_LIMIT)} of ${sortedCards.length} — search to narrow`
 
   return (
-    <div className="page-stack">
+    <div className="page-stack refresh-page sell-refresh">
       <section className="hero-card">
         <div>
           <p className="eyebrow">Sell planning</p>
           <h2>If you sell this pass</h2>
           <p>
-            Lost vs freed claimable RAX if you sell. Removing archives earnings under Entry → Saved
+            Lost vs freed claimable RAX if you sell. Removing archives earnings under import tools → Saved
             profiles.
           </p>
         </div>

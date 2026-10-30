@@ -1,7 +1,7 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { changeTrackerProfilePin, profileSyncConfigured } from '../../lib/trackerProfileStore'
+import { requireAppSession } from '../admin/_helpers.js'
+import { changeTrackerProfilePin, profileSyncConfigured } from '../../lib/trackerProfileStore.js'
 
 export const config = {
   runtime: 'edge',

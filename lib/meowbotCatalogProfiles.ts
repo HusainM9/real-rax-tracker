@@ -1,8 +1,8 @@
 import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
-} from './meowbotCatalogStore'
-import { filterDailyRowsToPassSeason } from './seasonClaimWindow'
+} from './meowbotCatalogStore.js'
+import { filterDailyRowsToPassSeason } from './seasonClaimWindow.js'
 
 type CachedProfileInput = {
   entityId?: unknown

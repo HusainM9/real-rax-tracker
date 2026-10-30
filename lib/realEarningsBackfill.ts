@@ -1,5 +1,6 @@
-import { RealApiError, type RealPassEarnings, type RealPassEarningsQuery } from './realApi'
-import { parseRealAppToolsBaseDailyRows } from './realAppToolsPaste'
+import { RealApiError, type RealPassEarnings, type RealPassEarningsQuery } from './realApi.js'
+import { parseRealAppToolsBaseDailyRows } from './realAppToolsPaste.js'
+import { isTerminalRequestFailure, failureStatus, isPendingRequest } from './httpFailurePolicy.js'
 import {
   REAL_EARNINGS_PASSES_MAX_REQUEST,
   resolveBaseRaxTotal,
@@ -8,9 +9,9 @@ import {
   type EarningsBackfillPass,
   type EarningsBackfillPassResult,
   type EarningsBackfillStats,
-} from './realEarningsShared'
-import { realRequestSportSlugs } from './realPassScan'
-import { runWithConcurrency } from './runWithConcurrency'
+} from './realEarningsShared.js'
+import { realRequestSportSlugs } from './realPassScan.js'
+import { runWithConcurrency } from './runWithConcurrency.js'
 import {
   canonicalCatalogPassMetadata,
   catalogExternalKeyCandidates,
@@ -19,7 +20,7 @@ import {
   resolveCatalogPassSeasonYear,
   resolvePassSeasonDateWindow,
   sportSkipsClaimDaySeasonFilter,
-} from './seasonClaimWindow'
+} from './seasonClaimWindow.js'
 import {
   fetchCatalogImportProfilesBulk,
   meowbotCatalogConfigured,
@@ -27,7 +28,7 @@ import {
   upsertCatalogPasses,
   type CatalogImportProfile,
   type CatalogPassInput,
-} from './meowbotCatalogStore'
+} from './meowbotCatalogStore.js'
 
 export type EarningsBackfillResult = {
   passes: EarningsBackfillPassResult[]
@@ -48,6 +49,8 @@ export type EarningsBackfillDeps = {
   concurrency?: number
   /** Cached passes older than this are refetched so newly claimed days appear. */
   cacheTtlMs?: number
+  /** Resolve fresh shared rows only; never contact Real or write the catalog. */
+  cacheOnly?: boolean
   now?: () => number
 }
 
@@ -323,9 +326,32 @@ export async function backfillRealPassEarnings(
   const fetchedRows: Array<EarningsBackfillDailyRow & { externalKey: string }> = []
   const slugCache = new Map<string, string>()
   let authError: unknown = null
+  let terminalError: unknown = null
+
+  if (deps.cacheOnly) {
+    return {
+      passes: results,
+      failures: toFetch.map((pass) => ({
+        externalKey: pass.externalKey,
+        name: pass.name,
+        kind: 'cache_miss',
+        message: 'Daily earnings need refreshing.',
+      })),
+      stats: {
+        requested: passes.length,
+        cacheHits,
+        fetched: 0,
+        upstreamRequests: 0,
+        passesWithoutEarnings: results.filter((pass) => pass.rows.length === 0).length,
+        rowsWritten: 0,
+        passesWritten: 0,
+        cacheConfigured,
+      },
+    }
+  }
 
   await runWithConcurrency(toFetch, deps.concurrency ?? DEFAULT_CONCURRENCY, async (pass) => {
-    if (authError) return
+    if (authError || terminalError) return
 
     const candidates = lookupKeys.get(pass.externalKey) ?? []
     const candidateProfiles = candidates
@@ -372,6 +398,7 @@ export async function backfillRealPassEarnings(
         newRowCount: scoped.rows.filter((row) => !cachedDays.has(row.claimDay)).length,
       })
     } catch (error) {
+      if (isTerminalRequestFailure(error)) terminalError = error
       if (error instanceof RealApiError && error.kind === 'auth') {
         authError = error
         return
@@ -385,11 +412,21 @@ export async function backfillRealPassEarnings(
         name: pass.name,
         message: error instanceof Error ? error.message : 'Could not fetch daily earnings.',
         kind: errorKind(error),
+        ...(isTerminalRequestFailure(error) ? { upstreamStatus: failureStatus(error), retryable: false, pending: isPendingRequest(error) } : {}),
       })
     }
   })
 
   if (authError) throw authError
+
+  if (terminalError) {
+    const resolvedKeys = new Set([...results, ...failures].map((pass) => pass.externalKey))
+    for (const pass of toFetch) if (!resolvedKeys.has(pass.externalKey)) failures.push({
+      externalKey: pass.externalKey, name: pass.name, kind: 'request_blocked',
+      message: 'Not requested: this import stopped after a failed or uncertain upstream request.',
+      upstreamStatus: failureStatus(terminalError), retryable: false, pending: isPendingRequest(terminalError),
+    })
+  }
 
   let passesWritten = 0
   let rowsWritten = 0
@@ -407,7 +444,7 @@ export async function backfillRealPassEarnings(
     stats: {
       requested: passes.length,
       cacheHits,
-      fetched: toFetch.length - failures.length,
+      fetched: results.filter((result) => result.source === 'real').length,
       upstreamRequests,
       passesWithoutEarnings: results.filter((result) => result.rows.length === 0).length,
       rowsWritten,

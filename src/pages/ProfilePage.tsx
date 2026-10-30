@@ -48,10 +48,6 @@ export default function ProfilePage() {
               <span>Marketplace alerts</span>
               <strong>Open marketplace →</strong>
             </Link>
-            <Link className="profile-earnings-cta" to="/earnings">
-              <span>Daily RAX</span>
-              <strong>View earnings →</strong>
-            </Link>
           </div>
         </div>
         <div className="profile-hero-stats">

@@ -73,6 +73,7 @@ export default function OtdPage() {
 
   const [results, setResults] = useState<CatalogSearchResult[]>([])
   const [total, setTotal] = useState(0)
+  const [incomplete, setIncomplete] = useState(false)
   const [storageConfigured, setStorageConfigured] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -193,6 +194,7 @@ export default function OtdPage() {
         if (controller.signal.aborted) return
         setResults(result.results)
         setTotal(result.total)
+        setIncomplete(result.incomplete === true)
         setStorageConfigured(result.storageConfigured)
       } catch (loadError) {
         if (controller.signal.aborted) return
@@ -290,7 +292,7 @@ export default function OtdPage() {
   const openGroupedDays = openProfile ? groupRowsByMonth(openProfile.rows) : []
 
   return (
-    <div className="page-stack">
+    <div className="page-stack refresh-page otd-refresh">
       <CollapsiblePanel
         title="OTD catalog"
         description="Browse the full pass catalog. Open a calendar to see every claimable date for that pass."
@@ -410,6 +412,10 @@ export default function OtdPage() {
           <p className="import-hint">
             Showing passes claimable in {MONTH_OPTIONS.find((m) => m.value === filterMonth)?.label}.
           </p>
+        ) : null}
+
+        {incomplete && !loading && !error ? (
+          <p className="error-text" role="status">This range exceeded the scan limit. Totals and ranking are partial; narrow the date range or sport filters for complete results.</p>
         ) : null}
 
         {!storageConfigured ? (

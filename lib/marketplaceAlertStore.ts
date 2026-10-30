@@ -1,4 +1,5 @@
-import { kv } from '@vercel/kv'
+import { kv } from './noRetryKv.js'
+import { MARKETPLACE_SCAN_INTERVAL_SECONDS } from './marketplaceAvailability.js'
 import { adminStorageConfigured } from './adminEventStore.js'
 import {
   parseMarketplaceAlertRule,
@@ -25,7 +26,6 @@ const MAX_SCAN_LOG_ENTRIES = 40
 const SEEN_TTL_SECONDS = 14 * 24 * 60 * 60
 const IGNORED_LISTING_TTL_SECONDS = 30 * 24 * 60 * 60
 const SCAN_LEASE_TTL_SECONDS = 70
-const SCAN_COOLDOWN_TTL_SECONDS = 75
 
 export type MarketplaceScanStatus = {
   startedAt: string
@@ -118,7 +118,7 @@ export function marketplaceAlertStorageConfigured(): boolean {
 /**
  * Prevent overlapping scheduler deliveries from multiplying Real API traffic.
  * QStash retries failed deliveries, so one slow scan can otherwise create a
- * thundering herd of identical scans every two minutes.
+ * thundering herd of scans. The start gate also covers legacy two-minute triggers.
  */
 export async function acquireMarketplaceScanLease(): Promise<string | null> {
   if (!marketplaceAlertStorageConfigured()) return null
@@ -128,17 +128,22 @@ export async function acquireMarketplaceScanLease(): Promise<string | null> {
     ex: SCAN_LEASE_TTL_SECONDS,
     nx: true,
   })
-  return claimed ? token : null
+  if (!claimed) return null
+  // NX is required even after the earlier read: concurrent invocations can race it.
+  const admitted = await kv.set(SCAN_COOLDOWN_KEY, token, {
+    ex: MARKETPLACE_SCAN_INTERVAL_SECONDS, nx: true,
+  })
+  if (!admitted) {
+    await releaseMarketplaceScanLease(token)
+    return null
+  }
+  return token
 }
 
 export async function releaseMarketplaceScanLease(token: string): Promise<void> {
   if (!marketplaceAlertStorageConfigured()) return
-  const current = await kv.get<string>(SCAN_LEASE_KEY)
-  if (current !== token) return
-  // A short post-run cooldown acknowledges delayed QStash retries without doing
-  // the same exhaustive scan again. It expires before the next two-minute tick.
-  await kv.set(SCAN_COOLDOWN_KEY, '1', { ex: SCAN_COOLDOWN_TTL_SECONDS })
-  await kv.del(SCAN_LEASE_KEY)
+  // Do not extend the start gate at completion: that would skip the four-minute tick.
+  await kv.eval(`if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`, [SCAN_LEASE_KEY], [token])
 }
 
 export async function listMarketplaceAlertOwners(): Promise<string[]> {

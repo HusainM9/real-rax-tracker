@@ -1,10 +1,15 @@
-import { dedupeCatalogPassSummaries } from './catalogPassIdentity'
+import { dedupeCatalogPassSummaries } from './catalogPassIdentity.js'
+import { guardedUpstreamFetch } from './guardedUpstreamFetch.js'
+import { isHttp5xx } from './httpFailurePolicy.js'
+import { BULK_PROFILE_KEYS_MAX_REQUEST } from './catalogShared.js'
+export { BULK_PROFILE_KEYS_MAX_REQUEST } from './catalogShared.js'
+import { runWithConcurrency } from './runWithConcurrency.js'
 import {
   canonicalCatalogPassMetadata,
   claimDayInPassSeason,
   filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
-} from './seasonClaimWindow'
+} from './seasonClaimWindow.js'
 
 export type CatalogPassKind = 'player' | 'team'
 
@@ -79,7 +84,6 @@ type SupabaseDailyRow = {
 const MAX_SEARCH_LIMIT = 50
 const MAX_CANDIDATES_PAGE = 200
 /** Max passes per HTTP bulk request — one pass query + one daily query per request. */
-export const BULK_PROFILE_KEYS_MAX_REQUEST = 80
 const PASS_UPSERT_BATCH_SIZE = 250
 const DAILY_UPSERT_BATCH_SIZE = 200
 const UPSERT_BATCH_PAUSE_MS = 300
@@ -91,6 +95,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function formatSupabaseError(status: number, detail: string): string {
+  if (isHttp5xx(status)) return `Supabase catalog request failed (${status}). Stopped for safety; do not retry this operation.`
   const trimmed = detail.trim()
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
     return `Supabase catalog request failed (${status}). The database gateway is temporarily unavailable — wait a minute and retry with a smaller import batch.`
@@ -107,20 +112,8 @@ function formatSupabaseError(status: number, detail: string): string {
   return `Supabase catalog request failed (${status}). ${trimmed}`.trim()
 }
 
-function isRetryableSupabaseError(status: number, detail: string): boolean {
-  if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) {
-    return true
-  }
-  if (
-    status === 500 &&
-    (detail.includes('57014') ||
-      detail.includes('statement timeout') ||
-      detail.includes('40P01') ||
-      detail.includes('deadlock'))
-  ) {
-    return true
-  }
-  return false
+function isRetryableSupabaseError(status: number): boolean {
+  return status === 408 || status === 429
 }
 
 let catalogWriteTail: Promise<unknown> = Promise.resolve()
@@ -204,9 +197,16 @@ function supabaseHeaders(prefer?: string): HeadersInit {
   }
 }
 
+class SupabaseCatalogError extends Error {
+  readonly status: number
+  readonly code?: string
+  constructor(message: string, status: number, code?: string) { super(message); this.status = status; this.code = code }
+}
+
 async function supabaseFetch<T>(
   path: string,
   init: RequestInit & { params?: URLSearchParams } = {},
+  onResponse?: (response: Response) => void,
 ): Promise<T> {
   if (!meowbotCatalogConfigured()) {
     throw new Error('Meowbot catalog storage is not configured.')
@@ -223,8 +223,9 @@ async function supabaseFetch<T>(
 
   let lastError = 'Supabase catalog request failed.'
   for (let attempt = 0; attempt <= SUPABASE_MAX_RETRIES; attempt += 1) {
-    const response = await fetch(url, requestInit)
+    const response = await guardedUpstreamFetch('supabase-catalog', url, requestInit)
     if (response.ok) {
+      onResponse?.(response)
       if (response.status === 204) return undefined as T
       const text = await response.text()
       if (!text) return undefined as T
@@ -233,8 +234,10 @@ async function supabaseFetch<T>(
 
     const detail = await response.text().catch(() => '')
     lastError = formatSupabaseError(response.status, detail)
-    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status, detail)) {
-      throw new Error(lastError)
+    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status)) {
+      let code: string | undefined
+      try { code = JSON.parse(detail).code } catch { /* gateway responses need not be JSON */ }
+      throw new SupabaseCatalogError(lastError, response.status, code)
     }
 
     const delayMs = SUPABASE_RETRY_BASE_MS * 2 ** attempt
@@ -472,13 +475,23 @@ const DAILY_FETCH_PAGE_SIZE = 1000
 async function fetchDailyRowsPage(
   filter: URLSearchParams,
   offset: number,
-): Promise<SupabaseDailyRow[]> {
+  withCount = false,
+): Promise<{ rows: SupabaseDailyRow[]; total: number | null }> {
   const params = new URLSearchParams(filter)
   params.set('select', 'external_key,claim_day,base_rax_earned,player_box_score_id')
-  params.set('order', 'claim_day.desc')
+  params.set('order', 'claim_day.desc,external_key.asc')
   params.set('limit', String(DAILY_FETCH_PAGE_SIZE))
   params.set('offset', String(offset))
-  return supabaseFetch<SupabaseDailyRow[]>('meowbot_daily_earnings', { params })
+  let total: number | null = null
+  const rows = await supabaseFetch<SupabaseDailyRow[]>(
+    'meowbot_daily_earnings',
+    { params, ...(withCount ? { headers: supabaseHeaders('count=exact') } : {}) },
+    withCount ? (response) => {
+      const count = response.headers.get('content-range')?.split('/')[1]
+      if (count && /^\d+$/.test(count)) total = Number(count)
+    } : undefined,
+  )
+  return { rows, total }
 }
 
 const DAILY_FETCH_PAGE_CONCURRENCY = 4
@@ -494,7 +507,7 @@ async function fetchExactRowCount(table: string, filter: URLSearchParams): Promi
   let lastError = 'Supabase catalog count failed.'
 
   for (let attempt = 0; attempt <= SUPABASE_MAX_RETRIES; attempt += 1) {
-    const response = await fetch(url, { headers: supabaseHeaders('count=exact') })
+    const response = await guardedUpstreamFetch('supabase-catalog', url, { headers: supabaseHeaders('count=exact') })
     if (response.ok) {
       const range = response.headers.get('content-range') ?? ''
       const total = Number(range.split('/')[1])
@@ -503,7 +516,7 @@ async function fetchExactRowCount(table: string, filter: URLSearchParams): Promi
 
     const detail = await response.text().catch(() => '')
     lastError = formatSupabaseError(response.status, detail)
-    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status, detail)) {
+    if (attempt >= SUPABASE_MAX_RETRIES || !isRetryableSupabaseError(response.status)) {
       throw new Error(lastError)
     }
 
@@ -514,20 +527,22 @@ async function fetchExactRowCount(table: string, filter: URLSearchParams): Promi
 }
 
 async function fetchAllDailyRows(filter: URLSearchParams): Promise<SupabaseDailyRow[]> {
-  const total = await fetchExactRowCount('meowbot_daily_earnings', filter)
-  if (total === 0) return []
+  // The first page supplies both its rows and the exact count in one request.
+  const first = await fetchDailyRowsPage(filter, 0, true)
+  const total = first.total ?? await fetchExactRowCount('meowbot_daily_earnings', filter)
+  if (total === 0) return first.rows
 
   const pageCount = Math.ceil(total / DAILY_FETCH_PAGE_SIZE)
-  const rows: SupabaseDailyRow[] = []
+  const rows: SupabaseDailyRow[] = [...first.rows]
 
-  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += DAILY_FETCH_PAGE_CONCURRENCY) {
+  for (let pageIndex = 1; pageIndex < pageCount; pageIndex += DAILY_FETCH_PAGE_CONCURRENCY) {
     const pages = await Promise.all(
       Array.from({ length: Math.min(DAILY_FETCH_PAGE_CONCURRENCY, pageCount - pageIndex) }, (_, index) =>
         fetchDailyRowsPage(filter, (pageIndex + index) * DAILY_FETCH_PAGE_SIZE),
       ),
     )
     for (const page of pages) {
-      rows.push(...page)
+      rows.push(...page.rows)
     }
   }
 
@@ -886,7 +901,7 @@ async function browseCatalogPassesByDateRange(options: {
   endDate: string
   limit: number
   offset: number
-}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean }> {
+}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean; incomplete?: boolean }> {
   const daySpan = inclusiveDaySpan(options.startDate, options.endDate)
   if (daySpan < 1) {
     return { results: [], total: 0, storageConfigured: true }
@@ -895,6 +910,30 @@ async function browseCatalogPassesByDateRange(options: {
     throw new Error(
       `Date range can be at most ${MAX_DATE_RANGE_DAYS} days. Narrow the range and try again.`,
     )
+  }
+
+  // Enable only after migration, authorized SQL parity, and EXPLAIN checks.
+  if (process.env.CATALOG_RANGE_RPC_ENABLED === '1') {
+    try {
+      const aggregate = await supabaseFetch<{
+        rows: Array<SupabasePassRow & { range_base_rax: number; row_count: number }>
+        total: number
+      }>('rpc/catalog_range_totals_v1', { method: 'POST', body: JSON.stringify({
+        p_start_date: options.startDate, p_end_date: options.endDate,
+        p_sports: options.sports, p_season_years: options.seasonYears,
+        p_pass_kind: options.passKind ?? null, p_query: options.query,
+        p_limit: options.limit, p_offset: options.offset,
+      }) })
+      if (!aggregate || !Array.isArray(aggregate.rows) || !Number.isSafeInteger(aggregate.total) || aggregate.total < 0) {
+        throw new Error('Invalid catalog range aggregate response.')
+      }
+      return {
+        results: aggregate.rows.map((row) => ({ ...fromPassRow(row), rangeBaseRax: Number(row.range_base_rax), rowCount: Number(row.row_count) })),
+        total: aggregate.total, storageConfigured: true,
+      }
+    } catch (error) {
+      if (!(error instanceof SupabaseCatalogError && error.status === 404 && error.code === 'PGRST202')) throw error
+    }
   }
 
   const passSelect =
@@ -913,6 +952,7 @@ async function browseCatalogPassesByDateRange(options: {
   })
 
   const rangeTotals = new Map<string, { rax: number; pass: SupabasePassRow; days: number }>()
+  let incomplete = false
 
   for (let page = 0; page < MAX_RANGE_DAILY_PAGES; page += 1) {
     const pageParams = new URLSearchParams(params)
@@ -922,6 +962,7 @@ async function browseCatalogPassesByDateRange(options: {
       params: pageParams,
     })
     if (rows.length === 0) break
+    incomplete = page === MAX_RANGE_DAILY_PAGES - 1 && rows.length === RANGE_DAILY_PAGE_SIZE
 
     for (const row of rows) {
       const pass = unwrapPassEmbed(row.meowbot_passes)
@@ -957,7 +998,7 @@ async function browseCatalogPassesByDateRange(options: {
     }
   })
 
-  return { results, total: ranked.length, storageConfigured: true }
+  return { results, total: ranked.length, storageConfigured: true, incomplete }
 }
 
 export async function browseCatalogPasses(options: {
@@ -972,7 +1013,7 @@ export async function browseCatalogPasses(options: {
   endDate?: string
   limit?: number
   offset?: number
-}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean }> {
+}): Promise<{ results: CatalogSearchResult[]; total: number; storageConfigured: boolean; incomplete?: boolean }> {
   if (!meowbotCatalogConfigured()) {
     return { results: [], total: 0, storageConfigured: false }
   }
@@ -1156,6 +1197,32 @@ export async function fetchCatalogPassAvatars(
   }
 
   return { passes, storageConfigured: true }
+}
+
+/** Faces must not reset earnings totals or source freshness through a full-row upsert. */
+export async function updateCatalogPassAvatars(
+  updates: Array<{ externalKey: string; avatar: string }>,
+): Promise<void> {
+  if (!meowbotCatalogConfigured() || updates.length === 0) return
+  await runWithConcurrency(updates, 4, async (update) => {
+    await supabaseFetch('meowbot_passes', {
+      method: 'PATCH',
+      params: new URLSearchParams({ external_key: `eq.${update.externalKey}` }),
+      body: JSON.stringify({ avatar: update.avatar }),
+    })
+  })
+}
+
+/** Avatar discovery can race an earnings insert; never overwrite the winner's metadata. */
+export async function insertCatalogPassesIfMissing(passes: CatalogPassInput[]): Promise<void> {
+  if (!meowbotCatalogConfigured() || passes.length === 0) return
+  for (const rows of buildCatalogPassUpsertBatches(passes)) {
+    await supabaseFetch('meowbot_passes', {
+      method: 'POST',
+      headers: supabaseHeaders('resolution=ignore-duplicates'),
+      body: JSON.stringify(rows),
+    })
+  }
 }
 
 /**

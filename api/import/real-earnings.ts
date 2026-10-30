@@ -1,20 +1,22 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression'
+import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression.js'
 import {
   RealApiError,
   getPassEarnings,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
-} from '../../lib/realApi'
+} from '../../lib/realApi.js'
 import {
   backfillRealPassEarnings,
   catalogEarningsBackfillDeps,
   REAL_EARNINGS_PASSES_MAX_REQUEST,
   type EarningsBackfillPass,
-} from '../../lib/realEarningsBackfill'
-import { requireAppSession } from '../admin/_helpers'
+} from '../../lib/realEarningsBackfill.js'
+import { requireAppSession } from '../admin/_helpers.js'
+import { REAL_EARNINGS_CACHE_MAX_REQUEST } from '../../lib/realEarningsShared.js'
 
 export const config = {
   runtime: 'edge',
@@ -23,6 +25,7 @@ export const config = {
 type RealEarningsRequest = {
   passes?: unknown
   forceRefresh?: unknown
+  cacheOnly?: unknown
 }
 
 function parsePass(raw: unknown): EarningsBackfillPass | null {
@@ -50,6 +53,7 @@ function parsePass(raw: unknown): EarningsBackfillPass | null {
 }
 
 function errorResponse(error: unknown): Response {
+  if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
   if (error instanceof RealApiError) {
     switch (error.kind) {
       case 'auth':
@@ -103,10 +107,11 @@ export default async function handler(request: Request): Promise<Response> {
   if (rawPasses.length === 0) {
     return Response.json({ error: 'passes array is required' }, { status: 400 })
   }
-  if (rawPasses.length > REAL_EARNINGS_PASSES_MAX_REQUEST) {
+  const requestLimit = body.cacheOnly === true ? REAL_EARNINGS_CACHE_MAX_REQUEST : REAL_EARNINGS_PASSES_MAX_REQUEST
+  if (rawPasses.length > requestLimit) {
     return Response.json(
       {
-        error: `Too many passes in one request (max ${REAL_EARNINGS_PASSES_MAX_REQUEST}). Hard-refresh the page (Ctrl+Shift+R) if this persists after updating.`,
+        error: `Too many passes in one request (max ${requestLimit}). Hard-refresh the page (Ctrl+Shift+R) if this persists after updating.`,
       },
       { status: 400 },
     )
@@ -124,10 +129,13 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     const result = await backfillRealPassEarnings(
       passes,
-      catalogEarningsBackfillDeps((query) => getPassEarnings(query, context), {
-        concurrency: realConfig.concurrency,
-        cacheTtlMs: body.forceRefresh === true ? 0 : undefined,
-      }),
+      {
+        ...catalogEarningsBackfillDeps((query) => getPassEarnings(query, context), {
+          concurrency: realConfig.concurrency,
+          cacheTtlMs: body.forceRefresh === true ? 0 : undefined,
+        }),
+        cacheOnly: body.cacheOnly === true,
+      },
     )
 
     return Response.json({

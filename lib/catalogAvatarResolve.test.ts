@@ -5,7 +5,8 @@ vi.mock('./meowbotCatalogStore', () => ({
   meowbotCatalogConfigured: () => true,
   fetchCatalogPassAvatars: vi.fn(),
   findCatalogAvatarForEntitySport: vi.fn(),
-  upsertCatalogPasses: vi.fn(async (passes: unknown[]) => passes.length),
+  updateCatalogPassAvatars: vi.fn(),
+  insertCatalogPassesIfMissing: vi.fn(),
 }))
 
 vi.mock('./realApi', async () => {
@@ -20,7 +21,7 @@ vi.mock('./realApi', async () => {
 import {
   fetchCatalogPassAvatars,
   findCatalogAvatarForEntitySport,
-  upsertCatalogPasses,
+  updateCatalogPassAvatars,
 } from './meowbotCatalogStore'
 import { getRealSportEntity } from './realApi'
 import { resolveCatalogAvatars } from './catalogAvatarResolve'
@@ -28,7 +29,6 @@ import { resolveCatalogAvatars } from './catalogAvatarResolve'
 describe('resolveCatalogAvatars', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(upsertCatalogPasses).mockImplementation(async (passes) => passes.length)
   })
   it('returns exact catalog avatars when present', async () => {
     vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({
@@ -56,6 +56,19 @@ describe('resolveCatalogAvatars', () => {
     expect(getRealSportEntity).not.toHaveBeenCalled()
   })
 
+  it('leaves unresolved faces empty without probing Real and accepts a later saved image', async () => {
+    const pass = { externalKey: '98765|2026|NBA', entityId: 98765, passKind: 'player' as const, sport: 'NBA', seasonYear: 2026, seasonLabel: '2026-27', name: 'Missing face' }
+    vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({ storageConfigured: true, passes: [pass] })
+    vi.mocked(findCatalogAvatarForEntitySport).mockResolvedValue(undefined)
+    vi.mocked(getRealSportEntity).mockResolvedValue({ id: 98765 })
+    const realContext = { config: {} } as RealApiContext
+    await resolveCatalogAvatars([pass.externalKey], { realContext })
+    await resolveCatalogAvatars([pass.externalKey], { realContext })
+    expect(getRealSportEntity).not.toHaveBeenCalled()
+    vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({ storageConfigured: true, passes: [{ ...pass, avatar: 'now-available' }] })
+    expect((await resolveCatalogAvatars([pass.externalKey], { realContext })).avatars).toEqual([{ externalKey: pass.externalKey, avatar: 'now-available' }])
+  })
+
   it('fills from a sibling season when the owned key has no avatar', async () => {
     vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({
       storageConfigured: true,
@@ -77,10 +90,10 @@ describe('resolveCatalogAvatars', () => {
     const result = await resolveCatalogAvatars(['4600663|2025|CBB'], { realContext: null })
     expect(result.avatars).toEqual([{ externalKey: '4600663|2025|CBB', avatar: 'sibling-face' }])
     expect(result.filledFromSiblingSeason).toBe(1)
-    expect(upsertCatalogPasses).toHaveBeenCalled()
+    expect(updateCatalogPassAvatars).toHaveBeenCalledWith([{ externalKey: '4600663|2025|CBB', avatar: 'sibling-face' }])
   })
 
-  it('fills college faces from Real player entity when catalog has no avatar', async () => {
+  it('does not fill college faces from Real even when a context is supplied', async () => {
     vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({
       storageConfigured: true,
       passes: [
@@ -122,18 +135,13 @@ describe('resolveCatalogAvatars', () => {
     } as RealApiContext
 
     const result = await resolveCatalogAvatars(['461757|2024|CFB'], { realContext })
-    expect(result.avatars).toEqual([
-      { externalKey: '461757|2024|CFB', avatar: 'b4b3c9b263b4d64b18d9280155027c33' },
-    ])
-    expect(result.filledFromReal).toBe(1)
-    expect(getRealSportEntity).toHaveBeenCalledWith(
-      { entityId: 461757, sport: 'ncaaf', entityType: 'player' },
-      realContext,
-    )
-    expect(upsertCatalogPasses).toHaveBeenCalled()
+    expect(result.avatars).toEqual([])
+    expect(result.filledFromReal).toBe(0)
+    expect(getRealSportEntity).not.toHaveBeenCalled()
+    expect(updateCatalogPassAvatars).not.toHaveBeenCalled()
   })
 
-  it('fills UFC faces from Real team entity even when catalog passKind is player', async () => {
+  it('does not probe UFC teams or players for a missing face', async () => {
     vi.mocked(fetchCatalogPassAvatars).mockResolvedValue({
       storageConfigured: true,
       passes: [
@@ -175,11 +183,8 @@ describe('resolveCatalogAvatars', () => {
     } as RealApiContext
 
     const result = await resolveCatalogAvatars(['1936|2023|UFC'], { realContext })
-    expect(result.avatars).toEqual([{ externalKey: '1936|2023|UFC', avatar: 'd5985082bc' }])
-    expect(result.filledFromReal).toBe(1)
-    expect(getRealSportEntity).toHaveBeenCalledWith(
-      { entityId: 1936, sport: 'ufc', entityType: 'team' },
-      realContext,
-    )
+    expect(result.avatars).toEqual([])
+    expect(result.filledFromReal).toBe(0)
+    expect(getRealSportEntity).not.toHaveBeenCalled()
   })
 })

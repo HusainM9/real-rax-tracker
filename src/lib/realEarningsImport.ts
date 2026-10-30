@@ -1,7 +1,10 @@
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { safeImportFetch } from './safeImportFetch'
+import { failureStatus, isTerminalRequestFailure, isPendingRequest } from '../../lib/httpFailurePolicy'
 import {
   REAL_EARNINGS_BATCH_CONCURRENCY,
   REAL_EARNINGS_PASSES_MAX_REQUEST,
+  REAL_EARNINGS_CACHE_MAX_REQUEST,
   type EarningsBackfillDailyRow,
   type EarningsBackfillFailure,
   type EarningsBackfillPass,
@@ -56,6 +59,8 @@ export type DailyRaxBackfillOptions = {
   batchSize?: number
   concurrency?: number
   forceRefresh?: boolean
+  /** Probe fresh shared history in larger read-only batches before refreshing misses. */
+  cacheFirst?: boolean
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -110,15 +115,16 @@ async function fetchEarningsBatchOnce(
   passes: EarningsBackfillPass[],
   signal?: AbortSignal,
   forceRefresh = false,
+  cacheOnly = false,
 ): Promise<{
   passes: EarningsBackfillPassResult[]
   failures: EarningsBackfillFailure[]
   stats?: EarningsBackfillStats
 }> {
-  const response = await fetch(REAL_EARNINGS_ENDPOINT, {
+  const response = await safeImportFetch(REAL_EARNINGS_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ passes, forceRefresh }),
+    body: JSON.stringify({ passes, forceRefresh, ...(cacheOnly ? { cacheOnly: true } : {}) }),
     signal,
   })
 
@@ -139,7 +145,7 @@ async function fetchEarningsBatchOnce(
 
   if (!response.ok) {
     const message = body?.error || `Daily RAX backfill failed (${response.status}).`
-    if (response.status === 503 || body?.code === 'real_session_expired') {
+    if ([401, 403, 503].includes(response.status) || body?.code === 'real_session_expired') {
       throw new DailyRaxBackfillFatalError(message)
     }
     if (response.status === 429 || body?.code === 'real_rate_limited') {
@@ -225,65 +231,124 @@ export async function fetchDailyRaxRows(
     return { rowsByExternalKey, sourceByExternalKey, failures, stats }
   }
 
+  let completed = 0
+  let remaining = passes
+  if (options.cacheFirst && !options.forceRefresh && passes.length > REAL_EARNINGS_PASSES_MAX_REQUEST) {
+    const cacheBatches = chunkArray(passes, REAL_EARNINGS_CACHE_MAX_REQUEST)
+    let nextCacheBatch = 0
+    let cacheStopped = false
+    const cacheWorker = async () => {
+      while (!cacheStopped && nextCacheBatch < cacheBatches.length) {
+        if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        const batch = cacheBatches[nextCacheBatch++]!
+        try {
+          const cached = await fetchEarningsBatchOnce(batch, options.signal, false, true)
+          for (const pass of cached.passes) {
+            if (pass.source !== 'cache' || rowsByExternalKey.has(pass.externalKey)) continue
+            rowsByExternalKey.set(pass.externalKey, pass.rows)
+            sourceByExternalKey.set(pass.externalKey, 'cache')
+            stats.rowsReturned += pass.rows.length
+            stats.cacheHits += 1
+            completed += 1
+          }
+          if (cached.stats?.cacheConfigured === false) stats.cacheConfigured = false
+          options.onProgress?.({ completed, total: passes.length })
+        } catch (error) {
+          if (
+            isTerminalRequestFailure(error) || error instanceof DailyRaxBackfillFatalError ||
+            (error instanceof DOMException && error.name === 'AbortError')
+          ) {
+            cacheStopped = true
+            throw error
+          }
+          // Older deployments or an unavailable cache fall back to the normal bounded route.
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(2, cacheBatches.length) }, () => cacheWorker()))
+    remaining = passes.filter((pass) => !rowsByExternalKey.has(pass.externalKey))
+  }
+
   const batches = chunkArray(
-    passes,
+    remaining,
     Math.min(options.batchSize ?? REAL_EARNINGS_PASSES_MAX_REQUEST, REAL_EARNINGS_PASSES_MAX_REQUEST),
   )
-  const waveSize = Math.max(1, options.concurrency ?? REAL_EARNINGS_BATCH_CONCURRENCY)
-  let completed = 0
+  const workerCount = Math.min(
+    batches.length,
+    Math.max(1, Math.floor(options.concurrency ?? REAL_EARNINGS_BATCH_CONCURRENCY)),
+  )
+  let nextBatch = 0
+  let stopped = false
+  let terminalError: unknown = null
+  const outcomes: BatchOutcome[] = new Array(batches.length)
 
-  for (let waveStart = 0; waveStart < batches.length; waveStart += waveSize) {
-    if (options.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError')
+  const worker = async () => {
+    while (!stopped && nextBatch < batches.length) {
+      if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const index = nextBatch++
+      const batch = batches[index]!
+      try {
+        outcomes[index] = {
+          batch,
+          result: await fetchEarningsBatch(batch, options.signal, options.forceRefresh === true),
+        }
+        const terminal = outcomes[index]?.result?.failures.find(isTerminalRequestFailure)
+        if (terminal) { stopped = true; terminalError = terminal }
+      } catch (error) {
+        if (isTerminalRequestFailure(error)) {
+          stopped = true
+          terminalError = error
+        }
+        if (
+          error instanceof DailyRaxBackfillFatalError ||
+          (error instanceof DOMException && error.name === 'AbortError')
+        ) {
+          stopped = true
+          throw error
+        }
+        outcomes[index] = { batch, error: error instanceof Error ? error : new Error('Batch failed.') }
+      }
+      completed += batch.length
+      options.onProgress?.({ completed: Math.min(completed, passes.length), total: passes.length })
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+  // Explicitly report unscheduled work; never interpret it as successful empty earnings.
+  if (terminalError) for (let index = 0; index < batches.length; index += 1) {
+    if (!outcomes[index]) outcomes[index] = { batch: batches[index]!, error: terminalError instanceof Error ? terminalError : Object.assign(new Error('Import stopped after an upstream failure.'), terminalError) }
+  }
+
+  // Aggregate in input order even if the requests completed out of order.
+  for (const entry of outcomes) {
+    if (entry.error) {
+      for (const pass of entry.batch) {
+        failures.push({
+          externalKey: pass.externalKey,
+          name: pass.name,
+          message: entry.error.message,
+          kind: entry.error.name === 'DailyRaxBatchRateLimitedError' ? 'rate_limited' : 'batch',
+          ...(isTerminalRequestFailure(entry.error) ? { upstreamStatus: failureStatus(entry.error), retryable: false, pending: isPendingRequest(entry.error) } : {}),
+        })
+      }
+      continue
     }
 
-    const wave = batches.slice(waveStart, waveStart + waveSize)
-    const settled = await Promise.all(
-      wave.map(async (batch): Promise<BatchOutcome> => {
-        try {
-          return {
-            batch,
-            result: await fetchEarningsBatch(batch, options.signal, options.forceRefresh === true),
-          }
-        } catch (error) {
-          if (error instanceof DailyRaxBackfillFatalError) throw error
-          if (error instanceof DOMException && error.name === 'AbortError') throw error
-          return { batch, error: error instanceof Error ? error : new Error('Batch failed.') }
-        }
-      }),
-    )
-
-    for (const entry of settled) {
-      completed += entry.batch.length
-      if (entry.error) {
-        for (const pass of entry.batch) {
-          failures.push({
-            externalKey: pass.externalKey,
-            name: pass.name,
-            message: entry.error.message,
-            kind: entry.error.name === 'DailyRaxBatchRateLimitedError' ? 'rate_limited' : 'batch',
-          })
-        }
-        continue
-      }
-
-      const result = entry.result
-      if (!result) continue
-      for (const passResult of result.passes) {
-        rowsByExternalKey.set(passResult.externalKey, passResult.rows)
-        sourceByExternalKey.set(passResult.externalKey, passResult.source)
-        stats.rowsReturned += passResult.rows.length
-      }
-      failures.push(...result.failures)
-      if (result.stats) {
-        stats.cacheHits += result.stats.cacheHits
-        stats.fetched += result.stats.fetched
-        stats.upstreamRequests += result.stats.upstreamRequests
-        if (!result.stats.cacheConfigured) stats.cacheConfigured = false
-      }
+    const result = entry.result
+    if (!result) continue
+    for (const passResult of result.passes) {
+      rowsByExternalKey.set(passResult.externalKey, passResult.rows)
+      sourceByExternalKey.set(passResult.externalKey, passResult.source)
+      stats.rowsReturned += passResult.rows.length
     }
-
-    options.onProgress?.({ completed: Math.min(completed, passes.length), total: passes.length })
+    failures.push(...result.failures)
+    if (result.stats) {
+      stats.cacheHits += result.stats.cacheHits
+      stats.fetched += result.stats.fetched
+      stats.upstreamRequests += result.stats.upstreamRequests
+      if (!result.stats.cacheConfigured) stats.cacheConfigured = false
+    }
   }
 
   return { rowsByExternalKey, sourceByExternalKey, failures, stats }

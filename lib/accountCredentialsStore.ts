@@ -1,7 +1,7 @@
-import { kv } from '@vercel/kv'
-import { sessionMatchesCredentials } from './accountAuth'
-import { adminStorageConfigured } from './adminEventStore'
-import { normalizeRealUsername } from './importOwnershipTypes'
+import { kv } from './noRetryKv.js'
+import { sessionMatchesCredentials } from './accountAuth.js'
+import { adminStorageConfigured } from './adminEventStore.js'
+import { normalizeRealUsername } from './importOwnershipTypes.js'
 
 const AUTH_PREFIX = 'rax:tracker-auth:'
 const PROFILE_PREFIX = 'rax:tracker-profile:'

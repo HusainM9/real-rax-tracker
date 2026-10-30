@@ -1,4 +1,4 @@
-import { getSigningSecret } from './authCookie'
+import { getSigningSecret } from './authCookie.js'
 
 const COOKIE_NAME = 'rax_login_rl'
 const MAX_ATTEMPTS = 5

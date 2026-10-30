@@ -1,26 +1,26 @@
-import { kv } from '@vercel/kv'
-import { adminStorageConfigured } from './adminEventStore'
+import { kv } from './noRetryKv.js'
+import { adminStorageConfigured } from './adminEventStore.js'
 import {
   deleteProfileAuth,
   getProfileAuth,
   newCredentialsUpdatedAt,
   persistProfileAuth,
-} from './accountCredentialsStore'
+} from './accountCredentialsStore.js'
 import {
   validateAccountPassword,
   validateAccountUsername,
-} from './accountPasswordRules'
+} from './accountPasswordRules.js'
 import {
   decodeStoredProfilePayload,
   encodeStoredProfilePayload,
   encodedProfileByteLength,
-} from './cloudSyncCompression'
+} from './cloudSyncCompression.js'
 import {
   compactTrackerProfileForCloudSync,
   trackerProfileJsonByteLength,
-} from './cloudSyncPayload'
-import { normalizeRealUsername } from './importOwnershipTypes'
-import { hashSyncPassphrase, matchesSyncPassphrase } from './syncPassphrase'
+} from './cloudSyncPayload.js'
+import { normalizeRealUsername } from './importOwnershipTypes.js'
+import { hashSyncPassphrase, matchesSyncPassphrase } from './syncPassphrase.js'
 
 const PROFILE_PREFIX = 'rax:tracker-profile:'
 const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'

@@ -10,6 +10,16 @@ const IDB_NAME = 'real-rax-tracker'
 const IDB_STORE = 'profile'
 const IDB_KEY = 'v1'
 
+export type PersistenceScope = { accountUsername: string }
+
+function storageKeys(scope?: PersistenceScope) {
+  if (!scope) return { local: LEGACY_LOCAL_KEY, idb: IDB_KEY }
+  const username = scope.accountUsername.trim().toLowerCase()
+  if (!username) throw new Error('Account storage requires a username.')
+  const suffix = `:account:${encodeURIComponent(username)}`
+  return { local: LEGACY_LOCAL_KEY + suffix, idb: IDB_KEY + suffix }
+}
+
 export type StoragePersistResult = {
   ok: boolean
   byteSize: number
@@ -22,10 +32,6 @@ export type StoragePersistResult = {
 export type StorageLoadResult = {
   data: RaxTrackerData
   source: 'idb' | 'local' | 'empty'
-}
-
-function estimateBytes(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value)).length
 }
 
 function storageErrorReason(error: unknown): StoragePersistResult['reason'] {
@@ -71,12 +77,12 @@ function openDb(): Promise<IDBDatabase> {
   })
 }
 
-async function readIdbJson(): Promise<string | null> {
+async function readIdbJson(key: string): Promise<string | null> {
   if (!indexedDbAvailable()) return null
   const db = await openDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readonly')
-    const request = tx.objectStore(IDB_STORE).get(IDB_KEY)
+    const request = tx.objectStore(IDB_STORE).get(key)
     request.onsuccess = () => {
       const value = request.result
       resolve(typeof value === 'string' ? value : null)
@@ -85,13 +91,13 @@ async function readIdbJson(): Promise<string | null> {
   })
 }
 
-async function writeIdbJson(json: string): Promise<boolean> {
+async function writeIdbJson(json: string, key: string): Promise<boolean> {
   if (!indexedDbAvailable()) return false
   try {
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, 'readwrite')
-      tx.objectStore(IDB_STORE).put(json, IDB_KEY)
+      tx.objectStore(IDB_STORE).put(json, key)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error ?? new Error('Could not write IndexedDB.'))
     })
@@ -101,19 +107,19 @@ async function writeIdbJson(json: string): Promise<boolean> {
   }
 }
 
-function readLegacyLocalJson(): string | null {
+function readLocalJson(key: string): string | null {
   if (!localStorageAvailable()) return null
   try {
-    return localStorage.getItem(LEGACY_LOCAL_KEY)
+    return localStorage.getItem(key)
   } catch {
     return null
   }
 }
 
-function writeLegacyLocalJson(json: string): boolean {
+function writeLocalJson(json: string, key: string): boolean {
   if (!localStorageAvailable()) return false
   try {
-    localStorage.setItem(LEGACY_LOCAL_KEY, json)
+    localStorage.setItem(key, json)
     return true
   } catch {
     return false
@@ -146,9 +152,10 @@ export function storageWarningMessage(result: StoragePersistResult): string {
   return `Could not save your collection (${sizeLabel}). Export a JSON backup from Dashboard and sign in so your account can keep a copy.`
 }
 
-export async function loadPersistedTrackerData(): Promise<StorageLoadResult> {
+export async function loadPersistedTrackerData(scope?: PersistenceScope): Promise<StorageLoadResult> {
+  const keys = storageKeys(scope)
   try {
-    const idbRaw = await readIdbJson()
+    const idbRaw = await readIdbJson(keys.idb)
     if (idbRaw) {
       return { data: parseStoredJson(idbRaw), source: 'idb' }
     }
@@ -156,37 +163,43 @@ export async function loadPersistedTrackerData(): Promise<StorageLoadResult> {
     // Fall through to legacy localStorage.
   }
 
-  const localRaw = readLegacyLocalJson()
+  const localRaw = readLocalJson(keys.local)
   if (localRaw) {
-    const data = parseStoredJson(localRaw)
-    void persistTrackerData(data)
-    return { data, source: 'local' }
+    try {
+      const data = parseStoredJson(localRaw)
+      void persistTrackerData(data, scope)
+      return { data, source: 'local' }
+    } catch {
+      // Leave the damaged value recoverable; never borrow another account's cache.
+    }
   }
 
   return { data: createEmptyData(), source: 'empty' }
 }
 
-export async function persistTrackerData(data: RaxTrackerData): Promise<StoragePersistResult> {
-  const fullBytes = estimateBytes(data)
+export async function persistTrackerData(data: RaxTrackerData, scope?: PersistenceScope): Promise<StoragePersistResult> {
+  const keys = storageKeys(scope)
+  const fullJson = JSON.stringify(data)
+  const fullBytes = new TextEncoder().encode(fullJson).length
   const compactedPayload = compactTrackerProfileForCloudSync(data)
-  const compactedBytes = estimateBytes(compactedPayload)
+  const compactedJson = JSON.stringify(compactedPayload)
+  const compactedBytes = new TextEncoder().encode(compactedJson).length
   const useCompact = compactedBytes < fullBytes
-  const payload = useCompact ? compactedPayload : data
   const byteSize = useCompact ? compactedBytes : fullBytes
-  const json = JSON.stringify(payload)
+  const json = useCompact ? compactedJson : fullJson
 
   let idbSaved = false
   let localSaved = false
   let reason: StoragePersistResult['reason'] | undefined
 
   try {
-    idbSaved = await writeIdbJson(json)
+    idbSaved = await writeIdbJson(json, keys.idb)
   } catch (error) {
     reason = storageErrorReason(error)
   }
 
   try {
-    localSaved = writeLegacyLocalJson(json)
+    localSaved = writeLocalJson(json, keys.local)
   } catch (error) {
     if (!reason) reason = storageErrorReason(error)
   }

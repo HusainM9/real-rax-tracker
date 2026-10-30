@@ -1,10 +1,10 @@
-import { normalizeRealUsername } from './importOwnershipTypes'
+import { normalizeRealUsername } from './importOwnershipTypes.js'
 import {
   SESSION_MAX_AGE_SECONDS,
   getSigningSecret,
   signPayload,
   toBase64Url,
-} from './authCookie'
+} from './authCookie.js'
 
 const COOKIE_NAME = 'rax_account_session'
 

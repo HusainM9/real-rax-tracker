@@ -9,6 +9,7 @@ export type EarningsHistoryEntry = {
     label: string
     sport: string
     totalEarnings: number
+    avatar?: string
   }>
 }
 
@@ -56,7 +57,16 @@ export function saveEarningsHistoryEntries(entries: EarningsHistoryEntry[]): Ear
   )
   next.push(...entries)
   next.sort((a, b) => a.day.localeCompare(b.day) || a.username.localeCompare(b.username))
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(-1500)))
+  // Browser storage quotas vary. Keep the full merged history in memory for this session,
+  // while retaining as much as the browser can persist for later visits.
+  for (const limit of [6000, 1500, 300]) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next.slice(-limit)))
+      break
+    } catch {
+      // Try a smaller persisted history if storage is full or unavailable.
+    }
+  }
   return next
 }
 
@@ -111,6 +121,27 @@ export type EarningPassRanking = {
   total: number
   best: number
   days: number
+  avatar?: string
+}
+
+/** Filters by calendar dates, inclusive. Preserves the existing chronological order. */
+export function filterEarningsHistory(
+  entries: EarningsHistoryEntry[],
+  start?: string,
+  end?: string,
+): EarningsHistoryEntry[] {
+  return entries.filter((entry) => (!start || entry.day >= start) && (!end || entry.day <= end))
+}
+
+export function weeklyEarningsTotals(entries: EarningsHistoryEntry[]): Array<{ day: string; dailyTotal: number }> {
+  const weeks = new Map<string, number>()
+  for (const entry of entries) {
+    const date = new Date(`${entry.day}T12:00:00Z`)
+    date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+    const key = date.toISOString().slice(0, 10)
+    weeks.set(key, (weeks.get(key) ?? 0) + entry.dailyTotal)
+  }
+  return [...weeks].sort(([a], [b]) => a.localeCompare(b)).map(([day, dailyTotal]) => ({ day, dailyTotal }))
 }
 
 export type EarningSportRanking = {
@@ -178,12 +209,14 @@ export function rankEarningPasses(
         total: 0,
         best: 0,
         days: 0,
+        ...(pass.avatar ? { avatar: pass.avatar } : {}),
       }
       passes.set(key, {
         ...current,
         total: current.total + pass.totalEarnings,
         best: Math.max(current.best, pass.totalEarnings),
         days: current.days + 1,
+        ...(pass.avatar ? { avatar: pass.avatar } : {}),
       })
     }
   }

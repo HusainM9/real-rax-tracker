@@ -1,13 +1,13 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   getAccountCookieName,
   verifyAccountSessionToken,
-} from '../../lib/accountAuth'
-import { getAccountEnvStatus } from '../../lib/accountEnvStatus'
-import { authConfigured, readCookie } from '../../lib/authCookie'
-import { accountSessionIsRevoked } from '../../lib/accountCredentialsStore'
-import { requireAppSession } from '../admin/_helpers'
+} from '../../lib/accountAuth.js'
+import { getAccountEnvStatus } from '../../lib/accountEnvStatus.js'
+import { authConfigured, readCookie } from '../../lib/authCookie.js'
+import { accountSessionIsRevoked } from '../../lib/accountCredentialsStore.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 export const config = {
   runtime: 'edge',

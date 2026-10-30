@@ -1,3 +1,4 @@
+import { safeFetch } from "../lib/safeImportFetch"
 import { useCallback, useEffect, useState } from 'react'
 import CollapsiblePanel from './CollapsiblePanel'
 import {
@@ -172,7 +173,7 @@ export default function AdminAccountTrackers({
     setLoading(true)
     setError('')
     try {
-      const response = await fetch('/api/admin/tracker-profile?list=1', {
+      const response = await safeFetch('/api/admin/tracker-profile?list=1', {
         credentials: 'include',
       })
       const body = (await response.json()) as {
@@ -213,7 +214,7 @@ export default function AdminAccountTrackers({
     }))
 
     try {
-      const response = await fetch(
+      const response = await safeFetch(
         `/api/admin/tracker-profile?username=${encodeURIComponent(username)}&packs=1`,
         { credentials: 'include' },
       )

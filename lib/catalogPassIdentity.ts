@@ -1,6 +1,6 @@
-import type { CatalogPassKind } from './meowbotCatalogStore'
-import { isUfcCatalogSport } from './passKind'
-import { expectedSeasonLabelFromYear } from './seasonClaimWindow'
+import type { CatalogPassKind } from './meowbotCatalogStore.js'
+import { isUfcCatalogSport } from './passKind.js'
+import { expectedSeasonLabelFromYear } from './seasonClaimWindow.js'
 
 export type CatalogPassIdentityFields = {
   passKind: CatalogPassKind

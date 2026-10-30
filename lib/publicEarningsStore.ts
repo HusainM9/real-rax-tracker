@@ -1,4 +1,4 @@
-import { kv } from '@vercel/kv'
+import { kv } from './noRetryKv.js'
 import { adminStorageConfigured } from './adminEventStore.js'
 import { normalizeRealUsernameInput } from './realApi.js'
 import type { PublicDailyEarningsResult } from './publicDailyEarnings.js'
@@ -62,8 +62,12 @@ export async function listPublicEarningsSnapshots(
     const days = (await kv.smembers(snapshotDaysKey(username)))
       .sort((a, b) => b.localeCompare(a))
       .slice(0, Math.max(1, limitPerAccount))
-    const rows = await Promise.all(days.map((day) => readPublicEarningsSnapshot(username, day)))
-    snapshots.push(...rows.filter((row): row is PublicDailyEarningsResult => row !== null))
+    // Bound simultaneous KV requests even when a long history is requested.
+    for (let index = 0; index < days.length; index += 30) {
+      const keys = days.slice(index, index + 30).map((day) => snapshotKey(username, day))
+      const rows = await kv.mget<Array<PublicDailyEarningsResult | null>>(...keys)
+      snapshots.push(...rows.filter((row): row is PublicDailyEarningsResult => row !== null))
+    }
   }
   return snapshots.sort(
     (a, b) => a.day.localeCompare(b.day) || a.username.localeCompare(b.username),

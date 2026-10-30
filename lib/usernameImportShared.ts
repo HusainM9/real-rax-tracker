@@ -2,7 +2,7 @@ import {
   expectedSeasonLabelFromYear,
   normalizeSportForSeasonWindow,
   seasonYearKindForSport,
-} from './seasonClaimWindow'
+} from './seasonClaimWindow.js'
 
 function normalizeMeowbotSport(raw: string): string {
   const sport = raw.trim().toLowerCase()

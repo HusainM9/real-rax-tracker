@@ -1,7 +1,7 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { clearAccountSessionCookieHeader } from '../../lib/accountAuth'
-import { requireAppSession } from '../admin/_helpers'
+import { clearAccountSessionCookieHeader } from '../../lib/accountAuth.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 export const config = {
   runtime: 'edge',

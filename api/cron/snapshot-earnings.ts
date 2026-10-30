@@ -1,4 +1,6 @@
 import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { DAILY_EARNINGS_FEATURE_ENABLED, retiredEarningsResponse } from '../../lib/earningsFeature.js'
+import { isTerminalRequestFailure, failureStatus } from '../../lib/httpFailurePolicy.js'
 
 import {
   currentRealEarningsDay,
@@ -94,7 +96,7 @@ export function isAuthorizedSnapshotRequest(request: Request): boolean {
   if (process.env.NODE_ENV === 'development') return true
   const secret = process.env.CRON_SECRET?.trim()
   if (secret) return request.headers.get('authorization') === `Bearer ${secret}`
-  return request.headers.get('user-agent') === 'vercel-cron/1.0'
+  return false
 }
 
 export function hasSnapshotBearerAuthorization(request: Request): boolean {
@@ -170,6 +172,7 @@ async function handleSnapshot(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return methodNotAllowed()
   }
+  if (!DAILY_EARNINGS_FEATURE_ENABLED) return retiredEarningsResponse(true)
   if (!isAuthorizedSnapshotRequest(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const url = new URL(request.url)
@@ -286,6 +289,12 @@ async function handleSnapshot(request: Request): Promise<Response> {
         break
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown snapshot error.'
+        if (isTerminalRequestFailure(error)) {
+          errors.push({ username, error: `${message}${failureStatus(error) ? ` [upstream ${failureStatus(error)}; no retry]` : ' [no retry]'}` })
+          deferred.push(...usernames.slice(accountIndex + 1))
+          accountIndex = usernames.length
+          break
+        }
         if (!force && snapshotSignal.aborted && !request.signal.aborted) {
           deferred.push(...usernames.slice(accountIndex))
           accountIndex = usernames.length

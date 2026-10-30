@@ -20,6 +20,8 @@ concurrency:
 
 jobs:
   snapshot:
+    # Standalone Earnings removed; no scheduled or manual reconstruction requests.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:

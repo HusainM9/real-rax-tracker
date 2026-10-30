@@ -1,3 +1,4 @@
+import { safeFetch } from "../lib/safeImportFetch"
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdminAccountTrackers from '../components/AdminAccountTrackers'
@@ -6,6 +7,7 @@ import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { ADMIN_EVENT_TYPES, type AdminEvent, type AdminUserSummary } from '../../lib/adminEventTypes'
+import { safeImportFetch } from '../lib/safeImportFetch'
 import {
   fetchCatalogImportProfile,
   type CatalogSearchResult,
@@ -178,8 +180,8 @@ export default function AdminPage() {
       params.set('limit', '200')
 
       const [usersResponse, eventsResponse] = await Promise.all([
-        fetch('/api/admin/users', { credentials: 'include' }),
-        fetch(`/api/admin/events?${params.toString()}`, { credentials: 'include' }),
+        safeFetch('/api/admin/users', { credentials: 'include' }),
+        safeFetch(`/api/admin/events?${params.toString()}`, { credentials: 'include' }),
       ])
 
       if (!usersResponse.ok || !eventsResponse.ok) {
@@ -207,7 +209,7 @@ export default function AdminPage() {
     setOwnershipSnapshotsLoading(true)
     setOwnershipSnapshotsError('')
     try {
-      const response = await fetch('/api/admin/ownership?list=1', { credentials: 'include' })
+      const response = await safeFetch('/api/admin/ownership?list=1', { credentials: 'include' })
       if (!response.ok) {
         throw new Error('Could not load ownership snapshots.')
       }
@@ -242,7 +244,7 @@ export default function AdminPage() {
     }
     setOwnershipLookupStatus('Checking snapshot…')
     try {
-      const response = await fetch(
+      const response = await safeFetch(
         `/api/admin/ownership?username=${encodeURIComponent(username)}`,
         { credentials: 'include' },
       )
@@ -288,7 +290,7 @@ export default function AdminPage() {
     setCloudProfileBusy(true)
     setCloudProfileStatus('Checking account…')
     try {
-      const response = await fetch(
+      const response = await safeFetch(
         `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
         { credentials: 'include' },
       )
@@ -337,7 +339,7 @@ export default function AdminPage() {
     setCloudProfileBusy(true)
     setCloudProfileStatus('Resetting password…')
     try {
-      const response = await fetch('/api/admin/tracker-profile', {
+      const response = await safeFetch('/api/admin/tracker-profile', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -376,7 +378,7 @@ export default function AdminPage() {
     setCloudProfileBusy(true)
     setCloudProfileStatus('Deleting account…')
     try {
-      const response = await fetch(
+      const response = await safeFetch(
         `/api/admin/tracker-profile?username=${encodeURIComponent(username)}`,
         { method: 'DELETE', credentials: 'include' },
       )
@@ -409,7 +411,7 @@ export default function AdminPage() {
     setCloudProfileBusy(true)
     setCloudProfileStatus('Deleting all accounts…')
     try {
-      const response = await fetch('/api/admin/tracker-profile?all=1', {
+      const response = await safeFetch('/api/admin/tracker-profile?all=1', {
         method: 'DELETE',
         credentials: 'include',
       })
@@ -483,7 +485,7 @@ export default function AdminPage() {
     setManualUpsertBusy(true)
     setManualUpsertStatus('Saving catalog override to Supabase…')
     try {
-      const response = await fetch('/api/admin/catalog-import', {
+      const response = await safeImportFetch('/api/admin/catalog-import', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -900,7 +902,7 @@ export default function AdminPage() {
 
         let response: Response
         try {
-          response = await fetch('/api/admin/shop-earnings-crawl', {
+          response = await safeImportFetch('/api/admin/shop-earnings-crawl', {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },

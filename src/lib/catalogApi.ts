@@ -1,5 +1,6 @@
 import { dedupeCatalogPassSummaries } from '../../lib/catalogPassIdentity'
-import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
+import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/catalogShared'
+import { safeImportFetch } from './safeImportFetch'
 import { catalogCandidatePassKindsForSport } from '../../lib/passKind'
 import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from './realMedia'
 import { readResponseJson } from './readResponseJson'
@@ -59,7 +60,7 @@ async function fetchCatalogImportProfilesBulkBatch(
   batchKeys: string[],
   signal?: AbortSignal,
 ): Promise<{ profiles: CatalogImportProfile[]; storageConfigured: boolean }> {
-  const response = await fetch('/api/catalog/candidates-bulk', {
+  const response = await safeImportFetch('/api/catalog/candidates-bulk', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ externalKeys: batchKeys }),
@@ -88,7 +89,7 @@ export async function searchCatalog(query: string, signal?: AbortSignal): Promis
   storageConfigured: boolean
 }> {
   const params = new URLSearchParams({ q: query, limit: '24' })
-  const response = await fetch(`/api/catalog/search?${params}`, { signal })
+  const response = await safeImportFetch(`/api/catalog/search?${params}`, { signal })
   const data = await readResponseJson<{
     results?: CatalogSearchResult[]
     storageConfigured?: boolean
@@ -113,7 +114,7 @@ export async function fetchCatalogImportProfile(
   storageConfigured: boolean
 }> {
   const params = new URLSearchParams({ externalKey })
-  const response = await fetch(`/api/catalog/import?${params}`, { signal })
+  const response = await safeImportFetch(`/api/catalog/import?${params}`, { signal })
   const data = await readResponseJson<{
     profile?: CatalogImportProfile | null
     storageConfigured?: boolean
@@ -153,7 +154,7 @@ async function fetchCatalogPassSummariesForKind(
     params.set('limit', String(options.limit))
   }
 
-  const response = await fetch(`/api/catalog/candidates?${params}`, { signal })
+  const response = await safeImportFetch(`/api/catalog/candidates?${params}`, { signal })
   const data = await readResponseJson<{
     results?: CatalogSearchResult[]
     storageConfigured?: boolean
@@ -269,7 +270,7 @@ async function fetchCatalogAvatarsBatch(
   avatars: CatalogAvatarResolveItem[]
   storageConfigured: boolean
 }> {
-  const response = await fetch('/api/catalog/avatars', {
+  const response = await safeImportFetch('/api/catalog/avatars', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ externalKeys: batchKeys }),
@@ -340,7 +341,7 @@ export async function fetchCatalogAvatars(
 }
 
 /**
- * Fill missing `avatar` on catalog profiles/search rows (sibling seasons + Real entity fill).
+ * Fill missing `avatar` on catalog profiles/search rows from saved sibling-season images only.
  * Same resolve path Cards/Plan use via `fetchCatalogAvatars`. Non-abort errors are ignored.
  */
 export async function enrichCatalogProfilesWithAvatars<
@@ -383,7 +384,7 @@ export async function fetchCatalogSeasonYears(
         sport: options.sport,
         passKind,
       })
-      const response = await fetch(`/api/catalog/season-years?${params}`, { signal })
+      const response = await safeImportFetch(`/api/catalog/season-years?${params}`, { signal })
       const data = await readResponseJson<{
         seasonYears?: CatalogSeasonYearOption[]
         storageConfigured?: boolean
@@ -436,6 +437,7 @@ export async function browseOtdPasses(
   results: CatalogSearchResult[]
   total: number
   storageConfigured: boolean
+  incomplete?: boolean
 }> {
   const params = new URLSearchParams()
   if (options.query?.trim()) params.set('q', options.query.trim())
@@ -455,10 +457,11 @@ export async function browseOtdPasses(
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   if (options.offset !== undefined) params.set('offset', String(options.offset))
 
-  const response = await fetch(`/api/catalog/otd-browse?${params}`, { signal })
+  const response = await safeImportFetch(`/api/catalog/otd-browse?${params}`, { signal })
   const data = await readResponseJson<{
     results?: CatalogSearchResult[]
     total?: number
+    incomplete?: boolean
     storageConfigured?: boolean
     error?: string
   }>(response)
@@ -470,6 +473,7 @@ export async function browseOtdPasses(
   return {
     results: Array.isArray(data.results) ? data.results : [],
     total: Number.isFinite(data.total) ? Number(data.total) : 0,
+    incomplete: data.incomplete === true,
     storageConfigured: data.storageConfigured !== false,
   }
 }

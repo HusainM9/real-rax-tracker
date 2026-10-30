@@ -1,4 +1,4 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   adminDeleteAllTrackerProfiles,
@@ -8,8 +8,8 @@ import {
   lookupTrackerProfileForAdmin,
   lookupTrackerProfilePacksForAdmin,
   profileSyncConfigured,
-} from '../../lib/trackerProfileStore'
-import { requireAdminSession } from './_helpers'
+} from '../../lib/trackerProfileStore.js'
+import { requireAdminSession } from './_helpers.js'
 
 export const config = {
   runtime: 'edge',

@@ -1,7 +1,8 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { getCatalogImportProfile } from '../../lib/meowbotCatalogStore'
+import { requireAppSession } from '../admin/_helpers.js'
+import { getCatalogImportProfile } from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -21,11 +22,15 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'externalKey is required' }, { status: 400 })
   }
 
-  const result = await getCatalogImportProfile(externalKey)
-  if (result.storageConfigured && !result.profile) {
-    return Response.json({ error: 'Catalog pass was not found.' }, { status: 404 })
+  try {
+    const result = await getCatalogImportProfile(externalKey)
+    if (result.storageConfigured && !result.profile) {
+      return Response.json({ error: 'Catalog pass was not found.' }, { status: 404 })
+    }
+    return Response.json(result)
+  } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
+    throw error
   }
-
-  return Response.json(result)
 }
 

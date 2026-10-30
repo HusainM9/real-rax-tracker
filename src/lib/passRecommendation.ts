@@ -14,9 +14,12 @@ import { computeYearRollup } from './claimOptimizer'
 import { CALENDAR_MONTH_NAMES } from './calendarView'
 import { monthDayKeyFromClaimDay, monthIndexFromMonthDay } from './claimDayKey'
 import { applyCardRarityChange } from './cardRarity'
+import { prepareImportScenario, scoreImportScenario, type PreparedImportScenario } from './importScenario'
 import { formatClaimDay } from './format'
 import {
   analyzePotentialCard,
+  preparePotentialAnalysis,
+  type PreparedPotentialAnalysis,
   netGuaranteedDelta,
   netWithProDelta,
   type PotentialAnalysisResult,
@@ -25,7 +28,7 @@ import { parseRealAppToolsRows, type ParsedRealAppToolsRow } from './realAppTool
 import { computeOtdRax, parseRarityLabel } from './otdRax'
 import { isLegendaryPlusRarity, normalizeRarityTier } from './rarityFilter'
 import type { CatalogPassKind } from './catalogApi'
-import { SPORTS, type PlayerCard, type RaxTrackerData, type Sport } from '../types/rax'
+import { SPORTS, type PlayerCard, type RaxTrackerData, type Sport, type YearRollup } from '../types/rax'
 
 /** All recommendation what-if runs assume buying at this OTD tier. */
 export const RECOMMENDATION_SIMULATED_RARITY = 'Iconic 1'
@@ -475,9 +478,10 @@ function dayMetricsFromAnalysis(
     }
   }
 
+  const collectionDelta = analysis.claimDayNet.find((day) => day.claimDay === monthDay)
   return {
-    netDelta: gain - displaced,
-    guaranteedNetDelta: guaranteedGain - guaranteedDisplaced,
+    netDelta: collectionDelta?.netDelta ?? gain - displaced,
+    guaranteedNetDelta: collectionDelta?.guaranteedNetDelta ?? guaranteedGain - guaranteedDisplaced,
     gain,
     displaced,
   }
@@ -741,15 +745,20 @@ export function analyzeCatalogImportAtRarity(
   profile: CatalogImportProfile,
   rarityLabel: string,
 ): PassRecommendationRow | null {
+  return analyzeCatalogImportWithBaseline(data, profile, rarityLabel)
+}
+
+function analyzeCatalogImportWithBaseline(
+  data: RaxTrackerData,
+  profile: CatalogImportProfile,
+  rarityLabel: string,
+  prepared?: PreparedImportScenario,
+): PassRecommendationRow | null {
   if (profile.rows.length === 0) return null
   const rarity = rarityLabel.trim() || RECOMMENDATION_SIMULATED_RARITY
   const simulated = profileAtSimulatedRarity(profile, rarity)
-  const after = addProfileToDataAtRarity(data, profile, rarity)
-  const deltas = collectionNetDeltas(data, after)
-  const cardId = after.cards.find((card) => card.externalKey === simulated.externalKey)?.id
-  const totals = cardId
-    ? cardClaimableTotals(after, cardId)
-    : { claimable: 0, guaranteed: 0, overlap: 0 }
+  const score = scoreImportScenario(prepared ?? prepareImportScenario(data), simulated, rarity)
+  if (!score) return null
   const sport = sportFromCatalog(simulated.sport)
   const passKind = recommendationPassKind(simulated)
   return {
@@ -764,11 +773,7 @@ export function analyzeCatalogImportAtRarity(
     totalBaseRax: simulated.totalBaseRax,
     iconic1TotalRax: estimateTotalRaxAtRarity(simulated, rarity),
     rowCount: simulated.rows.length,
-    newClaimableRax: totals.claimable,
-    displacedRax: Math.max(0, totals.claimable - deltas.withPro),
-    overlapRax: totals.overlap,
-    netClaimableDelta: deltas.withPro,
-    netGuaranteedDelta: deltas.guaranteed,
+    ...score,
   }
 }
 
@@ -813,15 +818,17 @@ export function analyzeOwnedCardUpgradeAtRarity(
 function analyzeCatalogProfilePotential(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
+  prepared?: PreparedPotentialAnalysis,
 ): PotentialAnalysisResult | null {
   // Rank/solo parity: always score at Iconic 1, never the catalog's stored rarity_label.
-  return analyzeCatalogProfilePotentialAtRarity(data, profile, RECOMMENDATION_SIMULATED_RARITY)
+  return analyzeCatalogProfilePotentialAtRarity(data, profile, RECOMMENDATION_SIMULATED_RARITY, prepared)
 }
 
 function analyzeCatalogProfilePotentialAtRarity(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
   rarityLabel: string,
+  prepared?: PreparedPotentialAnalysis,
 ): PotentialAnalysisResult | null {
   if (profile.rows.length === 0) return null
 
@@ -840,6 +847,7 @@ function analyzeCatalogProfilePotentialAtRarity(
       passKind: simulated.passKind,
     },
     rows,
+    { prepared, includeBreakdowns: false },
   )
 }
 
@@ -874,8 +882,9 @@ export function analyzeCatalogCandidateForMonth(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
   monthIdx: number,
+  prepared?: PreparedPotentialAnalysis,
 ): MonthPassRecommendationRow | null {
-  const analysis = analyzeCatalogProfilePotential(data, profile)
+  const analysis = analyzeCatalogProfilePotential(data, profile, prepared)
   if (!analysis) return null
 
   const monthly = analysis.monthlyNet.find((row) => row.monthIdx === monthIdx)
@@ -896,12 +905,13 @@ export function analyzeCatalogCandidateForDay(
   data: RaxTrackerData,
   profile: CatalogImportProfile,
   monthDay: string,
+  prepared?: PreparedPotentialAnalysis,
 ): MonthPassRecommendationRow | null {
   const normalizedDay = normalizeBestDayParam(monthDay)
   if (!normalizedDay) return null
   if (!profileHasEarningsOnMonthDay(profile, normalizedDay)) return null
 
-  const analysis = analyzeCatalogProfilePotential(data, profile)
+  const analysis = analyzeCatalogProfilePotential(data, profile, prepared)
   if (!analysis) return null
 
   const metrics = dayMetricsFromAnalysis(analysis, normalizedDay)
@@ -1046,13 +1056,9 @@ function withProBonusAnalysisData(data: RaxTrackerData): RaxTrackerData {
   }
 }
 
-function collectionClaimableTotal(data: RaxTrackerData): number {
+function collectionRollup(data: RaxTrackerData): YearRollup {
   // Match collectionNetDeltas / ranking what-ifs: always score with Pro enabled.
-  return computeYearRollup(withProBonusAnalysisData(data)).totalClaimableRax
-}
-
-function collectionGuaranteedTotal(data: RaxTrackerData): number {
-  return computeYearRollup(data).totalGuaranteedRax
+  return computeYearRollup(withProBonusAnalysisData(data))
 }
 
 function collectionNetDeltas(
@@ -1061,10 +1067,11 @@ function collectionNetDeltas(
 ): { guaranteed: number; withPro: number } {
   const beforePro = withProBonusAnalysisData(before)
   const afterPro = withProBonusAnalysisData(after)
+  const beforeRollup = computeYearRollup(beforePro)
+  const afterRollup = computeYearRollup(afterPro)
   return {
-    guaranteed:
-      collectionGuaranteedTotal(afterPro) - collectionGuaranteedTotal(beforePro),
-    withPro: collectionClaimableTotal(afterPro) - collectionClaimableTotal(beforePro),
+    guaranteed: afterRollup.totalGuaranteedRax - beforeRollup.totalGuaranteedRax,
+    withPro: afterRollup.totalClaimableRax - beforeRollup.totalClaimableRax,
   }
 }
 
@@ -1090,7 +1097,13 @@ function cardClaimableTotals(
   data: RaxTrackerData,
   cardId: string,
 ): { claimable: number; guaranteed: number; overlap: number } {
-  const rollup = computeYearRollup(withProBonusAnalysisData(data))
+  return cardTotalsFromRollup(collectionRollup(data), cardId)
+}
+
+function cardTotalsFromRollup(
+  rollup: YearRollup,
+  cardId: string,
+): { claimable: number; guaranteed: number; overlap: number } {
   const row = rollup.cards.find((entry) => entry.card.id === cardId)
   return {
     claimable: row?.totalClaimableRax ?? 0,
@@ -1153,14 +1166,14 @@ export function analyzeOwnedIconicUpgradeImpacts(
 
   const isolatedByKey = new Map<string, number>()
   const passClaimableByKey = new Map<string, { claimable: number; guaranteed: number }>()
+  const baseline = collectionRollup(data)
   for (const candidate of eligible) {
     const upgraded = applyIconicUpgradeCandidate(data, candidate)
-    const before = collectionClaimableTotal(data)
-    const after = collectionClaimableTotal(upgraded)
-    isolatedByKey.set(candidate.key, after - before)
+    const after = collectionRollup(upgraded)
+    isolatedByKey.set(candidate.key, after.totalClaimableRax - baseline.totalClaimableRax)
     const cardId = findCardIdForCandidate(upgraded, candidate)
     if (cardId) {
-      passClaimableByKey.set(candidate.key, cardClaimableTotals(upgraded, cardId))
+      passClaimableByKey.set(candidate.key, cardTotalsFromRollup(after, cardId))
     }
   }
 
@@ -1173,14 +1186,15 @@ export function analyzeOwnedIconicUpgradeImpacts(
 
   const rows: OwnedIconicUpgradeImpactRow[] = []
   let workingData = data
+  let workingRollup = baseline
   for (const sport of [...bySport.keys()].sort()) {
     const ordered = [...(bySport.get(sport) ?? [])].sort(
       (a, b) => (isolatedByKey.get(b.key) ?? 0) - (isolatedByKey.get(a.key) ?? 0),
     )
     for (const candidate of ordered) {
-      const before = collectionClaimableTotal(workingData)
+      const before = workingRollup.totalClaimableRax
       workingData = applyIconicUpgradeCandidate(workingData, candidate)
-      const after = collectionClaimableTotal(workingData)
+      workingRollup = collectionRollup(workingData)
       rows.push({
         key: candidate.key,
         name: candidate.name,
@@ -1188,14 +1202,17 @@ export function analyzeOwnedIconicUpgradeImpacts(
         season: candidate.season,
         ...impactIdentityFromCandidate(candidate),
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
-        marginalNetDelta: after - before,
+        marginalNetDelta: workingRollup.totalClaimableRax - before,
         passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,
         passGuaranteedRax: passClaimableByKey.get(candidate.key)?.guaranteed ?? 0,
       })
     }
   }
 
-  const combined = collectionNetDeltas(data, workingData)
+  const combined = {
+    withPro: workingRollup.totalClaimableRax - baseline.totalClaimableRax,
+    guaranteed: workingRollup.totalGuaranteedRax - baseline.totalGuaranteedRax,
+  }
 
   // Display order for per-pass contribution: highest net RAX first.
   rows.sort(
@@ -1314,15 +1331,15 @@ function analyzeCheckerImpactsWithRarityResolver(
 
   const isolatedByKey = new Map<string, number>()
   const passClaimableByKey = new Map<string, { claimable: number; guaranteed: number }>()
+  const baseline = collectionRollup(data)
   for (const candidate of eligible) {
     const rarity = resolveRarity(candidate)
     const upgraded = applySimulatedRarityCheckerCandidate(data, candidate, rarity)
-    const before = collectionClaimableTotal(data)
-    const after = collectionClaimableTotal(upgraded)
-    isolatedByKey.set(candidate.key, after - before)
+    const after = collectionRollup(upgraded)
+    isolatedByKey.set(candidate.key, after.totalClaimableRax - baseline.totalClaimableRax)
     const cardId = findCardIdForCandidate(upgraded, candidate)
     if (cardId) {
-      passClaimableByKey.set(candidate.key, cardClaimableTotals(upgraded, cardId))
+      passClaimableByKey.set(candidate.key, cardTotalsFromRollup(after, cardId))
     }
   }
 
@@ -1335,18 +1352,19 @@ function analyzeCheckerImpactsWithRarityResolver(
 
   const rows: OwnedIconicUpgradeImpactRow[] = []
   let workingData = data
+  let workingRollup = baseline
   for (const sport of [...bySport.keys()].sort()) {
     const ordered = [...(bySport.get(sport) ?? [])].sort(
       (a, b) => (isolatedByKey.get(b.key) ?? 0) - (isolatedByKey.get(a.key) ?? 0),
     )
     for (const candidate of ordered) {
-      const before = collectionClaimableTotal(workingData)
+      const before = workingRollup.totalClaimableRax
       workingData = applySimulatedRarityCheckerCandidate(
         workingData,
         candidate,
         resolveRarity(candidate),
       )
-      const after = collectionClaimableTotal(workingData)
+      workingRollup = collectionRollup(workingData)
       rows.push({
         key: candidate.key,
         name: candidate.name,
@@ -1354,14 +1372,17 @@ function analyzeCheckerImpactsWithRarityResolver(
         season: candidate.season,
         ...impactIdentityFromCandidate(candidate),
         isolatedNetDelta: isolatedByKey.get(candidate.key) ?? 0,
-        marginalNetDelta: after - before,
+        marginalNetDelta: workingRollup.totalClaimableRax - before,
         passClaimableRax: passClaimableByKey.get(candidate.key)?.claimable ?? 0,
         passGuaranteedRax: passClaimableByKey.get(candidate.key)?.guaranteed ?? 0,
       })
     }
   }
 
-  const combined = collectionNetDeltas(data, workingData)
+  const combined = {
+    withPro: workingRollup.totalClaimableRax - baseline.totalClaimableRax,
+    guaranteed: workingRollup.totalGuaranteedRax - baseline.totalGuaranteedRax,
+  }
 
   return {
     rows,
@@ -1415,8 +1436,9 @@ function rankCandidatesSync(
   candidates: CatalogImportProfile[],
 ): PassRecommendationRow[] {
   const rows: PassRecommendationRow[] = []
+  const baseline = candidates.length ? prepareImportScenario(data) : undefined
   for (const profile of candidates) {
-    const row = analyzeCatalogCandidate(data, profile)
+    const row = analyzeCatalogImportWithBaseline(data, profile, RECOMMENDATION_SIMULATED_RARITY, baseline)
     if (row) rows.push(row)
   }
   return sortRecommendationRows(rows)
@@ -1428,8 +1450,9 @@ function rankMonthCandidatesSync(
   monthIdx: number,
 ): MonthPassRecommendationRow[] {
   const rows: MonthPassRecommendationRow[] = []
+  const prepared = candidates.length ? preparePotentialAnalysis(data) : undefined
   for (const profile of candidates) {
-    const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx)
+    const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx, prepared)
     if (row) rows.push(row)
   }
   return sortMonthRecommendationRows(rows)
@@ -1441,8 +1464,9 @@ function rankDayCandidatesSync(
   monthDay: string,
 ): MonthPassRecommendationRow[] {
   const rows: MonthPassRecommendationRow[] = []
+  const prepared = candidates.length ? preparePotentialAnalysis(data) : undefined
   for (const profile of candidates) {
-    const row = analyzeCatalogCandidateForDay(data, profile, monthDay)
+    const row = analyzeCatalogCandidateForDay(data, profile, monthDay, prepared)
     if (row) rows.push(row)
   }
   return sortMonthRecommendationRows(rows)
@@ -1460,6 +1484,7 @@ async function rankCandidatesAsync(
 ): Promise<PassRecommendationRow[]> {
   const rows: PassRecommendationRow[] = []
   const batchSize = Math.max(options?.batchSize ?? 24, 1)
+  const baseline = candidates.length && !options?.signal?.aborted ? prepareImportScenario(data) : undefined
 
   for (let index = 0; index < candidates.length; index += batchSize) {
     if (options?.signal?.aborted) {
@@ -1468,7 +1493,7 @@ async function rankCandidatesAsync(
 
     const batch = candidates.slice(index, index + batchSize)
     for (const profile of batch) {
-      const row = analyzeCatalogCandidate(data, profile)
+      const row = analyzeCatalogImportWithBaseline(data, profile, RECOMMENDATION_SIMULATED_RARITY, baseline)
       if (row) rows.push(row)
     }
 
@@ -1498,6 +1523,7 @@ async function rankMonthCandidatesAsync(
   },
 ): Promise<MonthPassRecommendationRow[]> {
   const rows: MonthPassRecommendationRow[] = []
+  const prepared = candidates.length && !options?.signal?.aborted ? preparePotentialAnalysis(data) : undefined
   const batchSize = Math.max(options?.batchSize ?? 24, 1)
 
   for (let index = 0; index < candidates.length; index += batchSize) {
@@ -1507,7 +1533,7 @@ async function rankMonthCandidatesAsync(
 
     const batch = candidates.slice(index, index + batchSize)
     for (const profile of batch) {
-      const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx)
+      const row = analyzeCatalogCandidateForMonth(data, profile, monthIdx, prepared)
       if (row) rows.push(row)
     }
 
@@ -1537,6 +1563,7 @@ async function rankDayCandidatesAsync(
   },
 ): Promise<MonthPassRecommendationRow[]> {
   const rows: MonthPassRecommendationRow[] = []
+  const prepared = candidates.length && !options?.signal?.aborted ? preparePotentialAnalysis(data) : undefined
   const batchSize = Math.max(options?.batchSize ?? 24, 1)
 
   for (let index = 0; index < candidates.length; index += batchSize) {
@@ -1546,7 +1573,7 @@ async function rankDayCandidatesAsync(
 
     const batch = candidates.slice(index, index + batchSize)
     for (const profile of batch) {
-      const row = analyzeCatalogCandidateForDay(data, profile, monthDay)
+      const row = analyzeCatalogCandidateForDay(data, profile, monthDay, prepared)
       if (row) rows.push(row)
     }
 

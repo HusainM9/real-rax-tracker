@@ -1,4 +1,6 @@
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { failureStatus, isPendingRequest, isTerminalRequestFailure } from '../../lib/httpFailurePolicy'
+import { safeImportFetch } from './safeImportFetch'
 import {
   legendaryPlusRarityFilter,
   passMatchesRarityFilter,
@@ -30,8 +32,9 @@ import {
 import { ignoredPassKeySet } from './ignoredPasses'
 import { resolveImportPassKind } from './passKind'
 import { fetchCatalogAvatars } from './catalogApi'
-import { avatarByExternalKey } from './realMedia'
+import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from './realMedia'
 import { passMetadataKey } from './seasonLabel'
+import { computeOtdRax } from './otdRax'
 import type {
   PlayerCard,
   RaxPerformance,
@@ -109,6 +112,9 @@ export type PassFetchError = {
   externalKey: string
   passKind: 'player' | 'team'
   message: string
+  upstreamStatus?: number
+  retryable?: boolean
+  pending?: boolean
 }
 
 export type FailedPlayerPassImport = {
@@ -139,7 +145,7 @@ export function getFailedPlayerPasses(result: UsernameImportResult): FailedPlaye
       passKind: pass.passKind,
       reason: 'no_earnings',
       detail:
-        'No daily earnings returned from import. The card was still added — add RAX manually on the Entry page (Add card & earnings: select this card, paste JSON or add day by day).',
+        'No daily earnings returned from import. The card was still added; import again when earnings become available.',
       retryable: false,
     })
   }
@@ -324,7 +330,7 @@ function attachAdminSnapshotEarnings(
 
     passesWithNoEarnings.push(passMeta)
     errors.push(
-      `${pass.name}: no daily earnings in admin snapshot — add RAX manually on the Entry page (Add card & earnings).`,
+      `${pass.name}: no daily earnings in the imported snapshot. The pass remains in your collection without new earnings.`,
     )
   }
 
@@ -567,11 +573,38 @@ function mergePerformances(
   }
 }
 
+function restoreFailedImportEarnings(
+  previous: RaxTrackerData,
+  next: RaxTrackerData,
+  failedKeys: Set<string>,
+): RaxTrackerData {
+  if (failedKeys.size === 0) return next
+  const previousCards = new Map(previous.cards.map((card) => [card.id, card]))
+  const importedCards = new Map(
+    next.cards.filter((card) => card.externalKey).map((card) => [card.externalKey!, card]),
+  )
+  const retained: RaxPerformance[] = []
+  for (const row of previous.performances) {
+    const oldCard = previousCards.get(row.cardId)
+    if (!oldCard?.externalKey || !failedKeys.has(oldCard.externalKey)) continue
+    const importedCard = importedCards.get(oldCard.externalKey)
+    if (!importedCard) continue
+    retained.push({
+      ...row,
+      cardId: importedCard.id,
+      raxEarned: row.baseRaxEarned != null && row.baseRaxEarned > 0
+        ? computeOtdRax(row.baseRaxEarned, importedCard.sport, importedCard.rarityLabel, importedCard.passKind)
+        : row.raxEarned,
+    })
+  }
+  return retained.length ? { ...next, performances: [...next.performances, ...retained] } : next
+}
+
 async function fetchOwnershipSnapshotPayload(
   username: string,
   signal?: AbortSignal,
 ): Promise<OwnershipSnapshotPayload & { passes: OwnershipSnapshotPass[] }> {
-  const response = await fetch('/api/import/ownership', {
+  const response = await safeImportFetch('/api/import/ownership', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username }),
@@ -711,19 +744,27 @@ export async function importFromUsername(
     }
   }
 
-  // Real's /userpasses omits entity.avatar for college (ncaam/ncaaf) players; resolve via
-  // catalog + Real `/players/{id}/sport/{slug}` (same path Cards uses).
+  // Real's /userpasses can omit faces. Resolve saved exact/sibling catalog images only.
   const catalogAvatarKeys = selectedPasses
     .filter((pass) => !pass.avatar?.trim())
     .map((pass) => describePass(pass).externalKey)
   let catalogAvatars = new Map<string, string>()
-  if (catalogAvatarKeys.length > 0) {
+  // Avatar-only catalog writes are now field-scoped, so faces and earnings can load safely
+  // in parallel. Import still waits for both before committing the isolated result.
+  const avatarPromise = (async () => {
+    if (catalogAvatarKeys.length === 0) return
     try {
       const { avatars } = await fetchCatalogAvatars(catalogAvatarKeys, options?.signal)
       catalogAvatars = avatarByExternalKey(avatars)
     } catch {
       // Catalog optional — import still proceeds without faces.
     }
+  })()
+  const withImportedAvatars = async (data: RaxTrackerData) => {
+    await avatarPromise
+    return catalogAvatars.size
+      ? { ...data, cards: enrichCardsWithCatalogAvatars(data.cards, catalogAvatars) }
+      : data
   }
 
   const resolvePassAvatarKey = (pass: MeowbotPlayerPass, externalKey: string) =>
@@ -791,6 +832,7 @@ export async function importFromUsername(
             )
           }
         } catch (error) {
+          if (isTerminalRequestFailure(error)) throw error
           const message =
             error instanceof Error ? error.message : 'Could not fetch daily earnings.'
           passFetchErrors.push({ ...passMeta, message })
@@ -831,6 +873,7 @@ export async function importFromUsername(
     let backfillCancelled = false
     try {
       backfill = await fetchDailyRaxRows(backfillPasses, {
+        cacheFirst: true,
         signal: options?.signal,
         onProgress: ({ completed: done, total: passTotal }) =>
           reportProgress?.({
@@ -841,8 +884,8 @@ export async function importFromUsername(
           }),
       })
     } catch (error) {
-      // The cards are already assembled, so a failed or cancelled backfill keeps the pass list
-      // rather than throwing the whole import away. Re-running the import retries it.
+      if (isTerminalRequestFailure(error)) throw error
+      // Only non-terminal failures/cancellation can retain a retry action.
       if (error instanceof DOMException && error.name === 'AbortError') {
         backfillCancelled = true
         errors.push(
@@ -886,10 +929,12 @@ export async function importFromUsername(
 
       const failure = failureByKey.get(described.externalKey)
       if (failure) {
-        passFetchErrors.push({ ...passMeta, message: failure.message })
+        passFetchErrors.push({ ...passMeta, message: failure.message,
+          ...(isTerminalRequestFailure(failure) ? { upstreamStatus: failureStatus(failure), retryable: false, pending: isPendingRequest(failure) } : {}),
+        })
         errors.push(`${described.name}: ${failure.message}`)
         const retryPass = backfillByKey.get(described.externalKey)
-        if (retryPass) retryableEarningsPasses.push(retryPass)
+        if (retryPass && !isTerminalRequestFailure(failure)) retryableEarningsPasses.push(retryPass)
         continue
       }
 
@@ -904,7 +949,7 @@ export async function importFromUsername(
         passesWithNoEarnings.push(passMeta)
         if (backfill) {
           errors.push(
-            `${described.name}: Real returned no daily RAX for this pass — add RAX manually on the Entry page (Add card & earnings).`,
+            `${described.name}: Real returned no daily RAX for this pass. The pass remains in your collection without new earnings.`,
           )
         } else {
           // Cancelled / fatal backfill: every unresolved pass is retryable.
@@ -932,7 +977,11 @@ export async function importFromUsername(
     // an earlier import stored for it.
     const cardIdsToReplace = new Set(performanceDrafts.map((draft) => draft.cardId))
     const { data: finalData, rowsImported, skipped } = mergePerformances(
-      withCards,
+      restoreFailedImportEarnings(
+        current,
+        withCards,
+        new Set(failureByKey.keys()),
+      ),
       performanceDrafts,
       cardIdsToReplace,
     )
@@ -951,7 +1000,7 @@ export async function importFromUsername(
     })
 
     return {
-      data: finalData,
+      data: await withImportedAvatars(finalData),
       result: {
         cardsCreated,
         cardsUpdated,
@@ -1017,7 +1066,7 @@ export async function importFromUsername(
   })
 
   return {
-    data: finalData,
+    data: await withImportedAvatars(finalData),
     result: {
       cardsCreated,
       cardsUpdated,
@@ -1238,6 +1287,7 @@ export async function retryFailedEarnings(
   let backfillCancelled = false
   try {
     backfill = await fetchDailyRaxRows(retryPasses, {
+      cacheFirst: true,
       signal: options?.signal,
       onProgress: ({ completed: done, total: passTotal }) =>
         reportProgress?.({
@@ -1248,6 +1298,7 @@ export async function retryFailedEarnings(
         }),
     })
   } catch (error) {
+    if (isTerminalRequestFailure(error)) throw error
     if (error instanceof DOMException && error.name === 'AbortError') {
       backfillCancelled = true
       errors.push('Retry cancelled — already-cached passes stay in place.')
@@ -1278,9 +1329,11 @@ export async function retryFailedEarnings(
     const failure = failureByKey.get(pass.externalKey)
 
     if (failure) {
-      passFetchErrors.push({ ...passMeta, message: failure.message })
+      passFetchErrors.push({ ...passMeta, message: failure.message,
+        ...(isTerminalRequestFailure(failure) ? { upstreamStatus: failureStatus(failure), retryable: false, pending: isPendingRequest(failure) } : {}),
+      })
       errors.push(`${pass.name}: ${failure.message}`)
-      retryableEarningsPasses.push(pass)
+      if (!isTerminalRequestFailure(failure)) retryableEarningsPasses.push(pass)
       continue
     }
 
@@ -1295,7 +1348,7 @@ export async function retryFailedEarnings(
       passesWithNoEarnings.push(passMeta)
       if (backfill) {
         errors.push(
-          `${pass.name}: Real returned no daily RAX for this pass — add RAX manually on the Entry page (Add card & earnings).`,
+          `${pass.name}: Real returned no daily RAX for this pass. The pass remains in your collection without new earnings.`,
         )
       } else {
         retryableEarningsPasses.push(pass)

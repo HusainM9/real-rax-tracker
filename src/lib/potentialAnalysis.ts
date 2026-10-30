@@ -1,6 +1,6 @@
 import { CALENDAR_MONTH_NAMES } from './calendarView'
-import { monthIndexFromClaimDay } from './claimDayKey'
-import { computeClaimDayResults, computeYearRollup } from './claimOptimizer'
+import { monthDayKeyFromClaimDay, monthIndexFromClaimDay } from './claimDayKey'
+import { computeClaimDayResults } from './claimOptimizer'
 import type { ParsedRealAppToolsRow } from './realAppToolsImport'
 import type {
   ClaimCandidate,
@@ -8,6 +8,7 @@ import type {
   ClaimStatus,
   PlayerCard,
   RaxTrackerData,
+  RaxPerformance,
   Sport,
 } from '../types/rax'
 
@@ -31,9 +32,9 @@ function overlapCandidates(day: ReturnType<typeof computeClaimDayResults>[number
   )
 }
 
-function buildClaimableByKey(data: RaxTrackerData): Map<string, ClaimCandidate['status']> {
+function buildClaimableByKey(results: ClaimDayResult[]): Map<string, ClaimCandidate['status']> {
   const claimable = new Map<string, ClaimCandidate['status']>()
-  for (const day of computeClaimDayResults(data)) {
+  for (const day of results) {
     for (const sport of day.sports) {
       for (const candidate of [...sport.guaranteed, ...sport.overlaps]) {
         if (candidate.status !== 'overlap') {
@@ -53,6 +54,12 @@ export type PotentialMonthlyNet = {
   netDelta: number
   guaranteedGain: number
   guaranteedDisplacedLoss: number
+  guaranteedNetDelta: number
+}
+
+export type PotentialDayNet = {
+  claimDay: string
+  netDelta: number
   guaranteedNetDelta: number
 }
 
@@ -87,6 +94,8 @@ export type PotentialAnalysisResult = {
   displacedByCard: DisplacedCardSummary[]
   displacedByCardGuaranteed: DisplacedCardSummary[]
   monthlyNet: PotentialMonthlyNet[]
+  /** Before/after collection deltas, including guaranteed → Pro transitions. */
+  claimDayNet: PotentialDayNet[]
   /** Per OTD day sport ladder — same rules as the Calendar page. */
   claimDayBreakdowns: PotentialClaimDayBreakdown[]
   /**
@@ -104,6 +113,29 @@ function withProBonusEnabled(data: RaxTrackerData): RaxTrackerData {
     settings: { ...data.settings, proBonusEnabled: true },
   }
 }
+
+/** Per-ranking-run index. No global memoization: changed collections cannot reuse stale results. */
+export function preparePotentialAnalysis(data: RaxTrackerData) {
+  const analysisData = withProBonusEnabled(data)
+  const baseResults = computeClaimDayResults(analysisData)
+  const performancesByDay = new Map<string, RaxPerformance[]>()
+  for (const performance of data.performances) {
+    const day = monthDayKeyFromClaimDay(performance.claimDay)
+    if (!day) continue
+    const rows = performancesByDay.get(day) ?? []
+    rows.push(performance)
+    performancesByDay.set(day, rows)
+  }
+  return {
+    source: data,
+    analysisData,
+    baseResults,
+    performancesByDay,
+    baseClaimableByKey: buildClaimableByKey(baseResults),
+  }
+}
+
+export type PreparedPotentialAnalysis = ReturnType<typeof preparePotentialAnalysis>
 
 export function netGuaranteedDelta(result: PotentialAnalysisResult): number {
   return result.collectionGuaranteedNetDelta
@@ -380,6 +412,7 @@ function addMonthlyRax(
 export function buildPotentialMonthlyNet(
   potentialCandidates: PotentialAnalysisResult['candidates'],
   displacedExisting: PotentialAnalysisResult['displacedExisting'],
+  dayNet?: PotentialDayNet[],
 ): PotentialMonthlyNet[] {
   const buckets = new Map<number, MonthlyNetBucket>()
 
@@ -408,17 +441,31 @@ export function buildPotentialMonthlyNet(
     }
   }
 
+  const collectionDeltas = new Map<number, { net: number; guaranteed: number }>()
+  for (const day of dayNet ?? []) {
+    const month = monthIndexFromClaimDay(day.claimDay)
+    if (month < 0) continue
+    const delta = collectionDeltas.get(month) ?? { net: 0, guaranteed: 0 }
+    delta.net += day.netDelta
+    delta.guaranteed += day.guaranteedNetDelta
+    collectionDeltas.set(month, delta)
+    if (!buckets.has(month)) buckets.set(month, { gain: 0, loss: 0, guaranteedGain: 0, guaranteedLoss: 0 })
+  }
+
   return [...buckets.entries()]
-    .map(([monthIdx, bucket]) => ({
-      monthIdx,
-      month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
-      potentialGain: bucket.gain,
-      displacedLoss: bucket.loss,
-      netDelta: bucket.gain - bucket.loss,
-      guaranteedGain: bucket.guaranteedGain,
-      guaranteedDisplacedLoss: bucket.guaranteedLoss,
-      guaranteedNetDelta: bucket.guaranteedGain - bucket.guaranteedLoss,
-    }))
+    .map(([monthIdx, bucket]) => {
+      const delta = collectionDeltas.get(monthIdx)
+      return {
+        monthIdx,
+        month: CALENDAR_MONTH_NAMES[monthIdx] ?? 'Other',
+        potentialGain: bucket.gain,
+        displacedLoss: delta ? bucket.gain - delta.net : bucket.loss,
+        netDelta: delta?.net ?? bucket.gain - bucket.loss,
+        guaranteedGain: bucket.guaranteedGain,
+        guaranteedDisplacedLoss: delta ? bucket.guaranteedGain - delta.guaranteed : bucket.guaranteedLoss,
+        guaranteedNetDelta: delta?.guaranteed ?? bucket.guaranteedGain - bucket.guaranteedLoss,
+      }
+    })
     .sort((a, b) => a.monthIdx - b.monthIdx)
 }
 
@@ -426,6 +473,7 @@ export function analyzePotentialCard(
   data: RaxTrackerData,
   profile: PotentialProfile,
   rows: ParsedRealAppToolsRow[],
+  options?: { prepared?: PreparedPotentialAnalysis; includeBreakdowns?: boolean },
 ): PotentialAnalysisResult | null {
   if (rows.length === 0) return null
 
@@ -439,12 +487,19 @@ export function analyzePotentialCard(
     simulatedRarityLabel: profile.simulatedRarityLabel?.trim() || undefined,
     createdAt: new Date().toISOString(),
   }
-  const analysisData = withProBonusEnabled(data)
+  const prepared = options?.prepared?.source === data ? options.prepared : preparePotentialAnalysis(data)
+  const analysisData = prepared.analysisData
+  const affectedDays = new Set(
+    rows.map((row) => monthDayKeyFromClaimDay(row.claimDay)).filter((day): day is string => Boolean(day)),
+  )
+  const existingPerformances = [...affectedDays].flatMap(
+    (day) => prepared.performancesByDay.get(day) ?? [],
+  )
   const potentialData = {
     ...analysisData,
     cards: [...analysisData.cards, potentialCard],
     performances: [
-      ...analysisData.performances,
+      ...existingPerformances,
       ...rows.map((row, index) => {
         const baseRax = row.baseRaxEarned ?? row.raxEarned
         return {
@@ -459,9 +514,11 @@ export function analyzePotentialCard(
       }),
     ],
   }
-  const baseClaimableByKey = buildClaimableByKey(analysisData)
-  const baseResults = computeClaimDayResults(analysisData)
+  // Only days touched by the candidate can change. Keep every sport on those days,
+  // since the single Pro bonus can move between sports.
+  const baseResults = prepared.baseResults.filter((day) => affectedDays.has(day.claimDay))
   const results = computeClaimDayResults(potentialData)
+  const baseClaimableByKey = prepared.baseClaimableByKey
   const potentialCandidates = results.flatMap((day) =>
     day.sports.flatMap((sport) =>
       [...sport.guaranteed, ...sport.overlaps]
@@ -510,17 +567,25 @@ export function analyzePotentialCard(
     ({ candidate }) => candidate.status === 'pro-bonus',
   )
 
-  const claimDayBreakdowns = buildPotentialClaimDayBreakdowns(
+  const claimDayBreakdowns = options?.includeBreakdowns === false ? [] : buildPotentialClaimDayBreakdowns(
     baseResults,
     results,
     potentialCandidates,
     displacedExisting,
   )
 
-  const beforeClaimable = computeYearRollup(analysisData).totalClaimableRax
-  const afterClaimable = computeYearRollup(potentialData).totalClaimableRax
-  const beforeGuaranteed = computeYearRollup(analysisData).totalGuaranteedRax
-  const afterGuaranteed = computeYearRollup(potentialData).totalGuaranteedRax
+  // These totals are the same reductions used by computeYearRollup; reuse the claim results
+  // already needed for the breakdown instead of recomputing and rolling up the full collection.
+  const beforeClaimable = baseResults.reduce((sum, day) => sum + day.totalClaimableRax, 0)
+  const afterClaimable = results.reduce((sum, day) => sum + day.totalClaimableRax, 0)
+  const beforeGuaranteed = baseResults.reduce((sum, day) => sum + day.totalGuaranteedRax, 0)
+  const afterGuaranteed = results.reduce((sum, day) => sum + day.totalGuaranteedRax, 0)
+  const beforeByDay = new Map(baseResults.map((day) => [day.claimDay, day]))
+  const claimDayNet = results.map((day): PotentialDayNet => ({
+    claimDay: day.claimDay,
+    netDelta: day.totalClaimableRax - (beforeByDay.get(day.claimDay)?.totalClaimableRax ?? 0),
+    guaranteedNetDelta: day.totalGuaranteedRax - (beforeByDay.get(day.claimDay)?.totalGuaranteedRax ?? 0),
+  }))
 
   return {
     candidates: potentialCandidates,
@@ -544,7 +609,8 @@ export function analyzePotentialCard(
     displacedProBonusRax,
     displacedByCard: summarizeDisplacedByCard(displacedExisting),
     displacedByCardGuaranteed: summarizeDisplacedByCard(displacedGuaranteedExisting),
-    monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting),
+    monthlyNet: buildPotentialMonthlyNet(potentialCandidates, displacedExisting, claimDayNet),
+    claimDayNet,
     claimDayBreakdowns,
     collectionNetDelta: afterClaimable - beforeClaimable,
     collectionGuaranteedNetDelta: afterGuaranteed - beforeGuaranteed,

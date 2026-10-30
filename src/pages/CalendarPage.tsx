@@ -243,15 +243,14 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="page-stack">
-      <section className="panel">
+    <div className="page-stack refresh-page calendar-refresh">
+      <section className="calendar-page-header">
         <div className="section-heading">
           <div>
-            <h2>Claim calendar</h2>
+            <p className="eyebrow">Your claims</p>
+            <h1>Calendar</h1>
             <p>
-              Each OTD day pools every year together — only the top two per sport
-              {proBonusEnabled ? ' plus one Pro bonus' : ' (Pro bonus off)'} count. Values include
-              OTD multipliers from username import.
+              Claim days across every year. Top two passes per sport{proBonusEnabled ? ', plus your Pro bonus.' : '.'}
             </p>
           </div>
           <Link to="/entry">Add entries</Link>

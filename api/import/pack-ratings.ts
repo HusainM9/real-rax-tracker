@@ -1,24 +1,25 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
 import {
   RealApiError,
-  getUserByUsername,
-  listPasses,
   normalizeRealUsernameInput,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
   type RealPass,
-} from '../../lib/realApi'
+} from '../../lib/realApi.js'
 import {
   displaySportFromRaw,
   usernameImportExternalKey,
-} from '../../lib/usernameImportShared'
-import { requireAppSession } from '../admin/_helpers'
-import { absolutePlayRating } from '../../lib/playRating'
+} from '../../lib/usernameImportShared.js'
+import { requireAppSession } from '../admin/_helpers.js'
+import { absolutePlayRating } from '../../lib/playRating.js'
+import { getRealOwnershipSnapshot } from '../../lib/realOwnershipSnapshot.js'
 
 type PackRatingsRequest = {
   username?: unknown
+  forceRefresh?: unknown
 }
 
 export type PackRatingPass = {
@@ -39,6 +40,7 @@ export const config = {
 }
 
 function errorResponse(error: unknown): Response {
+  if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
   if (error instanceof RealApiError) {
     switch (error.kind) {
       case 'auth':
@@ -163,8 +165,9 @@ export default async function handler(request: Request): Promise<Response> {
   const context: RealApiContext = { config: realConfig, signal: request.signal }
 
   try {
-    const user = await getUserByUsername(username, context)
-    const rawPasses = await listPasses({ userId: user.id }, context)
+    const { user, passes: rawPasses, fetchedAt, source } = await getRealOwnershipSnapshot(username, context, {
+      forceRefresh: body.forceRefresh === true,
+    })
     const passes = collapsePasses(
       rawPasses
         .map(toPackRatingPass)
@@ -177,6 +180,8 @@ export default async function handler(request: Request): Promise<Response> {
       userId: user.id,
       passCount: passes.length,
       passes,
+      fetchedAt,
+      source,
     })
   } catch (error) {
     return errorResponse(error)

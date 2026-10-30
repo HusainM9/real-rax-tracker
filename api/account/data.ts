@@ -1,12 +1,12 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { readRequestJson } from '../../lib/cloudSyncCompression'
+import { readRequestJson } from '../../lib/cloudSyncCompression.js'
 import {
   accountsConfigured,
   getAccountProfileForSession,
   saveAccountProfileForSession,
-} from '../../lib/trackerProfileStore'
-import { requireAccountSession } from '../admin/_helpers'
+} from '../../lib/trackerProfileStore.js'
+import { requireAccountSession } from '../admin/_helpers.js'
 
 export const config = {
   runtime: 'edge',

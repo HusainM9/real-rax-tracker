@@ -180,7 +180,8 @@ export function normalizeGlobalMeowbotCatalog(payload: unknown): NormalizedMeowb
 }
 
 export async function fetchGlobalMeowbotCatalog(url: string, token?: string): Promise<unknown> {
-  const response = await fetch(url, {
+  const { guardedUpstreamFetch } = await import('./guardedUpstreamFetch')
+  const response = await guardedUpstreamFetch('legacy-catalog', url, {
     headers: token?.trim() ? { Authorization: `Bearer ${token.trim()}` } : undefined,
   })
   if (!response.ok) {

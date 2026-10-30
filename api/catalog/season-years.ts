@@ -1,7 +1,8 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { listCatalogSeasonYears, type CatalogPassKind } from '../../lib/meowbotCatalogStore'
+import { requireAppSession } from '../admin/_helpers.js'
+import { listCatalogSeasonYears, type CatalogPassKind } from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -24,6 +25,10 @@ export default async function handler(request: Request): Promise<Response> {
   const passKindRaw = url.searchParams.get('passKind')?.trim() ?? 'player'
   const passKind: CatalogPassKind = passKindRaw === 'team' ? 'team' : 'player'
 
-  const result = await listCatalogSeasonYears({ sport, passKind })
-  return Response.json(result)
+  try {
+    return Response.json(await listCatalogSeasonYears({ sport, passKind }))
+  } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
+    throw error
+  }
 }

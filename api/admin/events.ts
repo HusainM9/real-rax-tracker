@@ -1,12 +1,12 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { adminStorageConfigured, appendAdminEvents, listAdminEvents } from '../../lib/adminEventStore'
+import { adminStorageConfigured, appendAdminEvents, listAdminEvents } from '../../lib/adminEventStore.js'
 import {
   isAdminEventType,
   validateAdminEventInput,
   type AdminEventInput,
-} from '../../lib/adminEventTypes'
-import { requireAdminSession, requireAppSession } from './_helpers'
+} from '../../lib/adminEventTypes.js'
+import { requireAdminSession, requireAppSession } from './_helpers.js'
 
 export const config = {
   runtime: 'edge',

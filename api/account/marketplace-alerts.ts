@@ -1,4 +1,4 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   ignoreMarketplaceListing,
@@ -10,10 +10,10 @@ import {
   readMarketplaceScanStatus,
   saveMarketplaceAlertRules,
   saveMarketplaceDeliverySettings,
-} from '../../lib/marketplaceAlertStore'
-import { parseMarketplaceAlertRule, type MarketplaceAlertRule } from '../../lib/marketplaceAlerts'
-import { requireEarningsSession } from '../../lib/earningsAuth'
-import { requireAccountSession } from '../admin/_helpers'
+} from '../../lib/marketplaceAlertStore.js'
+import { parseMarketplaceAlertRule, type MarketplaceAlertRule } from '../../lib/marketplaceAlerts.js'
+import { requireEarningsSession } from '../../lib/earningsAuth.js'
+import { requireAccountSession } from '../admin/_helpers.js'
 
 export const config = { runtime: 'edge' }
 

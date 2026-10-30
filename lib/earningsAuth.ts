@@ -3,7 +3,7 @@ import {
   getSigningSecret,
   readCookie,
   signPayload,
-} from './authCookie'
+} from './authCookie.js'
 
 const COOKIE_NAME = 'rax_earnings_access'
 const DEFAULT_PASSWORD = 'mate'

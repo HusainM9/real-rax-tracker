@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  filterEarningsHistory,
+  weeklyEarningsTotals,
   highestAverageWeekday,
   highestEarningDay,
   rankEarningPasses,
@@ -45,6 +47,19 @@ const history: EarningsHistoryEntry[] = [
 ]
 
 describe('earnings report statistics', () => {
+  it('groups long history into Monday-based totals without losing earnings', () => {
+    expect(weeklyEarningsTotals(history)).toEqual([
+      { day: '2026-10-05', dailyTotal: 340 },
+      { day: '2026-10-12', dailyTotal: 300 },
+    ])
+  })
+  it('filters inclusive date ranges and carries player avatars through rankings', () => {
+    const rows = filterEarningsHistory(history, '2026-10-06', '2026-10-12')
+    expect(rows.map((row) => row.day)).toEqual(['2026-10-06', '2026-10-12'])
+    expect(filterEarningsHistory(history, '2026-10-12', '2026-10-06')).toEqual([])
+    const enriched = [{ ...history[0]!, passes: history[0]!.passes.map((pass) => ({ ...pass, avatar: 'player-face' })) }]
+    expect(rankEarningPasses(enriched)[0]?.avatar).toBe('player-face')
+  })
   it('finds the highest earned day', () => {
     expect(highestEarningDay(history)?.day).toBe('2026-10-12')
   })

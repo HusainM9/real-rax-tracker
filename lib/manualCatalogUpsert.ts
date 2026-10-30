@@ -1,10 +1,10 @@
-import { normalizeRealAppToolsPaste, parseRealAppToolsBaseRows } from './realAppToolsPaste'
-import { filterDailyRowsToPassSeason } from './seasonClaimWindow'
+import { normalizeRealAppToolsPaste, parseRealAppToolsBaseRows } from './realAppToolsPaste.js'
+import { filterDailyRowsToPassSeason } from './seasonClaimWindow.js'
 import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
   CatalogPassKind,
-} from './meowbotCatalogStore'
+} from './meowbotCatalogStore.js'
 
 export type ManualCatalogUpsertInput = {
   entityId: number

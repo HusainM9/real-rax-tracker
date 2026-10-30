@@ -1,7 +1,8 @@
+import { safeFetch } from "./safeImportFetch"
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
 import { buildGzipSyncPutBody } from '../../lib/cloudSyncRequest'
 import { readResponseError, readResponseJson } from './readResponseJson'
-import { importTrackerData } from './storage'
+import { normalizeData } from './storage'
 import type { RaxTrackerData } from '../types/rax'
 
 export type AccountDataMeta = {
@@ -60,7 +61,7 @@ export async function decodeAccountDataPayload(
     rawData = await gunzipBase64ToJson(payload.dataBlob)
   }
 
-  const parsed = importTrackerData(JSON.stringify(rawData ?? {}))
+  const parsed = normalizeData(rawData ?? {})
   const reportedCards = Number(payload.cardCount) || 0
   const reportedPerformances = Number(payload.performanceCount) || 0
   if (reportedCards > 0 && parsed.cards.length === 0) {
@@ -86,7 +87,7 @@ export async function decodeAccountDataPayload(
 }
 
 export async function loadAccountData(): Promise<AccountDataLoadResult> {
-  const response = await fetch('/api/account/data', {
+  const response = await safeFetch('/api/account/data', {
     credentials: 'include',
   })
 
@@ -112,7 +113,7 @@ export async function saveAccountData(
     data,
     ifUnmodifiedSince: options?.ifUnmodifiedSince,
   })
-  const response = await fetch('/api/account/data', {
+  const response = await safeFetch('/api/account/data', {
     method: 'PUT',
     credentials: 'include',
     headers: put.headers,

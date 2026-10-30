@@ -1,4 +1,5 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
 import {
   RealApiError,
@@ -7,7 +8,7 @@ import {
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
-} from '../../lib/realApi'
+} from '../../lib/realApi.js'
 import {
   MAX_AVATAR_SHOP_CRAWL_MAX_PAGES,
   MAX_SHOP_CRAWL_MAX_PAGES,
@@ -19,9 +20,9 @@ import {
   resolveShopCrawlMaxPages,
   type ShopCrawlChunkInput,
   type ShopCrawlEntityType,
-} from '../../lib/realShopEarningsCrawl'
-import { meowbotCatalogConfigured } from '../../lib/meowbotCatalogStore'
-import { requireAdminSession } from './_helpers'
+} from '../../lib/realShopEarningsCrawl.js'
+import { meowbotCatalogConfigured } from '../../lib/meowbotCatalogStore.js'
+import { requireAdminSession } from './_helpers.js'
 
 /**
  * Edge (not Node): Hobby Edge allows ~30s vs Hobby Node ~10s. hashids / fetch already work on
@@ -100,6 +101,7 @@ function numberOrUndefined(input: unknown): number | undefined {
 }
 
 function errorResponse(error: unknown): Response {
+  if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
   if (error instanceof RealApiError) {
     const message =
       error.kind === 'auth'

@@ -1,4 +1,5 @@
-import { parseRealAppToolsBaseDailyRows } from './realAppToolsPaste'
+import { parseRealAppToolsBaseDailyRows } from './realAppToolsPaste.js'
+import { isTerminalRequestFailure } from './httpFailurePolicy.js'
 import {
   RealApiError,
   type RealPassEarnings,
@@ -6,16 +7,16 @@ import {
   type RealShopEarningsTotalItem,
   type RealShopEarningsTotalPage,
   type RealShopEarningsTotalQuery,
-} from './realApi'
-import { resolveBaseRaxTotal } from './realEarningsShared'
-import { canonicalRealSport, avatarFromRealEntity, realRequestSportSlugs } from './realPassScan'
-import { runWithConcurrency } from './runWithConcurrency'
+} from './realApi.js'
+import { resolveBaseRaxTotal } from './realEarningsShared.js'
+import { canonicalRealSport, avatarFromRealEntity, realRequestSportSlugs } from './realPassScan.js'
+import { runWithConcurrency } from './runWithConcurrency.js'
 import {
   canonicalCatalogPassMetadata,
   expectedSeasonLabelFromYear,
   filterDailyRowsToPassSeason,
   normalizeSportForSeasonWindow,
-} from './seasonClaimWindow'
+} from './seasonClaimWindow.js'
 import {
   meowbotCatalogConfigured,
   upsertCatalogDailyEarnings,
@@ -23,10 +24,11 @@ import {
   type CatalogDailyEarningInput,
   type CatalogPassInput,
   type CatalogPassKind,
-} from './meowbotCatalogStore'
+} from './meowbotCatalogStore.js'
 
 /** Real shop earningstotal page size (confirmed). */
-export const SHOP_EARNINGS_PAGE_SIZE = 20
+export { SHOP_EARNINGS_PAGE_SIZE } from './shopCrawlShared.js'
+import { SHOP_EARNINGS_PAGE_SIZE } from './shopCrawlShared.js'
 
 /**
  * Safe default pages per admin chunk. Each page triggers up to 20 earnings fetches + delayMs
@@ -650,6 +652,7 @@ export async function crawlShopEarningsTotalChunk(
       })
     } catch (error) {
       pagesFetched += 1
+      if (isTerminalRequestFailure(error)) throw error
       if (error instanceof RealApiError && error.kind === 'auth') {
         throw error
       }
@@ -800,6 +803,10 @@ export async function crawlShopEarningsTotalChunk(
         earningsFetched += 1
         pageOk += 1
       } catch (error) {
+        if (isTerminalRequestFailure(error)) {
+          authError = error
+          return
+        }
         if (error instanceof RealApiError && error.kind === 'auth') {
           authError = error
           return

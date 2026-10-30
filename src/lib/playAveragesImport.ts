@@ -1,3 +1,5 @@
+import { safeImportFetch } from './safeImportFetch'
+
 export type PlayAveragePassInput = {
   externalKey: string
   entityId?: number
@@ -48,7 +50,7 @@ export async function fetchPlayAverages(
     throw new Error('Select at least one pass to average.')
   }
 
-  const response = await fetch(PLAY_AVERAGES_ENDPOINT, {
+  const response = await safeImportFetch(PLAY_AVERAGES_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ passes }),

@@ -1,11 +1,11 @@
-import { kv } from '@vercel/kv'
+import { kv } from './noRetryKv.js'
 import {
   validateImportOwnershipSnapshot,
   type ImportOwnershipSnapshot,
   type StoredImportOwnershipSnapshot,
-} from './importOwnershipTypes'
-import { adminStorageConfigured } from './adminEventStore'
-import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter'
+} from './importOwnershipTypes.js'
+import { adminStorageConfigured } from './adminEventStore.js'
+import { legendaryPlusRarityFilter, passMatchesRarityFilter } from './rarityFilter.js'
 
 const OWNERSHIP_PREFIX = 'rax:ownership:'
 const OWNERSHIP_USERNAMES_KEY = 'rax:ownership:usernames'

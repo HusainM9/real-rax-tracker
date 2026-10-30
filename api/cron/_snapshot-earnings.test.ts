@@ -118,13 +118,14 @@ describe('scheduled earnings snapshot window', () => {
 })
 
 describe('scheduled earnings snapshot authorization', () => {
-  it('accepts Vercel cron invocations when no cron secret is configured', () => {
+  it('denies spoofed Vercel cron invocations when no production secret is configured', () => {
     process.env.NODE_ENV = 'production'
     delete process.env.CRON_SECRET
 
     expect(isAuthorizedSnapshotRequest(new Request('https://example.com/api/cron', {
       headers: { 'user-agent': 'vercel-cron/1.0' },
-    }))).toBe(true)
+    }))).toBe(false)
+    expect(isAuthorizedSnapshotRequest(new Request('https://example.com/api/cron'))).toBe(false)
   })
 
   it('requires the bearer token when a cron secret is configured', () => {
@@ -194,35 +195,31 @@ describe('scheduled earnings snapshot rate-limit fallback', () => {
     )).toEqual(['gordon'])
   })
 
-  it('configures shifted recovery attempts and the DST-aware final check', () => {
+  it('does not schedule retired earnings snapshot endpoints', () => {
     const config = JSON.parse(
       readFileSync('vercel.json', 'utf8'),
     ) as { crons: Array<{ path: string; schedule: string }> }
 
-    expect(config.crons).toEqual(expect.arrayContaining([
-      { path: '/api/cron/snapshot-earnings-summer', schedule: '30 8 * * *' },
-      { path: '/api/cron/snapshot-earnings-after-six-summer', schedule: '0 9 * * *' },
-      { path: '/api/cron/snapshot-earnings-winter', schedule: '30 9 * * *' },
-      { path: '/api/cron/snapshot-earnings-after-six-winter', schedule: '0 10 * * *' },
-      { path: '/api/cron/snapshot-earnings-fallback', schedule: '30 10 * * *' },
-      { path: '/api/cron/snapshot-earnings-final-check', schedule: '0 11 * * *' },
-      { path: '/api/cron/snapshot-earnings-golf-final-summer', schedule: '5 11 * * *' },
-      { path: '/api/cron/snapshot-earnings-golf-final-winter', schedule: '5 12 * * *' },
-    ]))
+    expect(config.crons.filter(job =>
+      job.path.startsWith('/api/cron/snapshot-earnings'),
+    )).toEqual([])
   })
 
-  it('allows complete active-pass scans enough time in manual and scheduled runs', () => {
+  it('removes reconstruction function overrides while retaining marketplace configuration', () => {
     const config = JSON.parse(
       readFileSync('vercel.json', 'utf8'),
     ) as { functions: Record<string, { maxDuration: number }> }
 
-    expect(config.functions['api/account/earnings.ts']?.maxDuration).toBe(300)
-    expect(config.functions['api/cron/snapshot-earnings*.ts']?.maxDuration).toBe(300)
+    expect(Object.keys(config.functions).filter(path =>
+      path === 'api/account/earnings.ts' || path.startsWith('api/cron/snapshot-earnings'),
+    )).toEqual([])
+    expect(config.functions['api/cron/marketplace-alerts.ts']?.maxDuration).toBe(60)
   })
 
-  it('configures an independent GitHub Actions fallback across EDT and EST', () => {
+  it('keeps the archived GitHub Actions fallback disabled', () => {
     const workflow = readFileSync('.github/workflows/earnings-snapshot.yml', 'utf8')
 
+    expect(workflow).toContain('if: ${{ false }}')
     expect(workflow).toContain("cron: '35 8-11 * * *'")
     expect(workflow).toContain("cron: '55 8-11 * * *'")
     expect(workflow).toContain("cron: '5,25,45 11-12 * * *'")

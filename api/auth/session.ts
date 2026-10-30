@@ -1,11 +1,11 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   authConfigured,
   getSessionCookieName,
   readCookie,
   verifySessionToken,
-} from '../../lib/authCookie'
+} from '../../lib/authCookie.js'
 
 export const config = {
   runtime: 'edge',

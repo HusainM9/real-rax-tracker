@@ -1,3 +1,4 @@
+import { safeFetch } from "../lib/safeImportFetch"
 import {
   createContext,
   useCallback,
@@ -26,7 +27,7 @@ async function readSession(): Promise<{ ok: boolean; devBypass: boolean }> {
   }
 
   try {
-    const response = await fetch('/api/auth/session', { credentials: 'include' })
+    const response = await safeFetch('/api/auth/session', { credentials: 'include' })
     if (!response.ok) return { ok: false, devBypass: false }
     const data = (await response.json()) as { ok?: boolean; devBypass?: boolean }
     return { ok: Boolean(data.ok), devBypass: Boolean(data.devBypass) }
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const login = useCallback(async (password: string) => {
-    const response = await fetch('/api/auth/login', {
+    const response = await safeFetch('/api/auth/login', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -67,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const logout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    await safeFetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
     setStatus('unauthenticated')
   }, [])
 

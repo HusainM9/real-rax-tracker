@@ -105,6 +105,7 @@ export default defineConfig(({ mode }) => {
     plugins: [localApiPlugin(), react()],
   test: {
     environment: 'jsdom',
+    setupFiles: ['./src/testing/offlineSetup.ts'],
   },
   }
 })

@@ -1,2 +1,7 @@
 # Test sources belong in Git, but should never become Vercel Functions.
-**/*.test.ts
+api/**/*.test.ts
+api/**/*.test.tsx
+.benchmarks/
+.superpowers/
+.env*
+!.env.example

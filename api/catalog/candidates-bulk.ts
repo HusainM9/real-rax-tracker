@@ -1,10 +1,11 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { requireAppSession } from '../admin/_helpers'
+import { requireAppSession } from '../admin/_helpers.js'
 import {
   fetchCatalogImportProfilesBulk,
   BULK_PROFILE_KEYS_MAX_REQUEST,
-} from '../../lib/meowbotCatalogStore'
+} from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -46,6 +47,7 @@ export default async function handler(request: Request): Promise<Response> {
     const result = await fetchCatalogImportProfilesBulk(externalKeys)
     return Response.json(result)
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     return Response.json(
       {
         error: error instanceof Error ? error.message : 'Catalog bulk import failed.',

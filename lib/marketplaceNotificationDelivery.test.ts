@@ -27,6 +27,17 @@ const originalDiscordUserId = process.env.MARKETPLACE_DISCORD_USER_ID
 const originalTelegramToken = process.env.MARKETPLACE_TELEGRAM_BOT_TOKEN
 const originalTelegramChat = process.env.MARKETPLACE_TELEGRAM_CHAT_ID
 
+it('does not resend a notification endpoint after a 5xx on a later scheduled run', async () => {
+  process.env.MARKETPLACE_DISCORD_WEBHOOK_URL = 'https://discord.example.test/webhook'
+  delete process.env.MARKETPLACE_DISCORD_BOT_TOKEN
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 503 }))
+  vi.stubGlobal('fetch', fetcher)
+  for (const owner of ['first-run', 'later-run']) {
+    await expect(deliverMarketplaceNotifications({ owner, notifications: [notification] })).rejects.toMatchObject({ upstreamStatus: 503, retryable: false })
+  }
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
   if (originalDiscord === undefined) delete process.env.MARKETPLACE_DISCORD_WEBHOOK_URL

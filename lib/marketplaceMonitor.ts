@@ -186,14 +186,18 @@ async function scanGroupsWithConcurrency(
 ): Promise<GroupScanResult[]> {
   const results = new Array<GroupScanResult>(groups.length)
   let nextIndex = 0
+  let stopped = false
   const concurrency = Math.max(1, Math.min(4, context.config.concurrency || 1))
 
   async function worker(): Promise<void> {
-    while (true) {
+    while (!stopped) {
       const index = nextIndex
       nextIndex += 1
       if (index >= groups.length) return
-      results[index] = await scanGroup(groups[index], context, foundAt)
+      try { results[index] = await scanGroup(groups[index], context, foundAt) } catch (error) {
+        stopped = true
+        throw error
+      }
     }
   }
 

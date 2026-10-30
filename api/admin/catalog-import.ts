@@ -1,12 +1,13 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
 import {
   attachPassTotals,
   meowbotCatalogConfigured,
   upsertCatalogSnapshot,
-} from '../../lib/meowbotCatalogStore'
-import { manualCatalogUpsertPayload } from '../../lib/manualCatalogUpsert'
-import { requireAdminSession } from './_helpers'
+} from '../../lib/meowbotCatalogStore.js'
+import { manualCatalogUpsertPayload } from '../../lib/manualCatalogUpsert.js'
+import { requireAdminSession } from './_helpers.js'
 
 export const config = {
   runtime: 'nodejs',
@@ -98,6 +99,7 @@ export default async function handler(request: Request): Promise<Response> {
       failures: [],
     })
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     return Response.json(
       { error: error instanceof Error ? error.message : 'Manual catalog upsert failed.' },
       { status: 400 },

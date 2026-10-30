@@ -1,10 +1,10 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { adminStorageConfigured } from '../../lib/adminEventStore'
-import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression'
-import { getImportOwnershipSnapshot } from '../../lib/importOwnershipStore'
-import { normalizeRealUsername } from '../../lib/importOwnershipTypes'
-import { requireAppSession } from '../admin/_helpers'
+import { adminStorageConfigured } from '../../lib/adminEventStore.js'
+import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression.js'
+import { getImportOwnershipSnapshot } from '../../lib/importOwnershipStore.js'
+import { normalizeRealUsername } from '../../lib/importOwnershipTypes.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 type OwnershipImportRequest = {
   username?: unknown

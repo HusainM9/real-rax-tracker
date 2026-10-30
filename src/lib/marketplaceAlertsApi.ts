@@ -1,3 +1,4 @@
+import { safeFetch } from "./safeImportFetch"
 import {
   parseMarketplaceAlertRule,
   marketplaceRuleRarities,
@@ -74,7 +75,7 @@ export async function loadMarketplaceAlerts(): Promise<MarketplaceAlertsPayload>
       discordBotConfigured: true,
     }
   }
-  const response = await fetch('/api/account/marketplace-alerts', { credentials: 'include' })
+  const response = await safeFetch('/api/account/marketplace-alerts', { credentials: 'include' })
   const data = await readResponseJson<MarketplaceAlertsPayload & { error?: string }>(response)
   if (!response.ok) throw new Error(data.error || `Could not load marketplace alerts (${response.status}).`)
   return data
@@ -88,7 +89,7 @@ export async function saveMarketplaceDiscordRecipient(
     writeLocal(DEV_DELIVERY_SETTINGS_KEY, deliverySettings)
     return deliverySettings
   }
-  const response = await fetch('/api/account/marketplace-alerts', {
+  const response = await safeFetch('/api/account/marketplace-alerts', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -106,7 +107,7 @@ export async function saveMarketplaceAlerts(
     writeLocal(DEV_RULES_KEY, rules)
     return rules
   }
-  const response = await fetch('/api/account/marketplace-alerts', {
+  const response = await safeFetch('/api/account/marketplace-alerts', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -167,7 +168,7 @@ export async function scanMarketplaceAlertsNow(
     }
   }
 
-  const response = await fetch('/api/account/marketplace-scan', {
+  const response = await safeFetch('/api/account/marketplace-scan', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -180,7 +181,9 @@ export async function scanMarketplaceAlertsNow(
     requests?: number
     scanStatus?: MarketplaceScanStatus
     error?: string
+    skipped?: boolean
   }>(response)
+  if (data.skipped) throw new MarketplaceScanRequestError('A marketplace check is already running or was started within the last four minutes. Your saved alerts are unchanged.', null)
   if (!response.ok) {
     throw new MarketplaceScanRequestError(
       data.error || `Marketplace scan failed (${response.status}).`,
@@ -221,7 +224,7 @@ export async function ignoreMarketplaceAlertListing(
     return remaining
   }
 
-  const response = await fetch('/api/account/marketplace-alerts', {
+  const response = await safeFetch('/api/account/marketplace-alerts', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },

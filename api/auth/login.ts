@@ -1,16 +1,16 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   authConfigured,
   buildSessionCookieHeader,
   createSessionToken,
-} from '../../lib/authCookie'
+} from '../../lib/authCookie.js'
 import {
   checkLoginRateLimit,
   clearLoginRateLimitHeaders,
   delayFailedLoginAttempt,
   recordFailedLoginAttempt,
-} from '../../lib/loginRateLimit'
+} from '../../lib/loginRateLimit.js'
 
 export const config = {
   runtime: 'edge',

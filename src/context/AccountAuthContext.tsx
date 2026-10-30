@@ -1,3 +1,4 @@
+import { safeFetch } from "../lib/safeImportFetch"
 import {
   createContext,
   useCallback,
@@ -39,7 +40,7 @@ async function readAccountSession(): Promise<{
   }
 
   try {
-    const response = await fetch('/api/account/session', { credentials: 'include' })
+    const response = await safeFetch('/api/account/session', { credentials: 'include' })
     if (response.ok) {
       const data = (await response.json()) as {
         ok?: boolean
@@ -86,7 +87,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (accountUsername: string, password: string) => {
-      const response = await fetch('/api/account/login', {
+      const response = await safeFetch('/api/account/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -121,7 +122,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (accountUsername: string, password: string) => {
-      const response = await fetch('/api/account/register', {
+      const response = await safeFetch('/api/account/register', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -159,7 +160,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     clearLocalDevAccountPreference()
     try {
-      await fetch('/api/account/logout', { method: 'POST', credentials: 'include' })
+      await safeFetch('/api/account/logout', { method: 'POST', credentials: 'include' })
     } catch {
       // Still clear client state if logout request fails.
     }

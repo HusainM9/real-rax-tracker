@@ -1,6 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { computeClaimDayResults, computeYearRollup } from './claimOptimizer'
+import { computeClaimDayResults, computeYearRollup, computeSportClaim, chooseProBonus } from './claimOptimizer'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
+
+describe('shared prepared-claim primitives', () => {
+  it('ranks one collapsed sport with the same top-two and overlap rules', () => {
+    const candidates = [10, 40, 30].map((value, index) => ({
+      card: card(String(index), String(index), 'NBA'),
+      performance: perf(String(index), String(index), value),
+    }))
+    const result = computeSportClaim('NBA', candidates)
+    expect(result.guaranteed.map((candidate) => candidate.performance.raxEarned)).toEqual([40, 30])
+    expect(result.overlaps.map((candidate) => [candidate.performance.raxEarned, candidate.rankInSport])).toEqual([[10, 3]])
+    expect(result.totalGuaranteedRax).toBe(70)
+    expect(result.totalOverlapRax).toBe(10)
+  })
+
+  it('selects Pro by earnings then name and preserves input order for exact ties', () => {
+    const candidates = ['Zulu', 'Alpha', 'Alpha'].map((name, index) => ({
+      card: card(String(index), name, 'NBA'), performance: perf(String(index), String(index), 40),
+      status: 'overlap' as const, rankInSport: index + 3,
+    }))
+    expect(chooseProBonus(candidates)?.card.id).toBe('1')
+    expect(chooseProBonus([])).toBeNull()
+    expect(candidates.every((candidate) => candidate.status === 'overlap')).toBe(true)
+  })
+})
 
 function card(id: string, name: string, sport: PlayerCard['sport']): PlayerCard {
   return {

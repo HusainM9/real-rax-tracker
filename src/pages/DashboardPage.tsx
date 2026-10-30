@@ -1,10 +1,12 @@
-import { useMemo, useState, type ChangeEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { lazy, Suspense, useMemo, useState, type ChangeEvent } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatClaimDay, formatRax } from '../lib/format'
-import { dismissOnboarding, isOnboardingDismissed } from '../lib/onboarding'
 import { useRaxData } from '../context/RaxDataContext'
+import './DashboardPage.css'
+
+const EntryPage = lazy(() => import('./EntryPage'))
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
@@ -18,9 +20,8 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
 
 export default function DashboardPage() {
   const { data, setSettings, exportJson, importJson, resetAll } = useRaxData()
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => data.cards.length === 0 && !isOnboardingDismissed(),
-  )
+  const [searchParams] = useSearchParams()
+  const [showImport, setShowImport] = useState(() => searchParams.get('import') === '1')
   const claimResults = useMemo(() => computeClaimDayResults(data), [data])
   const rollup = useMemo(() => computeYearRollup(data, claimResults), [data, claimResults])
   const bestDays = useMemo(
@@ -28,125 +29,33 @@ export default function DashboardPage() {
     [claimResults],
   )
 
-  const onExport = () => {
-    const blob = new Blob([exportJson()], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
+  const exportBackup = () => {
+    const url = URL.createObjectURL(new Blob([exportJson()], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `real-rax-tracker-backup.json`
+    anchor.download = 'real-rax-tracker-backup.json'
     anchor.click()
     URL.revokeObjectURL(url)
   }
-
-  const onImport = (event: ChangeEvent<HTMLInputElement>) => {
+  const importBackup = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file) return
-    file.text().then((text) => {
-      try {
-        importJson(text)
-      } catch {
-        alert('Import failed. Please choose a valid RAX tracker JSON file.')
-      }
+    if (file) void file.text().then((content) => {
+      try { importJson(content) } catch { window.alert('Import failed. Please choose a valid RAX tracker JSON file.') }
     })
   }
 
-  const onReset = () => {
-    if (
-      window.confirm(
-        'Clear all cards, RAX entries, and settings? Export a backup first if you need one.',
-      )
-    ) {
-      resetAll()
-      setShowOnboarding(true)
-    }
-  }
-
-  const closeOnboarding = () => {
-    dismissOnboarding()
-    setShowOnboarding(false)
-  }
-
   return (
-    <div className="page-stack">
-      {showOnboarding ? (
-        <section className="panel onboarding-panel">
-          <div className="section-heading">
-            <div>
-              <h2>Getting started</h2>
-              <p>Three steps to plan your RAX On This Day claims.</p>
-            </div>
-            <button className="button" type="button" onClick={closeOnboarding}>
-              Dismiss
-            </button>
-          </div>
-          <ol className="onboarding-steps">
-            <li>
-              <strong>Import or add cards</strong> — use username import while realapp.tools is
-              available, then add future cards manually or from cached earnings.
-            </li>
-            <li>
-              <strong>Check the Dashboard</strong> — see claimable vs overlapped RAX across your
-              collection and toggle Pro bonus if you use it.
-            </li>
-            <li>
-              <strong>Plan with Calendar and Overlaps</strong> — pick the best claim days and
-              spot wasted RAX before you spend in the app.
-            </li>
-          </ol>
-          <div className="button-row">
-              <Link className="button primary" to="/entry">
-                Import / add cards
-            </Link>
-            <Link className="button" to="/help">
-              How it works
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="hero-card">
+    <div className="page-stack dashboard-page">
+      <section className="dashboard-heading">
         <div>
-          <p className="eyebrow">Overview</p>
-          <h2>Know what to claim before overlaps waste RAX.</h2>
-          <p>
-            Each OTD day shows which player cards are claimable vs overlapped. The calendar groups
-            by month/day so you can plan across your full collection.
-          </p>
-          <p className="import-hint">
-            Your collection auto-saves to your signed-in account. Export JSON anytime for an extra
-            backup.
-          </p>
+          <p className="dashboard-eyebrow">Your RAX at a glance</p>
+          <h1>Dashboard</h1>
+          <p>Your collection, claims, and next steps in one place.</p>
         </div>
-        <div className="hero-actions">
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={data.settings.proBonusEnabled}
-              onChange={(event) => setSettings({ proBonusEnabled: event.target.checked })}
-            />
-            Include Pro bonus claim
-          </label>
-          <div className="button-row">
-            <Link className="button primary" to="/entry">
-              Import / add RAX
-            </Link>
-            <Link className="button" to="/overlaps">
-              Review overlaps
-            </Link>
-            <button className="button" type="button" onClick={onExport}>
-              Export JSON
-            </button>
-            <label className="button">
-              Import JSON
-              <input className="sr-only" type="file" accept="application/json,.json" onChange={onImport} />
-            </label>
-            <button className="button danger" type="button" onClick={onReset}>
-              Clear all data
-            </button>
-          </div>
-        </div>
+        <button className="button primary" type="button" aria-expanded={showImport} aria-controls="dashboard-import" onClick={() => setShowImport((open) => !open)}>{showImport ? 'Close import' : 'Import / add cards'}</button>
       </section>
+      {showImport ? <section id="dashboard-import"><Suspense fallback={<p>Loading import tools…</p>}><EntryPage /></Suspense><details className="dashboard-data-tools"><summary>Backup and claim settings</summary><label className="toggle"><input type="checkbox" checked={data.settings.proBonusEnabled} onChange={(event) => setSettings({ proBonusEnabled: event.target.checked })} /> Include Pro bonus claim</label><div className="button-row"><button className="button" type="button" onClick={exportBackup}>Export JSON</button><label className="button">Import JSON<input className="sr-only" type="file" accept="application/json,.json" onChange={importBackup} /></label><button className="button danger" type="button" onClick={() => { if (window.confirm('Clear all cards, RAX entries, and settings? Export a backup first if you need one.')) resetAll() }}>Clear all data</button></div></details></section> : null}
 
       <section className="stats-grid">
         <StatCard
@@ -179,7 +88,7 @@ export default function DashboardPage() {
           </div>
           {bestDays.length === 0 ? (
             <p className="empty">
-              No claim days yet. <Link to="/entry">Import or add cards</Link> to get started.
+              No claim days yet. Use Import / add cards above to get started.
             </p>
           ) : (
             <div className="list">

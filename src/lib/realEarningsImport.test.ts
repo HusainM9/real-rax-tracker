@@ -11,6 +11,100 @@ afterEach(() => {
 })
 
 describe('fetchDailyRaxRows', () => {
+  it('stops queued batches after an embedded 5xx while retaining successful partial rows', async () => {
+    const passes = [1, 2, 3].map((entityId) => ({ externalKey: `${entityId}|2025|FC`, entityId, passKind: 'player' as const, sportRaw: 'fc', seasonYear: 2025, seasonLabel: '2025-26', name: `Player ${entityId}` }))
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ passes: [{ externalKey: passes[0]!.externalKey, source: 'cache', rows: [{ claimDay: '2025-02-01', baseRaxEarned: 12 }] }], failures: [{ externalKey: passes[1]!.externalKey, name: 'Player 2', kind: 'upstream', upstreamStatus: 500, retryable: false, message: 'Stopped' }] }))
+    vi.stubGlobal('fetch', fetcher)
+    const result = await fetchDailyRaxRows(passes, { batchSize: 2, concurrency: 1 })
+    expect(result.rowsByExternalKey.get(passes[0]!.externalKey)?.[0]?.baseRaxEarned).toBe(12)
+    expect(result.failures).toHaveLength(2)
+    expect(result.failures.every((failure) => failure.retryable === false && failure.upstreamStatus === 500)).toBe(true)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+  it('stops queued cache probes on an authorization failure without falling back to Real', async () => {
+    const passes = Array.from({ length: 200 }, (_, index) => ({
+      externalKey: `${index + 1}|2025|FC`,
+      entityId: index + 1,
+      passKind: 'player' as const,
+      sportRaw: 'fc',
+      seasonYear: 2025,
+      seasonLabel: '2025-26',
+      name: `Player ${index + 1}`,
+    }))
+    let releaseSibling!: (response: Response) => void
+    const sibling = new Promise<Response>((resolve) => { releaseSibling = resolve })
+    let finishSibling!: () => void
+    const siblingFinished = new Promise<void>((resolve) => { finishSibling = resolve })
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: 'Account login required' }, { status: 401 }))
+      .mockReturnValueOnce(sibling) as typeof fetch
+
+    const pending = fetchDailyRaxRows(passes, { cacheFirst: true, onProgress: finishSibling })
+    await expect(pending).rejects.toThrow('Account login required')
+    releaseSibling(Response.json({ passes: [] }))
+    await siblingFinished
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('probes a large warm collection in one cache-only request instead of many upstream batches', async () => {
+    const passes = Array.from({ length: 60 }, (_, index) => ({ externalKey: `${index}|2025|FC`, entityId: index + 1, passKind: 'player' as const, sportRaw: 'fc', seasonYear: 2025, seasonLabel: '2025-26', name: `Player ${index}` }))
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.cacheOnly).toBe(true)
+      return Response.json({ passes: body.passes.map((pass: { externalKey: string }) => ({ externalKey: pass.externalKey, source: 'cache', rows: [] })) })
+    }) as typeof fetch
+    const result = await fetchDailyRaxRows(passes, { cacheFirst: true })
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(result.stats).toMatchObject({ requested: 60, cacheHits: 60, upstreamRequests: 0 })
+  })
+
+  it('refreshes only cache misses and gracefully falls back when the probe is unavailable', async () => {
+    const passes = Array.from({ length: 18 }, (_, index) => ({ externalKey: `${index}|2025|FC`, entityId: index + 1, passKind: 'player' as const, sportRaw: 'fc', seasonYear: 2025, seasonLabel: '2025-26', name: `Player ${index}` }))
+    const batches: number[] = []
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      const items = body.cacheOnly ? body.passes.slice(0, 16) : body.passes
+      if (!body.cacheOnly) batches.push(items.length)
+      return Response.json({ passes: items.map((pass: { externalKey: string }) => ({ externalKey: pass.externalKey, source: 'cache', rows: [] })), stats: { cacheHits: items.length, fetched: 0, upstreamRequests: 0, cacheConfigured: true } })
+    }) as typeof fetch
+    const result = await fetchDailyRaxRows(passes, { cacheFirst: true })
+    expect(batches).toEqual([2])
+    expect(result.stats.cacheHits).toBe(18)
+
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      if (body.cacheOnly) return Response.json({ error: 'Older server' }, { status: 400 })
+      return Response.json({ passes: body.passes.map((pass: { externalKey: string }) => ({ externalKey: pass.externalKey, source: 'cache', rows: [] })) })
+    }) as typeof fetch
+    expect((await fetchDailyRaxRows(passes, { cacheFirst: true })).rowsByExternalKey.size).toBe(18)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3)
+  })
+  it('starts the next batch as soon as a concurrency slot becomes free', async () => {
+    const passes = Array.from({ length: 3 }, (_, index) => ({
+      externalKey: `${index}|2025|FC`, entityId: index + 1, passKind: 'player' as const,
+      sportRaw: 'fc', seasonYear: 2025, seasonLabel: '2025-26', name: `Player ${index}`,
+    }))
+    const releases: Array<(response: Response) => void> = []
+    globalThis.fetch = vi.fn(() => new Promise<Response>((resolve) => releases.push(resolve))) as typeof fetch
+    const progress: number[] = []
+    const pending = fetchDailyRaxRows(passes, {
+      batchSize: 1, concurrency: 2, onProgress: ({ completed }) => progress.push(completed),
+    })
+    expect(releases).toHaveLength(2)
+    const response = (key: string) => Response.json({
+      ok: true,
+      passes: [{ externalKey: key, source: 'cache', rows: [] }],
+    })
+    releases[1]!(response(passes[1]!.externalKey))
+    await vi.waitFor(() => expect(releases).toHaveLength(3))
+    expect(progress).toEqual([1])
+    releases[2]!(response(passes[2]!.externalKey))
+    releases[0]!(response(passes[0]!.externalKey))
+    const result = await pending
+    expect(progress).toEqual([1, 2, 3])
+    expect([...result.rowsByExternalKey.keys()]).toEqual(passes.map((pass) => pass.externalKey))
+  })
+
   it('chunks passes at the route max and reports progress between batches', async () => {
     const passes = Array.from({ length: REAL_EARNINGS_PASSES_MAX_REQUEST + 2 }, (_, index) => ({
       externalKey: `${index}|2025|FC`,
@@ -67,7 +161,7 @@ describe('fetchDailyRaxRows', () => {
     )
   })
 
-  it('degrades a failed batch into per-pass failures so later batches can continue', async () => {
+  it('stops later batches after any 5xx instead of treating it as retryable partial work', async () => {
     const passes = [
       {
         externalKey: '1|2025|FC',
@@ -123,15 +217,10 @@ describe('fetchDailyRaxRows', () => {
 
     const result = await fetchDailyRaxRows(passes, { batchSize: 1, concurrency: 1 })
 
-    expect(result.failures).toEqual([
-      expect.objectContaining({
-        externalKey: '1|2025|FC',
-        kind: 'batch',
-      }),
-    ])
-    expect(result.rowsByExternalKey.get('2|2025|FC')).toEqual([
-      { claimDay: '2025-01-10', baseRaxEarned: 3, playerBoxScoreId: null },
-    ])
+    expect(result.failures).toHaveLength(2)
+    expect(result.failures.every((failure) => failure.upstreamStatus === 502 && failure.retryable === false)).toBe(true)
+    expect(result.rowsByExternalKey.size).toBe(0)
+    expect(calls).toBe(1)
   })
 
   it('retries a batch-level 429 then keeps partial later successes', async () => {

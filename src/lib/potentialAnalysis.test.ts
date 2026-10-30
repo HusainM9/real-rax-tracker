@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { analyzePotentialCard, buildPotentialMonthlyNet } from './potentialAnalysis'
+import { analyzePotentialCard, buildPotentialMonthlyNet, preparePotentialAnalysis } from './potentialAnalysis'
+import { computeClaimDayResults } from './claimOptimizer'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
 
 function card(id: string, name: string): PlayerCard {
@@ -25,6 +26,36 @@ function perf(id: string, cardId: string, rax: number, claimDay: string): RaxPer
 }
 
 describe('analyzePotentialCard', () => {
+  it('subtracts guaranteed cards moved into Pro when reporting monthly guaranteed net', () => {
+    const current = { ...data, performances: [
+      perf('p1', 'c1', 100, '2026-03-01'), perf('p2', 'c2', 90, '2026-03-01'), perf('p3', 'c3', 80, '2026-03-01'),
+    ] }
+    const result = analyzePotentialCard(current, { name: 'New pass', sport: 'NBA', season: '2025-26' }, [
+      { claimDay: '2026-03-01', raxEarned: 95, note: '' },
+    ])!
+    expect(result.collectionGuaranteedNetDelta).toBe(5)
+    expect(result.collectionNetDelta).toBe(15)
+    expect(result.monthlyNet[0]).toMatchObject({ guaranteedNetDelta: 5, netDelta: 15, guaranteedDisplacedLoss: 90 })
+  })
+
+  it('matches full-collection reference totals across mixed sports, UFC sums, duplicate days and simulations', () => {
+    for (let seed = 1; seed <= 24; seed += 1) {
+      const sports = ['NBA', 'NHL', 'UFC'] as const
+      const cards = Array.from({ length: 24 }, (_, index) => ({ ...card(`c${index}`, `Name ${index % 5}`), sport: sports[index % 3]!, ...(index % 4 === 0 ? { rarityLabel: 'Legendary 1', simulatedRarityLabel: 'Mystic 1' } : {}) }))
+      const performances = cards.flatMap((owned, index) => Array.from({ length: 8 }, (_, day) => ({ ...perf(`${index}-${day}`, owned.id, ((index * seed + day) % 20) + 1, `${2024 + day % 2}-03-${String(day % 4 + 1).padStart(2, '0')}`), baseRaxEarned: 1 })))
+      const current = { ...data, cards, performances, settings: { ...data.settings, proBonusEnabled: true } }
+      const profile = { name: 'Candidate', sport: sports[seed % 3]!, season: '2026' }
+      const rows = [{ claimDay: '2026-03-01', raxEarned: seed, note: '' }, { claimDay: '2025-03-01', raxEarned: seed + 1, note: '' }]
+      const after = { ...current, cards: [...cards, { ...card('potential-card', profile.name), sport: profile.sport }], performances: [...performances, ...rows.map((row, index) => perf(`new-${index}`, 'potential-card', row.raxEarned, row.claimDay))] }
+      const beforeDays = computeClaimDayResults(current)
+      const afterDays = computeClaimDayResults(after)
+      const optimized = analyzePotentialCard(current, profile, rows, { prepared: preparePotentialAnalysis(current), includeBreakdowns: false })!
+      expect(optimized.collectionNetDelta).toBe(afterDays.reduce((sum, day) => sum + day.totalClaimableRax, 0) - beforeDays.reduce((sum, day) => sum + day.totalClaimableRax, 0))
+      expect(optimized.collectionGuaranteedNetDelta).toBe(afterDays.reduce((sum, day) => sum + day.totalGuaranteedRax, 0) - beforeDays.reduce((sum, day) => sum + day.totalGuaranteedRax, 0))
+      expect(optimized.claimDayBreakdowns).toEqual([])
+      expect(optimized.candidates.map(({ candidate }) => [candidate.performance.raxEarned, candidate.status])).toEqual(afterDays.flatMap((day) => day.sports.flatMap((sport) => [...sport.guaranteed, ...sport.overlaps])).filter((candidate) => candidate.card.id === 'potential-card').map((candidate) => [candidate.performance.raxEarned, candidate.status]))
+    }
+  })
   const data: RaxTrackerData = {
     version: 1,
     settings: { proBonusEnabled: false, savedUsername: '' },

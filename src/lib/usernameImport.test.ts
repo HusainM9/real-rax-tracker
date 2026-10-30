@@ -329,7 +329,7 @@ describe('importFromUsername', () => {
         )
       }
 
-      if (url.includes('market-data') && body.action === 'get_daily_earnings') {
+      if (url.includes('market-data') && (body.action === 'get_daily_earnings' || body.action === 'get_team_daily_earnings')) {
         return Promise.resolve(
           new Response(JSON.stringify({ rows: [{ day: '2026-04-15', earnings: 12 }] }), {
             status: 200,

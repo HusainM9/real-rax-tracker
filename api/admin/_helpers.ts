@@ -3,16 +3,16 @@ import {
   getSessionCookieName,
   readCookie,
   verifySessionToken,
-} from '../../lib/authCookie'
+} from '../../lib/authCookie.js'
 import {
   getAccountCookieName,
   verifyAccountSessionToken,
-} from '../../lib/accountAuth'
+} from '../../lib/accountAuth.js'
 import {
   getAdminCookieName,
   verifyAdminSessionToken,
-} from '../../lib/adminAuth'
-import { accountSessionIsRevoked } from '../../lib/accountCredentialsStore'
+} from '../../lib/adminAuth.js'
+import { accountSessionIsRevoked } from '../../lib/accountCredentialsStore.js'
 
 export async function hasAppSession(request: Request): Promise<boolean> {
   if (process.env.NODE_ENV === 'development') return true

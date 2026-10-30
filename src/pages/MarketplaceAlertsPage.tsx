@@ -32,6 +32,7 @@ import {
 } from '../lib/marketplacePlayerSelection'
 import { fetchRealUserPasses } from '../lib/realPassImport'
 import { SPORTS } from '../types/rax'
+import { MARKETPLACE_ALERTS_ENABLED } from '../../lib/marketplaceAvailability'
 
 type Draft = Omit<MarketplaceAlertRule, 'id' | 'createdAt' | 'updatedAt' | 'enabled' | 'players' | 'pricePerRatingMax'> & {
   players: MarketplaceAlertPlayer[]
@@ -169,7 +170,7 @@ function formatAge(iso: string): string {
 }
 
 function scanStatusSummary(scanStatus: MarketplaceScanStatus | null): string {
-  if (!scanStatus) return 'The hosted two-minute monitor has not run yet.'
+  if (!scanStatus) return 'The hosted four-minute monitor has not run yet.'
   if (scanStatus.error) return `Last scan failed ${formatAge(scanStatus.finishedAt)}: ${scanStatus.error}`
   const delivery = scanStatus.deliveryChannel
     ? ` · ${scanStatus.delivered} sent by ${scanStatus.deliveryChannel}`
@@ -184,6 +185,17 @@ function formatScanTime(iso: string): string {
 }
 
 export default function MarketplaceAlertsPage() {
+  if (!MARKETPLACE_ALERTS_ENABLED) return (
+    <main className="page-stack marketplace-alerts-page">
+      <h1>Marketplace alerts</h1>
+      <p>Temporarily disabled. Automatic checks, manual scans and notifications are off until further notice.</p>
+      <p>Your saved rules and alert history have been kept.</p>
+    </main>
+  )
+  return <MarketplaceAlertsContent />
+}
+
+function MarketplaceAlertsContent() {
   const { data } = useRaxData()
   const { username: accountUsername } = useAccountAuth()
   const scanInFlightRef = useRef(false)
@@ -535,6 +547,8 @@ export default function MarketplaceAlertsPage() {
         </div>
       </section>
 
+      <div className="page-stack">
+
       <section className="marketplace-health" role="status">
         <span className="marketplace-health-dot" aria-hidden="true" />
         <div><strong>{status}</strong><span>{scanStatusSummary(scanStatus)}</span></div>
@@ -660,7 +674,7 @@ export default function MarketplaceAlertsPage() {
 
         <aside className="marketplace-side-stack">
           <section className="panel marketplace-rules-panel">
-            <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every two minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
+            <div className="section-heading"><span className="marketplace-section-number">02</span><div><h2>Saved alerts</h2><p>Checked every four minutes</p></div><span className="marketplace-count">{rules.length}</span></div>
             {rules.length === 0 ? (
               <div className="marketplace-empty"><strong>No alerts yet</strong><span>Saved alerts will appear here.</span></div>
             ) : (
@@ -705,7 +719,7 @@ export default function MarketplaceAlertsPage() {
             )}
           </section>
           <section className="panel marketplace-scan-log-panel">
-            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>The hosted monitor runs every two minutes with the page open or closed.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Hosted · 2 min'}</span></div>
+            <div className="marketplace-scan-log-heading"><div><h2>Scan log</h2><p>The hosted monitor runs every four minutes with the page open or closed.</p></div><span className={busy ? 'scanning' : ''}>{busy ? 'Scanning' : 'Hosted · 4 min'}</span></div>
             {busy ? <div className="marketplace-scan-live"><i aria-hidden="true" /><span>Requesting the latest bulk-rating feeds…</span></div> : null}
             {scanLog.length === 0 ? (
               <div className="marketplace-empty"><strong>No scans recorded yet</strong><span>The next hosted or manual check will appear here.</span></div>
@@ -802,6 +816,7 @@ export default function MarketplaceAlertsPage() {
           </section>
         </div>
       ) : null}
+      </div>
     </div>
   )
 }

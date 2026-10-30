@@ -1,18 +1,18 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
   buildAccountSessionCookieHeader,
   createAccountSessionToken,
-} from '../../lib/accountAuth'
-import { accountLoginEnvHint, getAccountEnvStatus } from '../../lib/accountEnvStatus'
+} from '../../lib/accountAuth.js'
+import { accountLoginEnvHint, getAccountEnvStatus } from '../../lib/accountEnvStatus.js'
 import {
   checkLoginRateLimit,
   clearLoginRateLimitHeaders,
   delayFailedLoginAttempt,
   recordFailedLoginAttempt,
-} from '../../lib/loginRateLimit'
-import { accountsConfigured, verifyAccountCredentials } from '../../lib/trackerProfileStore'
-import { requireAppSession } from '../admin/_helpers'
+} from '../../lib/loginRateLimit.js'
+import { accountsConfigured, verifyAccountCredentials } from '../../lib/trackerProfileStore.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 export const config = {
   runtime: 'edge',

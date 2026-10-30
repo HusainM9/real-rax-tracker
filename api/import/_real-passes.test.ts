@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
 import type { RealPassPayload } from '../../lib/realPassScan'
 import handler from './real-passes'
@@ -10,6 +10,8 @@ const REAL_ENV_KEYS = [
   'REAL_SESSION_TOKEN',
   'REAL_DEVICE_UUID',
   'REAL_BASE_URL',
+  'KV_REST_API_URL',
+  'KV_REST_API_TOKEN',
 ] as const
 
 const originalFetch = globalThis.fetch
@@ -92,6 +94,8 @@ describe('POST /api/import/real-passes', () => {
     }
     // Keep the app-session gate open: unconfigured auth allows the request through.
     delete process.env.BASIC_AUTH_PASSWORD
+    delete process.env.KV_REST_API_URL
+    delete process.env.KV_REST_API_TOKEN
     configureRealEnv()
   })
 
@@ -198,11 +202,31 @@ describe('POST /api/import/real-passes', () => {
     await expect(response.json()).resolves.toMatchObject({ code: 'real_no_passes' })
   })
 
-  it('surfaces upstream failures as 502', async () => {
+  it('preserves the upstream 500 as a non-retryable blocked response', async () => {
     mockRealFetch({ passes: new Response('boom', { status: 500 }) })
     const response = await handler(passesRequest())
 
-    expect(response.status).toBe(502)
-    await expect(response.json()).resolves.toMatchObject({ code: 'real_upstream' })
+    expect(response.status).toBe(423)
+    await expect(response.json()).resolves.toMatchObject({ code: 'request_blocked', upstreamStatus: 500, retryable: false })
+  })
+
+  it('carries an uncertain incident reference through the import API without repeating the lookup', async () => {
+    const logger = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetcher = vi.fn().mockRejectedValue(new TypeError('private connection details', { cause: { code: 'ECONNRESET' } }))
+    globalThis.fetch = fetcher
+    try {
+      const first = await handler(passesRequest('release-fixture'))
+      const firstBody = await first.json() as { error: string; retryable: boolean; upstreamStatus?: number }
+      expect(first.status).toBe(423)
+      expect(firstBody.retryable).toBe(false)
+      expect(firstBody.upstreamStatus).toBeUndefined()
+      const reference = firstBody.error.match(/Reference: ([a-f0-9-]{36})\./)?.[1]
+      expect(reference).toBeDefined()
+      const later = await handler(passesRequest('release-fixture'))
+      expect(later.status).toBe(423)
+      expect((await later.json()).error).toContain(reference)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(logger).toHaveBeenCalledWith('request-safety incident', expect.objectContaining({ provider: 'real', incidentId: reference, reason: 'connection_reset' }))
+    } finally { logger.mockRestore() }
   })
 })

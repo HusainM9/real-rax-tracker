@@ -52,6 +52,30 @@ function freshProfile(overrides: Partial<CatalogImportProfile> = {}): CatalogImp
 }
 
 describe('backfillRealPassEarnings', () => {
+  it('stops queued earnings after a 5xx and marks both failed and skipped passes non-retryable', async () => {
+    const fetchEarnings = vi.fn().mockRejectedValue(new RealApiError('upstream', 'Upstream failed', 500))
+    const result = await backfillRealPassEarnings([samplePass, { ...samplePass, entityId: 552, externalKey: '552|2025|FC' }], { fetchEarnings, concurrency: 1 })
+    expect(fetchEarnings).toHaveBeenCalledTimes(1)
+    expect(result.failures).toHaveLength(2)
+    expect(result.failures.every((failure) => failure.retryable === false && failure.upstreamStatus === 500)).toBe(true)
+    expect(result.stats.fetched).toBe(0)
+  })
+  it('a cache-only probe returns fresh hits and explicit misses without any upstream calls or writes', async () => {
+    const fetchEarnings = vi.fn()
+    const savePasses = vi.fn()
+    const saveDailyEarnings = vi.fn()
+    const miss = { ...samplePass, externalKey: '552|2025|FC', entityId: 552 }
+    const result = await backfillRealPassEarnings([samplePass, miss], {
+      fetchEarnings, savePasses, saveDailyEarnings, cacheOnly: true,
+      loadCachedProfiles: async () => ({ profiles: [freshProfile()], storageConfigured: true }),
+    })
+    expect(result.passes.map((pass) => pass.externalKey)).toEqual([samplePass.externalKey])
+    expect(result.failures).toEqual([expect.objectContaining({ externalKey: miss.externalKey, kind: 'cache_miss' })])
+    expect(result.stats).toMatchObject({ cacheHits: 1, fetched: 0, upstreamRequests: 0 })
+    expect(fetchEarnings).not.toHaveBeenCalled()
+    expect(savePasses).not.toHaveBeenCalled()
+    expect(saveDailyEarnings).not.toHaveBeenCalled()
+  })
   it('serves fresh catalog rows without calling Real', async () => {
     const fetchEarnings = vi.fn()
     const savePasses = vi.fn()

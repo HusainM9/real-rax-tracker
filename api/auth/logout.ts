@@ -1,6 +1,6 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { clearSessionCookieHeader } from '../../lib/authCookie'
+import { clearSessionCookieHeader } from '../../lib/authCookie.js'
 
 export const config = {
   runtime: 'edge',

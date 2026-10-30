@@ -1,4 +1,4 @@
-import { normalizeRealUsername } from './importOwnershipTypes'
+import { normalizeRealUsername } from './importOwnershipTypes.js'
 
 /** Strip accidental surrounding quotes from env values (common in copied .env.local). */
 export function stripEnvQuotes(value: string | undefined | null): string {

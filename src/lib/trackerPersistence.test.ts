@@ -1,6 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyData } from './storage'
-import { storageWarningMessage } from './trackerPersistence'
+import { loadPersistedTrackerData, persistTrackerData, storageWarningMessage } from './trackerPersistence'
+
+afterEach(() => { localStorage.clear(); vi.unstubAllGlobals() })
+
+describe('account-scoped persistence', () => {
+  it('isolates signed-in caches while preserving unassigned legacy data', async () => {
+    vi.stubGlobal('indexedDB', undefined)
+    const legacy = { ...createEmptyData(), settings: { proBonusEnabled: true, savedUsername: 'legacy' } }
+    await persistTrackerData(legacy)
+    const alice = { ...legacy, settings: { ...legacy.settings, savedUsername: 'alice' } }
+    await persistTrackerData(alice, { accountUsername: 'Alice' })
+    expect((await loadPersistedTrackerData({ accountUsername: 'alice' })).data.settings.savedUsername).toBe('alice')
+    expect((await loadPersistedTrackerData({ accountUsername: 'bob' })).data.cards).toEqual([])
+    expect((await loadPersistedTrackerData({ accountUsername: 'bob' })).data.settings.savedUsername).toBe('')
+    expect((await loadPersistedTrackerData()).data.settings.savedUsername).toBe('legacy')
+  })
+})
 
 describe('trackerPersistence', () => {
   it('warns when neither storage backend saved', () => {

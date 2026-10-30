@@ -1,4 +1,4 @@
-import { kv } from '@vercel/kv'
+import { kv } from './noRetryKv.js'
 import { adminStorageConfigured } from './adminEventStore.js'
 import type { RealPlayerBoxScore } from './realApi.js'
 

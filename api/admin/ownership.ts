@@ -1,13 +1,13 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { adminStorageConfigured } from '../../lib/adminEventStore'
-import { normalizeRealUsername, validateImportOwnershipSnapshot } from '../../lib/importOwnershipTypes'
+import { adminStorageConfigured } from '../../lib/adminEventStore.js'
+import { normalizeRealUsername, validateImportOwnershipSnapshot } from '../../lib/importOwnershipTypes.js'
 import {
   getImportOwnershipSnapshot,
   listImportOwnershipSnapshotSummaries,
   upsertImportOwnershipSnapshot,
-} from '../../lib/importOwnershipStore'
-import { requireAdminSession, requireAppSession } from './_helpers'
+} from '../../lib/importOwnershipStore.js'
+import { requireAdminSession, requireAppSession } from './_helpers.js'
 
 export const config = {
   runtime: 'edge',

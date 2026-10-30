@@ -1,20 +1,21 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression'
+import { gzipJsonToBase64 } from '../../lib/cloudSyncCompression.js'
 import {
   RealApiError,
-  getUserByUsername,
-  listPasses,
   normalizeRealUsernameInput,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
-} from '../../lib/realApi'
-import { buildRealPassPayload, scanRealUserPasses } from '../../lib/realPassScan'
-import { requireAppSession } from '../admin/_helpers'
+} from '../../lib/realApi.js'
+import { buildRealPassPayload } from '../../lib/realPassScan.js'
+import { getRealOwnershipSnapshot } from '../../lib/realOwnershipSnapshot.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 type RealPassesRequest = {
   username?: unknown
+  forceRefresh?: unknown
 }
 
 export const config = {
@@ -22,6 +23,7 @@ export const config = {
 }
 
 function errorResponse(error: unknown): Response {
+  if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
   if (error instanceof RealApiError) {
     switch (error.kind) {
       case 'auth':
@@ -83,11 +85,11 @@ export default async function handler(request: Request): Promise<Response> {
   const context: RealApiContext = { config: realConfig, signal: request.signal }
 
   try {
-    const user = await getUserByUsername(username, context)
-    const scan = await scanRealUserPasses(user.id, (query) => listPasses(query, context), {
-      concurrency: realConfig.concurrency,
+    const { user, passes, fetchedAt, source } = await getRealOwnershipSnapshot(username, context, {
+      // A collection replacement is fresh by default; its scan can then accelerate Packs.
+      forceRefresh: body.forceRefresh !== false,
     })
-    const payload = buildRealPassPayload(scan.passes)
+    const payload = buildRealPassPayload(passes)
 
     if (payload.playerPasses.length === 0 && payload.teamPasses.length === 0) {
       return Response.json(
@@ -101,11 +103,13 @@ export default async function handler(request: Request): Promise<Response> {
       source: 'real_api',
       username: user.userName,
       userId: user.id,
-      strategy: scan.strategy,
-      requests: scan.requests,
+      strategy: 'single',
+      requests: source === 'real' ? 1 : 0,
+      fetchedAt,
+      snapshotSource: source,
       // Raw count exposes silent truncation: no pagination cursor has been observed, but the
       // largest verified collection was ~1251 passes.
-      rawPassCount: scan.passes.length,
+      rawPassCount: passes.length,
       counts: {
         playerPasses: payload.playerPasses.length,
         teamPasses: payload.teamPasses.length,

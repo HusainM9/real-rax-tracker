@@ -1,9 +1,9 @@
-import { parseBoosterCardMultiplier } from './passEarningsBoost'
-import { RARITY_TIERS, passRarityLookupKey } from './rarityFilter'
-import { runWithConcurrency } from './runWithConcurrency'
-import { resolveCatalogPassSeasonYear } from './seasonClaimWindow'
-import { seasonLabelFromSportRaw } from './usernameImportShared'
-import type { RealPass, RealPassQuery } from './realApi'
+import { parseBoosterCardMultiplier } from './passEarningsBoost.js'
+import { RARITY_TIERS, passRarityLookupKey } from './rarityFilter.js'
+import { runWithConcurrency } from './runWithConcurrency.js'
+import { resolveCatalogPassSeasonYear } from './seasonClaimWindow.js'
+import { seasonLabelFromSportRaw } from './usernameImportShared.js'
+import type { RealPass, RealPassQuery } from './realApi.js'
 
 export type RealPassKind = 'player' | 'team'
 

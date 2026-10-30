@@ -1,18 +1,19 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
 import {
   listPlayerPlaysForPackAverage,
   realImportConfigStatus,
   resolveRealApiConfig,
   type RealApiContext,
-} from '../../lib/realApi'
+} from '../../lib/realApi.js'
 import {
   averagePlayRatingsFromPlays,
   ratingPerPackFromPlayAverage,
   toRealPlaySportSlug,
   MIN_RATING_PER_PACK,
-} from '../../lib/playAverages'
-import { requireAppSession } from '../admin/_helpers'
+} from '../../lib/playAverages.js'
+import { requireAppSession } from '../admin/_helpers.js'
 
 type PlayAveragePassInput = {
   externalKey?: unknown
@@ -211,6 +212,7 @@ export default async function handler(request: Request): Promise<Response> {
         errors: [],
       })
     } catch (error) {
+      if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
       return Response.json({
         ok: true,
         resultCount: 0,
@@ -224,6 +226,7 @@ export default async function handler(request: Request): Promise<Response> {
       })
     }
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     console.error('play-averages: unhandled', error)
     return Response.json(
       {

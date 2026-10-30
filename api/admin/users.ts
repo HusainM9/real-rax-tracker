@@ -1,7 +1,7 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { listAdminUsers } from '../../lib/adminEventStore'
-import { requireAdminSession } from './_helpers'
+import { listAdminUsers } from '../../lib/adminEventStore.js'
+import { requireAdminSession } from './_helpers.js'
 
 export const config = {
   runtime: 'edge',

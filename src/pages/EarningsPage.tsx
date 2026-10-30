@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
-import { cacheDailyEarningsResult, DailyEarningsRequestError, fetchAccountDailyEarnings, readCachedDailyEarningsResults, syncLinkedEarningsTracking, type DailyEarningsResult, type DailyEarningsResultCache } from '../lib/dailyEarnings'
-import { highestAverageWeekday, highestEarningDay, rankEarningPasses, rankEarningSports, readEarningsHistory, replaceEarningsHistoryForUsernames, saveEarningsHistoryEntry, sumHistory, type EarningsHistoryEntry } from '../lib/earningsHistory'
+import { cacheDailyEarningsResult, cacheDailyEarningsResults, DailyEarningsRequestError, fetchAccountDailyEarnings, readCachedDailyEarningsResults, syncLinkedEarningsTracking, type DailyEarningsResult, type DailyEarningsResultCache } from '../lib/dailyEarnings'
+import { filterEarningsHistory, highestAverageWeekday, highestEarningDay, rankEarningPasses, rankEarningSports, readEarningsHistory, replaceEarningsHistoryForUsernames, saveEarningsHistoryEntry, sumHistory, weeklyEarningsTotals, type EarningsHistoryEntry } from '../lib/earningsHistory'
 import { formatRax } from '../lib/format'
+import './EarningsPage.css'
 
 function currentRealEarningsDay(now = new Date()): string {
   const parts = Object.fromEntries(
@@ -140,6 +141,7 @@ function historyEntry(result: DailyEarningsResult): EarningsHistoryEntry {
       label: row.pass.label,
       sport: row.pass.sport,
       totalEarnings: row.totalEarnings,
+      avatar: row.pass.avatar || undefined,
     })),
   }
 }
@@ -174,21 +176,23 @@ function EarningsBarChart({
   entries: EarningsHistoryEntry[]
   compact?: boolean
 }) {
-  const ceiling = earningsChartCeiling(Math.max(1, ...entries.map((entry) => entry.dailyTotal)))
+  const weekly = entries.length > 45
+  const buckets = weekly ? weeklyEarningsTotals(entries) : entries
+  const ceiling = earningsChartCeiling(Math.max(1, ...buckets.map((entry) => entry.dailyTotal)))
   if (entries.length === 0) return <p className="empty">No tracked days yet.</p>
 
   return (
-    <div className={`earnings-chart-layout${compact ? ' is-compact' : ''}`}>
+    <div><p className="earnings-chart-granularity">{weekly ? 'Weekly totals · week starting Monday' : 'Daily totals'}</p><div className={`earnings-chart-layout${compact ? ' is-compact' : ''}`}>
       <div className="earnings-chart-axis" aria-hidden="true">
         <span>{formatRax(ceiling)}</span>
         <span>{formatRax(ceiling / 2)}</span>
         <span>0</span>
       </div>
-      <div className={`earnings-chart${entries.length <= 7 ? ' is-sparse' : ''}`} role="img" aria-label="Daily earnings over the last 30 tracked days">
-        {entries.map((entry) => {
+      <div className={`earnings-chart${buckets.length <= 7 ? ' is-sparse' : ''}${buckets.length > 16 ? ' is-dense' : ''}`} role="img" aria-label={`${weekly ? 'Weekly' : 'Daily'} earnings for ${entries.length} tracked days`}>
+        {buckets.map((entry, index) => {
           const dayLabel = earningsChartDayLabel(entry.day)
           return (
-            <div className="earnings-chart-column" key={entry.day} title={`${dayLabel.full}: ${formatRax(entry.dailyTotal)} RAX`}>
+            <div className={`earnings-chart-column${index % Math.ceil(buckets.length / 8) === 0 || index === buckets.length - 1 ? ' has-label' : ''}`} key={entry.day} title={`${weekly ? 'Week of ' : ''}${dayLabel.full}: ${formatRax(entry.dailyTotal)} RAX`}>
               <strong>{formatRax(entry.dailyTotal)}</strong>
               <div className="earnings-chart-track"><span style={{ height: `${Math.max(3, (entry.dailyTotal / ceiling) * 100)}%` }} /></div>
               <small><span>{dayLabel.weekday}</span><span>{dayLabel.date}</span></small>
@@ -196,7 +200,7 @@ function EarningsBarChart({
           )
         })}
       </div>
-    </div>
+    </div></div>
   )
 }
 
@@ -221,6 +225,10 @@ export default function EarningsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [refreshLog, setRefreshLog] = useState<RefreshLogEntry[]>([])
+  const [historyRange, setHistoryRange] = useState<'30' | '90' | 'all' | 'custom'>('30')
+  const [rangeStart, setRangeStart] = useState('')
+  const [rangeEnd, setRangeEnd] = useState('')
+  const [historyLimit, setHistoryLimit] = useState<number | null>(null)
   const [history, setHistory] = useState<EarningsHistoryEntry[]>(() => isDemo ? DEMO_HISTORY : readEarningsHistory())
   const result = useMemo(() => {
     if (isDemo) return DEMO_RESULT
@@ -258,7 +266,16 @@ export default function EarningsPage() {
     [availableDays, latestDay],
   )
   const isHistoricalDay = day !== latestDay
-  const recentHistory = accountHistory.slice(-30)
+  const rangeStartDay = useMemo(() => {
+    if (historyRange === 'all') return ''
+    if (historyRange === 'custom') return rangeStart
+    const date = new Date(`${day}T12:00:00Z`)
+    date.setUTCDate(date.getUTCDate() - (Number(historyRange) - 1))
+    return date.toISOString().slice(0, 10)
+  }, [day, historyRange, rangeStart])
+  const rangeEndDay = historyRange === 'custom' ? rangeEnd : historyRange === 'all' ? '' : day
+  const invalidRange = Boolean(rangeStartDay && rangeEndDay && rangeStartDay > rangeEndDay)
+  const rangeHistory = invalidRange ? [] : filterEarningsHistory(accountHistory, rangeStartDay, rangeEndDay)
   const selectedDate = new Date(`${day}T12:00:00`)
   const weekStart = new Date(selectedDate)
   weekStart.setDate(selectedDate.getDate() - ((selectedDate.getDay() + 6) % 7))
@@ -288,16 +305,16 @@ export default function EarningsPage() {
     entries: history
       .filter((row) => row.username.toLowerCase() === account.username.toLowerCase())
       .sort((a, b) => a.day.localeCompare(b.day))
-      .slice(-30),
-  })), [history, linkedAccounts])
+      .filter((row) => !invalidRange && (!rangeStartDay || row.day >= rangeStartDay) && (!rangeEndDay || row.day <= rangeEndDay)),
+  })), [history, linkedAccounts, invalidRange, rangeStartDay, rangeEndDay])
   const reportSubject = isAllAccounts ? 'all linked accounts' : `@${result?.username ?? selectedUsername}`
-  const highestDay = highestEarningDay(accountHistory)
-  const bestWeekday = highestAverageWeekday(accountHistory)
-  const topPasses = rankEarningPasses(accountHistory)
+  const highestDay = highestEarningDay(rangeHistory)
+  const bestWeekday = highestAverageWeekday(rangeHistory)
+  const topPasses = rankEarningPasses(rangeHistory)
   const selectedDayRows = result
     ? [historyEntry(result)]
     : accountHistory.filter((row) => row.day === day)
-  const sportRankings = rankEarningSports(accountHistory)
+  const sportRankings = rankEarningSports(rangeHistory)
   const daySportTotals = new Map(
     rankEarningSports(selectedDayRows).map((row) => [row.sport.toLowerCase(), row.total]),
   )
@@ -320,17 +337,15 @@ export default function EarningsPage() {
     void syncLinkedEarningsTracking(
       linkedAccounts.map((account) => account.username),
       controller.signal,
-    ).then(({ snapshots }) => {
+    ).then(({ snapshots, historyLimitPerAccount }) => {
       if (!isDemo) {
+        setHistoryLimit(historyLimitPerAccount ?? null)
         setHistory(replaceEarningsHistoryForUsernames(
           snapshots.map(historyEntry),
           linkedAccounts.map((account) => account.username),
         ))
         setAccountResults((current) => {
-          let snapshotsByAccountAndDay: DailyEarningsResultCache = {}
-          for (const snapshot of snapshots) {
-            snapshotsByAccountAndDay = cacheDailyEarningsResult(snapshotsByAccountAndDay, snapshot)
-          }
+          const snapshotsByAccountAndDay = cacheDailyEarningsResults({}, snapshots)
           return { ...snapshotsByAccountAndDay, ...current }
         })
       }
@@ -438,15 +453,14 @@ export default function EarningsPage() {
   }
 
   return (
-    <div className="page-stack earnings-page">
+    <div className="page-stack earnings-page refresh-page">
       <section className="earnings-hero">
         <div className="earnings-hero-copy">
           <p className="eyebrow">Earnings report</p>
-          <h1>Daily player-card earnings</h1>
-          <p>Active-season RAX for the current Real earnings day. On This Day claims are tracked separately.</p>
+          <h1>Earnings</h1>
+          <p>{result?.dayDisplay ?? displayEarningsDay(day)} · Active-season player-card RAX</p>
           {isDemo ? <span className="earnings-demo-badge">Development preview data</span> : null}
         </div>
-        <div className="earnings-hero-total"><span>{result?.dayDisplay ?? displayEarningsDay(day)}</span><strong>{formatRax(result?.dailyTotal ?? 0)}</strong><small>{isHistoricalDay ? 'Saved RAX' : 'RAX earned'}</small></div>
         <Link className="earnings-back-link" to="/profile">← Profile</Link>
       </section>
 
@@ -515,25 +529,37 @@ export default function EarningsPage() {
       {result?.source === 'public_reconstruction' ? <p className="earnings-source-note">Live preview from the complete active-pass collection, boosters, and Real box scores. Reports use the first successful scheduled snapshot beginning at 4:30 AM Eastern.</p> : null}
 
       {hasReportData ? <>
-        <section className="earnings-summary-grid">
-          <div className="panel earnings-summary-card earnings-summary-primary"><span>Daily earnings</span><strong>{formatRax(selectedDayTotal)} RAX</strong><small>{result?.dayDisplay ?? displayEarningsDay(day)}</small></div>
-          <div className="panel earnings-summary-card"><span>Yesterday's earnings</span><strong>{formatRax(yesterday?.dailyTotal ?? 0)} RAX</strong><small>{yesterday ? displayEarningsDay(yesterday.day) : `No snapshot for ${displayEarningsDay(yesterdayDay)}`}</small></div>
-          <div className="panel earnings-summary-card"><span>This week</span><strong>{formatRax(weeklyTotal)} RAX</strong><small>Monday through today</small></div>
-          <div className="panel earnings-summary-card"><span>This month</span><strong>{formatRax(monthlyTotal)} RAX</strong><small>{selectedDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</small></div>
-          <div className="panel earnings-summary-card"><span>Highest earned day</span><strong>{formatRax(highestDay?.dailyTotal ?? 0)} RAX</strong><small>{highestDay?.day ?? 'No tracked days yet'}</small></div>
-          <div className="panel earnings-summary-card"><span>Best average weekday</span><strong>{bestWeekday?.weekday ?? '—'}</strong><small>{bestWeekday ? `${formatRax(bestWeekday.average)} RAX average across ${bestWeekday.days} day${bestWeekday.days === 1 ? '' : 's'}` : 'No tracked days yet'}</small></div>
-          <div className="panel earnings-summary-card"><span>Highest earning sport</span><strong>{topSport?.sport ?? '—'}</strong><small>{topSport ? `${formatRax(topSport.total)} RAX across all tracked days` : 'No tracked sports yet'}</small></div>
+        <section className="earnings-overview" aria-label="Earnings overview">
+          <div><span>Selected day</span><strong>{formatRax(selectedDayTotal)} RAX</strong></div>
+          <div><span>Yesterday</span><strong>{yesterday ? `${formatRax(yesterday.dailyTotal)} RAX` : '—'}</strong></div>
+          <div><span>This week</span><strong>{formatRax(weeklyTotal)} RAX</strong><small>{percentChange(weeklyTotal, previousWeekTotal)} vs prior week</small></div>
+          <div><span>This month</span><strong>{formatRax(monthlyTotal)} RAX</strong><small>{percentChange(monthlyTotal, previousMonthTotal)} vs prior month</small></div>
         </section>
-        <section className="earnings-period-grid">
-          <div className="panel earnings-period-card"><div><span>Weekly report</span><strong>{formatRax(weeklyTotal)} RAX</strong></div><dl><div><dt>Average / active day</dt><dd>{formatRax(weekRows.length ? weeklyTotal / weekRows.length : 0)}</dd></div><div><dt>Best day</dt><dd>{formatRax(weekBest)}</dd></div><div><dt>Active days</dt><dd>{weekRows.length}</dd></div><div><dt>vs prior week</dt><dd className={weeklyTotal >= previousWeekTotal ? 'is-positive' : 'is-negative'}>{percentChange(weeklyTotal, previousWeekTotal)}</dd></div></dl></div>
-          <div className="panel earnings-period-card"><div><span>Monthly report</span><strong>{formatRax(monthlyTotal)} RAX</strong></div><dl><div><dt>Average / active day</dt><dd>{formatRax(monthRows.length ? monthlyTotal / monthRows.length : 0)}</dd></div><div><dt>Best day</dt><dd>{formatRax(monthBest)}</dd></div><div><dt>Active days</dt><dd>{monthRows.length}</dd></div><div><dt>vs prior month</dt><dd className={monthlyTotal >= previousMonthTotal ? 'is-positive' : 'is-negative'}>{percentChange(monthlyTotal, previousMonthTotal)}</dd></div></dl></div>
+        <details className="earnings-period-details"><summary>Week and month details</summary><div className="earnings-period-grid">
+          <div className="earnings-period-card"><div><span>Weekly report</span><strong>{formatRax(weeklyTotal)} RAX</strong></div><dl><div><dt>Average / active day</dt><dd>{formatRax(weekRows.length ? weeklyTotal / weekRows.length : 0)}</dd></div><div><dt>Best day</dt><dd>{formatRax(weekBest)}</dd></div><div><dt>Active days</dt><dd>{weekRows.length}</dd></div></dl></div>
+          <div className="earnings-period-card"><div><span>Monthly report</span><strong>{formatRax(monthlyTotal)} RAX</strong></div><dl><div><dt>Average / active day</dt><dd>{formatRax(monthRows.length ? monthlyTotal / monthRows.length : 0)}</dd></div><div><dt>Best day</dt><dd>{formatRax(monthBest)}</dd></div><div><dt>Active days</dt><dd>{monthRows.length}</dd></div></dl></div>
+        </div></details>
+        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Earnings history</h2><p>Daily RAX for {reportSubject} · {rangeHistory.length} tracked days. Only available snapshots are shown.</p></div><div className="earnings-chart-summary"><span>Selected range</span><strong>{formatRax(sumHistory(rangeHistory))} RAX</strong></div></div>
+          <div className="earnings-range-controls" aria-label="History range">{(['30', '90', 'all', 'custom'] as const).map((range) => <button className={`button compact${historyRange === range ? ' is-selected' : ''}`} aria-pressed={historyRange === range} key={range} type="button" onClick={() => setHistoryRange(range)}>{range === 'all' ? 'All available' : range === 'custom' ? 'Custom' : `${range} days`}</button>)}</div>
+          {historyRange === 'custom' ? <div className="earnings-range-dates"><label>From <input type="date" value={rangeStart} onChange={(event) => setRangeStart(event.target.value)} /></label><label>To <input type="date" value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} /></label></div> : null}
+          {invalidRange ? <p className="form-error">The start date must be before the end date.</p> : <EarningsBarChart entries={rangeHistory} />}
+          <p className="earnings-history-note">{historyLimit && !isDemo ? `Up to ${historyLimit} recent scheduled snapshots per account are loaded, alongside locally available history. ` : ''}History begins when snapshots were captured; missing days are not estimated.</p>
+          <div className="earnings-range-highlights"><span>Best day <strong>{highestDay ? `${formatRax(highestDay.dailyTotal)} RAX · ${highestDay.day}` : '—'}</strong></span><span>Best weekday average <strong>{bestWeekday ? `${bestWeekday.weekday} · ${formatRax(bestWeekday.average)} RAX` : '—'}</strong></span><span>Top sport <strong>{topSport?.sport ?? '—'}</strong></span></div>
         </section>
-        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Last 30 tracked days</h2><p>Daily RAX for {reportSubject}. Hover a bar for the exact date and amount.</p></div><div className="earnings-chart-summary"><span>30-day total</span><strong>{formatRax(sumHistory(recentHistory))} RAX</strong></div></div>
-          <EarningsBarChart entries={recentHistory} />
+        {isAllAccounts ? <section className="earnings-account-chart-grid" aria-label="Earnings by account">{accountCharts.map((account) => <article className="panel earnings-account-chart" key={account.id}><div className="earnings-account-chart-heading"><div><span>{account.name}</span><strong>@{account.username}</strong></div><div><small>Selected range</small><strong>{formatRax(sumHistory(account.entries))} RAX</strong></div></div><EarningsBarChart entries={account.entries} compact /></article>)}</section> : null}
+        <section className="panel earnings-report-panel">
+          <div className="section-heading"><div><h2>Highest earning sports</h2><p>Ranked by total RAX in the selected history range for {reportSubject}.</p></div><div className="earnings-chart-summary"><span>Sports tracked</span><strong>{sportRankings.length}</strong></div></div>
+          {sportRankings.length === 0 ? <p className="empty">No sport earnings in this range.</p> : <div className="earnings-sport-rankings">{sportRankings.map((sport, index) => {
+            const key = sport.sport.toLowerCase()
+            const share = trackedSportTotal > 0 ? (sport.total / trackedSportTotal) * 100 : 0
+            return <article className="earnings-sport-row" key={key}>
+              <div className="earnings-sport-rank"><span>{index + 1}</span><div><strong>{sport.sport}</strong><small>{sport.passes} earning pass{sport.passes === 1 ? '' : 'es'} · {sport.days} tracked day{sport.days === 1 ? '' : 's'} · best {formatRax(sport.best)} RAX</small></div></div>
+              <div className="earnings-sport-bar" aria-label={`${sport.sport} accounts for ${Math.round(share)} percent of earnings in the selected range`}><span style={{ width: `${Math.max(2, share)}%` }} /></div>
+              <dl className="earnings-sport-stats"><div><dt>Selected day</dt><dd>{formatRax(daySportTotals.get(key) ?? 0)}</dd></div><div><dt>This week</dt><dd>{formatRax(weekSportTotals.get(key) ?? 0)}</dd></div><div><dt>This month</dt><dd>{formatRax(monthSportTotals.get(key) ?? 0)}</dd></div><div><dt>Range total</dt><dd>{formatRax(sport.total)}</dd></div></dl>
+            </article>
+          })}</div>}
         </section>
-        {isAllAccounts ? <section className="earnings-account-chart-grid" aria-label="Earnings by account">{accountCharts.map((account) => <article className="panel earnings-account-chart" key={account.id}><div className="earnings-account-chart-heading"><div><span>{account.name}</span><strong>@{account.username}</strong></div><div><small>30-day total</small><strong>{formatRax(sumHistory(account.entries))} RAX</strong></div></div><EarningsBarChart entries={account.entries} compact /></article>)}</section> : null}
-        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Highest earning sports</h2><p>Ranked by total RAX across every tracked day for {reportSubject}.</p></div><div className="earnings-chart-summary"><span>Sports tracked</span><strong>{sportRankings.length}</strong></div></div>{sportRankings.length === 0 ? <p className="empty">Sport rankings will appear after the first tracked refresh.</p> : <div className="earnings-sport-rankings">{sportRankings.map((sport, index) => { const key = sport.sport.toLowerCase(); const share = trackedSportTotal > 0 ? (sport.total / trackedSportTotal) * 100 : 0; return <article className="earnings-sport-row" key={key}><div className="earnings-sport-rank"><span>{index + 1}</span><div><strong>{sport.sport}</strong><small>{sport.passes} earning pass{sport.passes === 1 ? '' : 'es'} · {sport.days} tracked day{sport.days === 1 ? '' : 's'} · best {formatRax(sport.best)} RAX</small></div></div><div className="earnings-sport-bar" aria-label={`${sport.sport} accounts for ${Math.round(share)} percent of tracked earnings`}><span style={{ width: `${Math.max(2, share)}%` }} /></div><dl className="earnings-sport-stats"><div><dt>Selected day</dt><dd>{formatRax(daySportTotals.get(key) ?? 0)}</dd></div><div><dt>This week</dt><dd>{formatRax(weekSportTotals.get(key) ?? 0)}</dd></div><div><dt>This month</dt><dd>{formatRax(monthSportTotals.get(key) ?? 0)}</dd></div><div><dt>Total tracked</dt><dd>{formatRax(sport.total)}</dd></div></dl></article> })}</div>}</section>
-        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Highest earning passes</h2><p>Top player passes across every tracked day for {reportSubject}.</p></div></div>{topPasses.length === 0 ? <p className="empty">Pass rankings will appear after the first tracked refresh.</p> : <div className="earnings-list">{topPasses.map((pass, index) => <article className="earnings-row earnings-ranked-pass" key={`${pass.username}:${pass.label}:${index}`}><div><strong><span>{index + 1}</span>{pass.label}</strong><small>{[pass.sport, isAllAccounts ? `@${pass.username}` : '', `${pass.days} earning day${pass.days === 1 ? '' : 's'}`, `best ${formatRax(pass.best)} RAX`].filter(Boolean).join(' · ')}</small></div><div className="earnings-row-total"><strong>{formatRax(pass.total)} RAX</strong><small>Total tracked</small></div></article>)}</div>}</section>
+        <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>Highest earning passes</h2><p>Top player passes in the selected history range for {reportSubject}.</p></div></div>{topPasses.length === 0 ? <p className="empty">No pass earnings in this range.</p> : <div className="earnings-list">{topPasses.map((pass, index) => <article className="earnings-row earnings-ranked-pass" key={`${pass.username}:${pass.label}:${index}`}><div className="earnings-pass-rank"><span className="earnings-pass-rank-number">{index + 1}</span><PassIdentity name={pass.label} sport={pass.sport} avatar={pass.avatar} meta={[pass.sport, isAllAccounts ? `@${pass.username}` : '', `${pass.days} earning day${pass.days === 1 ? '' : 's'}`, `best ${formatRax(pass.best)} RAX`].filter(Boolean).join(' · ')} /></div><div className="earnings-row-total"><strong>{formatRax(pass.total)} RAX</strong><small>Selected range</small></div></article>)}</div>}</section>
         <section className="panel earnings-report-panel"><div className="section-heading"><div><h2>What earned on this day</h2><p>{result ? `${result.earnings.length} player pass${result.earnings.length === 1 ? '' : 'es'} contributed.` : `No saved snapshot for ${displayEarningsDay(day)}.`}</p></div></div>{result ? <div className="earnings-list">{result.earnings.map((row) => <article className="earnings-row" key={row.id || row.pass.id}><PassIdentity name={row.pass.label} passKind="player" sport={row.pass.sport} avatar={row.pass.avatar} meta={[row.pass.sport, row.pass.season, row.pass.rarityLabel].filter(Boolean).join(' · ')} /><div className="earnings-row-total"><strong>{formatRax(row.totalEarnings)} RAX</strong>{row.infos.length ? <small>{row.infos.map((info) => `${info.label}: ${info.value}`).join(' · ')}</small> : null}</div></article>)}</div> : <p className="empty">Choose a saved day above, or refresh the current day for a live preview.</p>}</section>
       </> : null}
 

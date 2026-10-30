@@ -1,3 +1,5 @@
+import { isTerminalRequestFailure, requestFailureResponse } from './httpFailurePolicy.js'
+import { DAILY_EARNINGS_FEATURE_ENABLED, retiredEarningsResponse } from './earningsFeature.js'
 import {
   currentRealEarningsDay,
   reconstructPublicDailyEarnings,
@@ -9,6 +11,7 @@ import {
 } from './realApi.js'
 
 function errorResponse(error: unknown): Response {
+  if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
   const message = error instanceof Error ? error.message : 'Could not load Real earnings.'
   const kind = error instanceof Error && 'kind' in error ? String(error.kind) : ''
   if (kind) {
@@ -20,6 +23,7 @@ function errorResponse(error: unknown): Response {
 
 export async function handleAccountEarnings(request: Request): Promise<Response> {
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
+  if (!DAILY_EARNINGS_FEATURE_ENABLED) return retiredEarningsResponse()
 
   let body: { username?: unknown; day?: unknown; refreshId?: unknown }
   try {

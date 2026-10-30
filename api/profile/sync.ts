@@ -1,12 +1,12 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { readRequestJson } from '../../lib/cloudSyncCompression'
-import { requireAppSession } from '../admin/_helpers'
+import { readRequestJson } from '../../lib/cloudSyncCompression.js'
+import { requireAppSession } from '../admin/_helpers.js'
 import {
   getTrackerProfileTransfer,
   profileSyncConfigured,
   saveTrackerProfile,
-} from '../../lib/trackerProfileStore'
+} from '../../lib/trackerProfileStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -33,6 +33,13 @@ function queryParams(request: Request): SyncGetQuery {
 }
 
 export default async function handler(request: Request): Promise<Response> {
+  const response = await handleSync(request)
+  response.headers.set('Cache-Control', 'no-store')
+  if (request.method === 'GET') response.headers.set('Deprecation', '@1793318400')
+  return response
+}
+
+async function handleSync(request: Request): Promise<Response> {
   const denied = await requireAppSession(request)
   if (denied) return denied
 

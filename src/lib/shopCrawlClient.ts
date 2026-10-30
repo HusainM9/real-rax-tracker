@@ -1,4 +1,4 @@
-import { SHOP_EARNINGS_PAGE_SIZE } from '../../lib/realShopEarningsCrawl'
+import { SHOP_EARNINGS_PAGE_SIZE } from '../../lib/shopCrawlShared'
 
 /** Default pages per Admin chunk request (1 shop page + ≤20 earnings). */
 export const DEFAULT_SHOP_CRAWL_UI_MAX_PAGES = 1

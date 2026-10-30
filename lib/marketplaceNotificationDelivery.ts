@@ -1,3 +1,4 @@
+import { guardedUpstreamFetch } from './guardedUpstreamFetch.js'
 import {
   marketplaceListingUrl,
   type MarketplaceAlertNotification,
@@ -115,7 +116,7 @@ async function postDiscordBotJson<T>(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`https://discord.com/api/v10${path}`, {
+  const response = await guardedUpstreamFetch('marketplace-notification', `https://discord.com/api/v10${path}`, {
     method: 'POST',
     headers: {
       Authorization: `Bot ${token}`,
@@ -162,7 +163,7 @@ async function sendDiscordDirectMessage(
 }
 
 async function postJson(url: string, body: unknown, signal?: AbortSignal): Promise<void> {
-  const response = await fetch(url, {
+  const response = await guardedUpstreamFetch('marketplace-notification', url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

@@ -1,3 +1,4 @@
+import { safeFetch } from "./safeImportFetch"
 import { createId } from './id'
 import type { UsernameImportResult } from './usernameImport'
 
@@ -32,7 +33,7 @@ export async function postAdminEvents(events: AdminEventPayload[]): Promise<void
   if (events.length === 0 || import.meta.env.DEV) return
 
   try {
-    await fetch('/api/admin/events', {
+    await safeFetch('/api/admin/events', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -110,7 +111,7 @@ async function postImportOwnershipSnapshot(
   if (result.ownedPasses.length === 0 || import.meta.env.DEV) return
 
   try {
-    await fetch('/api/admin/ownership', {
+    await safeFetch('/api/admin/ownership', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

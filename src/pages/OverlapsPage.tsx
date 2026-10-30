@@ -82,7 +82,7 @@ export default function OverlapsPage() {
   }, [overlapDaysPage, overlapDaysPageTotal])
 
   return (
-    <div className="page-stack">
+    <div className="page-stack refresh-page overlaps-refresh">
       <section className="panel">
         <div className="section-heading">
           <div>

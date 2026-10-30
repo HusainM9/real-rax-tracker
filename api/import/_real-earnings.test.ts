@@ -81,6 +81,16 @@ describe('POST /api/import/real-earnings', () => {
     expect(response.status).toBe(503)
   })
 
+  it('permits larger cache-only reads without contacting Real when no cache is configured', async () => {
+    globalThis.fetch = vi.fn() as typeof fetch
+    const response = await handler(new Request('https://example.com/api/import/real-earnings', { method: 'POST', body: JSON.stringify({ passes: Array.from({ length: 40 }, (_, index) => ({ ...samplePass, entityId: index + 1, externalKey: `${index + 1}|2025|FC` })), cacheOnly: true }) }))
+    expect(response.status).toBe(200)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    const body = await response.json()
+    expect(body.stats).toMatchObject({ upstreamRequests: 0, fetched: 0, cacheHits: 0 })
+    expect(body.failures).toHaveLength(40)
+  })
+
   it('fetches Real earnings and returns a gzip pass payload', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

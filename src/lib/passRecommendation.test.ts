@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analyzePotentialCard } from './potentialAnalysis'
+import { createEmptyData } from './storage'
 import {
   analyzeCatalogCandidate,
   analyzeIconic20CheckerImpacts,
@@ -22,6 +23,7 @@ import {
   prefilterRecommendationProfiles,
   normalizeBestDayParam,
   rankCatalogRecommendations,
+  rankCatalogRecommendationsAsync,
   rankCatalogRecommendationsForDay,
   rankCatalogRecommendationsForMonth,
   rankAndRecommendAsync,
@@ -38,6 +40,29 @@ import {
 } from './passRecommendation'
 import { type CatalogImportProfile, type CatalogSearchResult } from './catalogApi'
 import type { PlayerCard, RaxPerformance, RaxTrackerData } from '../types/rax'
+
+describe('guaranteed month/day reporting', () => {
+  it.each([false, true])('reports actual before/after deltas, including cross-sport Pro changes (stored Pro setting %s)', (proBonusEnabled) => {
+    const cards = [card('a', 'A'), card('b', 'B'), card('c', 'C'),
+      ...['d', 'e', 'f'].map((id) => ({ ...card(id, id), sport: 'NFL' as const }))]
+    const current = { ...createEmptyData(), settings: { proBonusEnabled, savedUsername: '' }, cards,
+      performances: [100, 90, 80, 200, 190, 85].map((value, index) => perf(`row${index}`, cards[index]!.id, value, '2026-03-01')) }
+    const candidate: CatalogImportProfile = {
+      externalKey: '900|2025|NBA', entityId: 900, sport: 'NBA', passKind: 'player', seasonYear: 2025,
+      seasonLabel: '2025-26', name: 'Candidate', rowCount: 1, totalBaseRax: 95 / 150, cachedAt: '2026-10-30T00:00:00Z',
+      rows: [{ claimDay: '2026-03-01', baseRaxEarned: 95 / 150 }],
+    }
+    const annual = rankCatalogRecommendations(current, [candidate]).rows[0]!
+    const month = rankCatalogRecommendationsForMonth(current, [candidate], 2).rows[0]!
+    const day = rankCatalogRecommendationsForDay(current, [candidate], '03-01').rows[0]!
+    expect(annual.netClaimableDelta).toBe(10)
+    expect(annual.netGuaranteedDelta).toBe(5)
+    expect(month.monthNetDelta).toBe(10)
+    expect(month.monthGuaranteedNetDelta).toBe(5)
+    expect(day.monthNetDelta).toBe(10)
+    expect(day.monthGuaranteedNetDelta).toBe(5)
+  })
+})
 
 function card(
   id: string,
@@ -389,7 +414,7 @@ describe('passRecommendation', () => {
     expect(kept[0]?.externalKey).toBe('high|2025|NBA')
   })
 
-  it('ranks candidates by net claimable delta at Iconic 1', () => {
+  it('ranks candidates by net claimable delta at Iconic 1', async () => {
     const profiles = [
       catalogProfile('low|2025|NBA', 'Low value', [{ claimDay: '2026-03-01', baseRaxEarned: 12 }]),
       catalogProfile('high|2025|NBA', 'High value', [{ claimDay: '2026-03-01', baseRaxEarned: 35 }]),
@@ -399,6 +424,11 @@ describe('passRecommendation', () => {
     expect(ranked.rows[0]?.name).toBe('High value')
     expect(ranked.rows[0]?.rarityLabel).toBe(RECOMMENDATION_SIMULATED_RARITY)
     expect(ranked.rows[0]?.netClaimableDelta).toBeGreaterThan(ranked.rows[1]?.netClaimableDelta ?? 0)
+    const individualRows = profiles.map((profile) => analyzeCatalogCandidate(data, profile))
+    for (const row of ranked.rows) {
+      expect(row).toEqual(individualRows.find((individual) => individual?.externalKey === row.externalKey))
+    }
+    expect((await rankCatalogRecommendationsAsync(data, profiles, { batchSize: 1 })).rows).toEqual(ranked.rows)
   })
 
   it('ignores catalog rarity_label and always scores at Iconic 1 (solo/rank parity)', () => {

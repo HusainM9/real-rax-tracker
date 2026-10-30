@@ -1,4 +1,6 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { MARKETPLACE_ALERTS_ENABLED, MARKETPLACE_SCAN_INTERVAL_MINUTES, marketplaceDisabledResponse } from '../../lib/marketplaceAvailability.js'
+import { failureStatus, isTerminalRequestFailure } from '../../lib/httpFailurePolicy.js'
 
 import {
   acquireMarketplaceScanLease,
@@ -49,7 +51,7 @@ type MarketplaceScanResult = {
     delivered: number
     channel: string | null
   }>
-  errors: Array<{ owner: string; error: string }>
+  errors: Array<{ owner: string; error: string; upstreamStatus?: number; retryable?: boolean }>
   deferred: string[]
   elapsedMs: number
 }
@@ -70,7 +72,7 @@ async function runMarketplaceScan(
     delivered: number
     channel: string | null
   }> = []
-  const errors: Array<{ owner: string; error: string }> = []
+  const errors: MarketplaceScanResult['errors'] = []
   const deferred: string[] = []
 
   for (let index = 0; index < owners.length; index += 1) {
@@ -143,7 +145,7 @@ async function runMarketplaceScan(
       })
     } catch (error) {
       const message = errorMessage(error)
-      errors.push({ owner, error: message })
+      errors.push({ owner, error: message, ...(isTerminalRequestFailure(error) ? { upstreamStatus: failureStatus(error), retryable: false } : {}) })
       await saveMarketplaceScanStatus(owner, {
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -155,12 +157,16 @@ async function runMarketplaceScan(
         error: message,
         warning: null,
       })
+      if (isTerminalRequestFailure(error)) {
+        deferred.push(...owners.slice(index + 1))
+        break
+      }
     }
   }
 
   return {
     ok: errors.length === 0 && deferred.length === 0,
-    intervalMinutes: 2,
+    intervalMinutes: MARKETPLACE_SCAN_INTERVAL_MINUTES,
     owners: owners.length,
     completed,
     errors,
@@ -196,6 +202,7 @@ export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return methodNotAllowed()
   }
+  if (!MARKETPLACE_ALERTS_ENABLED) return marketplaceDisabledResponse()
   if (!isAuthorizedMarketplaceScanRequest(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -213,8 +220,8 @@ export default async function handler(request: Request): Promise<Response> {
     return Response.json({
       ok: true,
       skipped: true,
-      reason: 'scan_in_progress',
-      intervalMinutes: 2,
+      reason: 'scan_in_progress_or_cooldown',
+      intervalMinutes: MARKETPLACE_SCAN_INTERVAL_MINUTES,
     }, { status: 202 })
   }
 

@@ -60,6 +60,9 @@ export type EarningsBackfillFailure = {
   name: string
   message: string
   kind: string
+  upstreamStatus?: number
+  retryable?: boolean
+  pending?: boolean
 }
 
 export type EarningsBackfillStats = {
@@ -81,6 +84,9 @@ export type EarningsBackfillStats = {
  * rate limit — override via options on the client fetch helper.
  */
 export const REAL_EARNINGS_PASSES_MAX_REQUEST = 16
+
+/** Read-only cache probes can be larger: they never fan out to Real. */
+export const REAL_EARNINGS_CACHE_MAX_REQUEST = 80
 
 /**
  * Batches in flight from the browser. Each one occupies a serverless invocation that itself runs

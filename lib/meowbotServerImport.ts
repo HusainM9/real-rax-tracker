@@ -1,3 +1,5 @@
+import { guardedUpstreamFetch } from './guardedUpstreamFetch'
+import { isTerminalRequestFailure } from './httpFailurePolicy'
 import type {
   CatalogDailyEarningInput,
   CatalogPassInput,
@@ -78,7 +80,7 @@ function meowbotKey(): string {
 }
 
 async function invokeMeowbot(functionName: string, action: string, payload: unknown): Promise<unknown> {
-  const response = await fetch(`${meowbotUrl()}/functions/v1/${functionName}`, {
+  const response = await guardedUpstreamFetch('legacy-meowbot', `${meowbotUrl()}/functions/v1/${functionName}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -577,6 +579,7 @@ async function importPassesToOwnershipPayload(
       catalogPasses.set(ready.externalKey, passToOwnershipInput(pass, true, totalBaseRax))
       dailyEarnings.push(...rows)
     } catch (error) {
+      if (isTerminalRequestFailure(error)) throw error
       failures.push(`${pass.name}: ${error instanceof Error ? error.message : 'unknown error'}`)
     }
   })
@@ -644,6 +647,7 @@ async function importPassesToCatalogPayload(passes: ImportPass[]): Promise<Meowb
       catalogPasses.set(canonicalPass.externalKey, passToCatalogInput(canonicalPass, true, totalBaseRax))
       dailyEarnings.push(...rows)
     } catch (error) {
+      if (isTerminalRequestFailure(error)) throw error
       failures.push(`${pass.name}: ${error instanceof Error ? error.message : 'unknown error'}`)
     }
   })

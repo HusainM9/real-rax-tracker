@@ -1,6 +1,6 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { clearEarningsCookieHeader } from '../../lib/earningsAuth'
+import { clearEarningsCookieHeader } from '../../lib/earningsAuth.js'
 
 export const config = { runtime: 'edge' }
 

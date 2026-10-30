@@ -160,26 +160,26 @@ export function CatalogSearchPanel({
             <h2>{title}</h2>
             <p>{description}</p>
             <p className="catalog-accuracy-disclaimer">
-              Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
+              Catalog totals may be incomplete, especially older NBA seasons. Verify low totals on{' '}
               <a href="https://realapp.com" target="_blank" rel="noreferrer">
                 realapp.com
-              </a>{' '}
-              JSON if totals look low.
+              </a>
+              .
             </p>
           </div>
           <span className="badge">{badge}</span>
         </div>
       ) : (
         <p className="catalog-accuracy-disclaimer">
-          Catalog RAX can be incomplete (esp. older NBA). Fix with Manual add /{' '}
+          Catalog totals may be incomplete, especially older NBA seasons. Verify low totals on{' '}
           <a href="https://realapp.com" target="_blank" rel="noreferrer">
             realapp.com
-          </a>{' '}
-          JSON if totals look low.
+          </a>
+          .
         </p>
       )}
       {collectionAddEnabled ? (
-        <p className="import-hint">Search → rarity → add. Earnings import when available.</p>
+        <p className="import-hint">Search for a player, choose a rarity, then {actionLabel.toLowerCase()}.</p>
       ) : null}
       {collectionAddEnabled && collectionAdd ? (
         <ThemedSelect
@@ -205,7 +205,7 @@ export function CatalogSearchPanel({
         <p className="card-picker-empty">
           {emptyHint ??
             (collectionAddEnabled
-              ? 'Type a player name, then Add to collection. No JSON needed when earnings exist.'
+              ? `Type a player name to ${actionLabel.toLowerCase()}.`
               : 'Type to search. Results show row counts and base RAX.')}
         </p>
       ) : searching ? (

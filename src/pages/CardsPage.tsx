@@ -27,6 +27,7 @@ import { RARITY_TIERS } from '../lib/rarityFilter'
 import { isPlayerPassForSell } from '../lib/passKind'
 import { useRaxData } from '../context/RaxDataContext'
 import { SPORTS, type Sport } from '../types/rax'
+import './PlanningPages.css'
 
 const CARDS_PAGE_SIZE = 50
 
@@ -126,20 +127,13 @@ export default function CardsPage() {
   }
 
   return (
-    <div className="page-stack">
+    <div className="page-stack refresh-page cards-refresh collection-workspace">
+      <section className="collection-heading"><div><p className="eyebrow">Your collection</p><h1>Cards</h1><p>Review your passes and their claimable RAX.</p></div><div className="collection-heading-actions"><Link className="button" to="/entry">Add cards</Link><Link className="button primary" to="/sell">Explore if sold</Link></div></section>
+      <div className="collection-summary"><div><span>Collection</span><strong>{rollup.cards.length.toLocaleString()}</strong><small>passes</small></div><div><span>Showing</span><strong>{sortedCards.length.toLocaleString()}</strong><small>matching filters</small></div><div><span>Sports</span><strong>{rollup.sports.length.toLocaleString()}</strong><small>with entries</small></div></div>
       <CollapsiblePanel
-        title="Player card totals"
-        description="Guaranteed + Pro bonus claimable RAX. Filter, sort, edit rarity — saves with your collection."
+        title="Your cards"
+        description="Claimable RAX includes guaranteed and Pro bonus. Rarity changes save to your collection."
         badge={`${sortedCards.length} card${sortedCards.length === 1 ? '' : 's'}`}
-        actions={
-          <>
-            <Link to="/sell">If sold</Link>
-            <span className="section-action-sep" aria-hidden="true">
-              ·
-            </span>
-            <Link to="/entry">Manage cards</Link>
-          </>
-        }
       >
         {removeStatus ? <p className="import-status">{removeStatus}</p> : null}
         <div className="sort-controls">
@@ -151,14 +145,6 @@ export default function CardsPage() {
               placeholder="Player, team, sport, season…"
               onChange={(event) => setCardSearchQuery(event.target.value)}
             />
-          </label>
-          <label className="inline-toggle">
-            <input
-              type="checkbox"
-              checked={showTeamCards}
-              onChange={(event) => setShowTeamCards(event.target.checked)}
-            />
-            Team passes
           </label>
           <ThemedSelect
             label="Sport"
@@ -189,6 +175,13 @@ export default function CardsPage() {
               label: option.label,
             }))}
           />
+          <details className="collection-advanced-filters">
+            <summary>More filters{!showTeamCards || secondarySortKey !== 'none' || sortDirection !== 'desc' ? ' · active' : ''}</summary>
+            <div className="collection-advanced-content">
+              <label className="inline-toggle">
+                <input type="checkbox" checked={showTeamCards} onChange={(event) => setShowTeamCards(event.target.checked)} />
+                Team passes
+              </label>
           <ThemedSelect
             label="Then by"
             value={secondarySortKey}
@@ -210,6 +203,8 @@ export default function CardsPage() {
               { value: 'asc', label: 'Low to high / A-Z' },
             ]}
           />
+            </div>
+          </details>
         </div>
 
         {sortedCards.length > CARDS_PAGE_SIZE ? (
@@ -219,79 +214,60 @@ export default function CardsPage() {
         ) : null}
 
         <div className="table-wrap">
-          <table>
+          <table className="collection-table">
             <thead>
               <tr>
                 <th>Player card</th>
-                <th>Sport</th>
-                <th>Season</th>
                 <th>Rarity</th>
-                <th>Entries</th>
-                <th>Total base</th>
-                <th>Guaranteed</th>
-                <th>Pro bonus</th>
-                <th>Overlap</th>
+                <th>Breakdown</th>
                 <th>Total claimable</th>
-                <th></th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {rollup.cards.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="empty-cell">
+                  <td colSpan={5} className="empty-cell">
                     Add player cards to see card-level totals.
                   </td>
                 </tr>
               ) : filteredCards.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="empty-cell">
+                  <td colSpan={5} className="empty-cell">
                     No cards match the current search, sport, rarity, or team-pass filters.
                   </td>
                 </tr>
               ) : (
                 paginatedCards.map((cardRollup) => (
                   <tr key={cardRollup.card.id}>
-                    <td>
+                    <td data-label="Pass">
                       <PassIdentity
                         name={cardRollup.card.name}
                         passKind={cardRollup.card.passKind === 'team' ? 'team' : 'player'}
                         sport={cardRollup.card.sport}
                         avatar={cardRollup.card.avatar}
                         size="md"
-                        meta={
-                          isPlayerPassForSell(cardRollup.card) ? (
+                        meta={<>{cardRollup.card.sport} · {cardRollup.card.season}{isPlayerPassForSell(cardRollup.card) ? (
+                          <> · {' '}
                             <Link className="table-sub" to={`/sell?card=${cardRollup.card.id}`}>
-                              If sold →
+                              If sold
                             </Link>
-                          ) : undefined
-                        }
+                          </>) : null}</>}
                       />
                     </td>
-                    <td>{cardRollup.card.sport}</td>
-                    <td>{cardRollup.card.season}</td>
-                    <td>
+                    <td data-label="Rarity">
                       <CardRaritySelect card={cardRollup.card} onConfirmChange={setCardRarity} />
                     </td>
-                    <td>{cardRollup.performanceCount}</td>
-                    <td>
-                      <strong>{formatRax(displayRaxValue(cardRollup.totalBaseRax))} RAX</strong>
+                    <td className="collection-breakdown" data-label="Breakdown">
+                      <span>Guaranteed <strong>{formatRax(displayRaxValue(cardRollup.guaranteedRax))}</strong> <small>({cardRollup.guaranteedClaims})</small></span>
+                      <span>Pro bonus <strong>{formatRax(displayRaxValue(cardRollup.proBonusRax))}</strong> <small>({cardRollup.proBonusClaims})</small></span>
+                      <span>Overlap <strong>{formatRax(displayRaxValue(cardRollup.overlapRax))}</strong> <small>({cardRollup.overlapCount})</small></span>
+                      <small>{cardRollup.performanceCount} entries · {formatRax(displayRaxValue(cardRollup.totalBaseRax))} base</small>
                     </td>
-                    <td>
-                      {formatRax(displayRaxValue(cardRollup.guaranteedRax))} RAX
-                      <small className="table-sub">{cardRollup.guaranteedClaims} claims</small>
-                    </td>
-                    <td>
-                      {formatRax(displayRaxValue(cardRollup.proBonusRax))} RAX
-                      <small className="table-sub">{cardRollup.proBonusClaims} claims</small>
-                    </td>
-                    <td>
-                      {formatRax(displayRaxValue(cardRollup.overlapRax))} RAX
-                      <small className="table-sub">{cardRollup.overlapCount} overlaps</small>
-                    </td>
-                    <td>
+                    <td data-label="Total claimable">
                       <strong>{formatRax(displayRaxValue(cardRollup.totalClaimableRax))} RAX</strong>
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <span className="button-row compact-actions">
                         {cardRollup.card.externalKey ? (
                           <button

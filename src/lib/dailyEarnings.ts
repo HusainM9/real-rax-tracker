@@ -1,4 +1,6 @@
+import { safeFetch } from "./safeImportFetch"
 import { readResponseJson } from './readResponseJson'
+import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
 
 export type DailyEarningsRow = {
   id: string
@@ -43,6 +45,12 @@ export function cacheDailyEarningsResult(
   return { ...current, [datedEarningsCacheKey(result.username, result.day)]: result }
 }
 
+export function cacheDailyEarningsResults(current: DailyEarningsResultCache, results: DailyEarningsResult[]): DailyEarningsResultCache {
+  const next = { ...current }
+  for (const result of results) next[datedEarningsCacheKey(result.username, result.day)] = result
+  return next
+}
+
 export function readCachedDailyEarningsResults(
   cache: DailyEarningsResultCache,
   usernames: string[],
@@ -57,6 +65,7 @@ export function readCachedDailyEarningsResults(
 export type EarningsTrackingResult = {
   tracked: string[]
   snapshots: DailyEarningsResult[]
+  historyLimitPerAccount?: number
 }
 
 export class DailyEarningsRequestError extends Error {
@@ -76,7 +85,7 @@ export async function fetchAccountDailyEarnings(
   day: string,
   options: { signal?: AbortSignal; refreshId?: string } = {},
 ): Promise<DailyEarningsResult> {
-  const response = await fetch('/api/account/earnings', {
+  const response = await safeFetch('/api/account/earnings', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -98,14 +107,19 @@ export async function syncLinkedEarningsTracking(
   usernames: string[],
   signal?: AbortSignal,
 ): Promise<EarningsTrackingResult> {
-  const response = await fetch('/api/account/earnings-tracking', {
+  const response = await safeFetch('/api/account/earnings-tracking', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ usernames }),
+    body: JSON.stringify({ usernames, compressed: true }),
     signal,
   })
-  const data = await readResponseJson<EarningsTrackingResult & { error?: string }>(response)
+  const data = await readResponseJson<EarningsTrackingResult & { error?: string; snapshotsEncoding?: string; snapshotsPayload?: string }>(response)
   if (!response.ok) throw new Error(data.error || `Tracking request failed (${response.status}).`)
+  if (data.snapshotsEncoding === 'gzip-base64' && data.snapshotsPayload) {
+    const decoded = await gunzipBase64ToJson(data.snapshotsPayload)
+    if (!Array.isArray(decoded)) throw new Error('Invalid earnings history response.')
+    data.snapshots = decoded as DailyEarningsResult[]
+  }
   return data
 }

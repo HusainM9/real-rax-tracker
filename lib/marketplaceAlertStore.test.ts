@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MarketplaceAlertNotification, MarketplaceAlertRule } from './marketplaceAlerts'
 
 const values = new Map<string, unknown>()
+const expires = new Map<string, number>()
+function expire(key: string) {
+  if ((expires.get(key) ?? Infinity) <= Date.now()) { values.delete(key); expires.delete(key) }
+}
 const sets = new Map<string, Set<string>>()
 const lists = new Map<string, unknown[]>()
 const calls = {
@@ -14,6 +18,7 @@ const calls = {
 vi.mock('@vercel/kv', () => ({
   kv: {
     get: async (key: string) => {
+      expire(key)
       calls.get.push(key)
       return values.get(key) ?? null
     },
@@ -21,11 +26,19 @@ vi.mock('@vercel/kv', () => ({
       calls.mget.push(keys)
       return keys.map((key) => values.get(key) ?? null)
     },
-    set: async (key: string, value: unknown, options?: { nx?: boolean }) => {
+    set: async (key: string, value: unknown, options?: { nx?: boolean; ex?: number }) => {
+      expire(key)
       calls.set.push(key)
       if (options?.nx && values.has(key)) return null
       values.set(key, value)
+      if (options?.ex) expires.set(key, Date.now() + options.ex * 1000)
       return 'OK'
+    },
+    eval: async (_script: string, keys: string[], args: string[]) => {
+      expire(keys[0]!)
+      if (values.get(keys[0]!) !== args[0]) return 0
+      values.delete(keys[0]!)
+      return 1
     },
     del: async (...keys: string[]) => {
       let removed = 0
@@ -101,6 +114,7 @@ const notification: MarketplaceAlertNotification = {
 
 beforeEach(() => {
   values.clear()
+  expires.clear()
   sets.clear()
   lists.clear()
   calls.get.length = 0
@@ -108,8 +122,22 @@ beforeEach(() => {
   calls.set.length = 0
   calls.lpush.length = 0
 })
+afterEach(() => vi.useRealTimers())
 
 describe('marketplace alert storage', () => {
+  it('admits only one scan per four minutes from its start, even when a two-minute trigger persists', async () => {
+    vi.useFakeTimers()
+    const first = await acquireMarketplaceScanLease()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await releaseMarketplaceScanLease(first!)
+    await vi.advanceTimersByTimeAsync(90_000)
+    expect(await acquireMarketplaceScanLease()).toBeNull() // old 2-minute tick
+    await vi.advanceTimersByTimeAsync(119_000)
+    expect(await acquireMarketplaceScanLease()).toBeNull() // 239 s
+    await vi.advanceTimersByTimeAsync(1_000)
+    const arrivals = await Promise.all([acquireMarketplaceScanLease(), acquireMarketplaceScanLease()])
+    expect(arrivals.filter(Boolean)).toHaveLength(1) // exactly 240 s, not 270 s
+  })
   it('allows only one active marketplace scan lease and protects its owner token', async () => {
     const lease = await acquireMarketplaceScanLease()
     expect(lease).toEqual(expect.any(String))

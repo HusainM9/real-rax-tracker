@@ -5,12 +5,18 @@ export async function runWithConcurrency<T>(
   worker: (item: T, index: number) => Promise<void>,
 ): Promise<void> {
   let nextIndex = 0
+  let stopped = false
   const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (nextIndex < items.length) {
+    while (!stopped && nextIndex < items.length) {
       const index = nextIndex
       nextIndex += 1
       const item = items[index]
-      if (item !== undefined) await worker(item, index)
+      try {
+        if (item !== undefined) await worker(item, index)
+      } catch (error) {
+        stopped = true
+        throw error
+      }
     }
   })
   await Promise.all(workers)

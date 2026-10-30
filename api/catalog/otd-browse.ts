@@ -1,7 +1,8 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { browseCatalogPasses, type CatalogPassKind } from '../../lib/meowbotCatalogStore'
+import { requireAppSession } from '../admin/_helpers.js'
+import { browseCatalogPasses, type CatalogPassKind } from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -65,6 +66,7 @@ export default async function handler(request: Request): Promise<Response> {
 
     return Response.json(result)
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     return Response.json(
       {
         error: error instanceof Error ? error.message : 'Catalog OTD browse failed.',

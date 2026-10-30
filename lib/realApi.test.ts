@@ -3,14 +3,37 @@ import {
   getRealGamePlayerBoxScores,
   getRealHomeDayGames,
   getRealSportEntity,
+  listPlayerPlaysForPackAverage,
+  listTeamRecentPlays,
   getShopEarningsTotal,
   realApiRetryDelayMs,
   realGetJson,
+  listPasses,
   resolveRealApiConfig,
   type RealApiConfig,
 } from './realApi'
 
 const originalFetch = globalThis.fetch
+
+describe('terminal upstream failures', () => {
+  it('blocks a fresh Real caller and force/query variants after 5xx', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 504 }))
+    globalThis.fetch = fetcher
+    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '1' })).rejects.toMatchObject({ status: 504, retryable: false })
+    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '2', force: 1 })).rejects.toMatchObject({ status: 504, retryable: false })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+  it('never uses recent-play fallback after a top-play 5xx', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 500 }))
+    globalThis.fetch = fetcher
+    await expect(listPlayerPlaysForPackAverage({ entityId: 123, sport: 'nba', season: 2026 }, { config: testConfig() })).rejects.toMatchObject({ status: 500, retryable: false })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+  it('does not hide a team-play 5xx as an empty successful result', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 502 }))
+    await expect(listTeamRecentPlays({ entityId: 123, sport: 'nfl', season: 2026 }, { config: testConfig() })).rejects.toMatchObject({ status: 502, retryable: false })
+  })
+})
 
 afterEach(() => {
   globalThis.fetch = originalFetch
@@ -37,6 +60,11 @@ function testConfig(overrides: Partial<RealApiConfig> = {}): RealApiConfig {
 }
 
 describe('resolveRealApiConfig', () => {
+  it('rejects a malformed ownership response rather than treating it as an empty collection', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ message: 'temporarily unavailable' })) as typeof fetch
+    await expect(listPasses({ userId: 'test-user' }, { config: testConfig() })).rejects.toMatchObject({ kind: 'invalid_response' })
+  })
+
   it('defaults concurrency and retry knobs when unset', () => {
     const config = resolveRealApiConfig({
       REAL_IMPORT_ENABLED: 'true',
@@ -95,6 +123,7 @@ describe('realGetJson rate-limit retries', () => {
     const pending = realGetJson<{ ok: boolean }>('/user/test', {
       config: testConfig({ maxRetries: 4, retryBaseMs: 5, retryMaxMs: 20 }),
     })
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     await vi.runAllTimersAsync()
     await expect(pending).resolves.toEqual({ ok: true })
     expect(calls).toBe(3)
@@ -110,6 +139,7 @@ describe('realGetJson rate-limit retries', () => {
       (value) => ({ ok: true as const, value }),
       (error) => ({ ok: false as const, error }),
     )
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     await vi.runAllTimersAsync()
     const settled = await pending
     expect(settled.ok).toBe(false)
@@ -136,6 +166,7 @@ describe('realGetJson rate-limit retries', () => {
     const pending = realGetJson<{ listings: unknown[] }>('/cardmarketplacelistings', {
       config: testConfig({ maxRetries: 2, retryBaseMs: 5, retryMaxMs: 20 }),
     })
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     await vi.runAllTimersAsync()
 
     await expect(pending).resolves.toEqual({ listings: [] })

@@ -21,7 +21,6 @@ import {
   plannedPassFromOwnedCard,
   plannedPassProgressLabel,
   plannedPassProgressSortIndex,
-  plannedPassProgressTone,
   rankPlanFinishedForSalesAsync,
   withCollectionAssumedIconic1,
   type PlanFinishedCardSource,
@@ -49,6 +48,7 @@ import {
   type SellRankSortKey,
 } from '../lib/sellRankings'
 import { SPORTS, type PlannedPassProgress, type PlayerCard, type Sport } from '../types/rax'
+import './PlanningPages.css'
 
 const PLAN_RARITY_OPTIONS = RARITY_PREVIEW_OPTIONS.filter((option) => option.length > 0)
 const PLAN_SELL_RANK_PAGE_SIZE = 50
@@ -81,37 +81,13 @@ function sourceBadgeLabel(source: PlannedPassCardAnalysis['pass']['source']): st
   return 'Catalog'
 }
 
-function PlanTagPill({
-  progress,
-  selected = false,
-  onClick,
-}: {
-  progress: PlannedPassProgress
-  selected?: boolean
-  onClick?: () => void
-}) {
-  const tone = plannedPassProgressTone(progress)
-  const label = plannedPassProgressLabel(progress)
-  const className = `plan-tag plan-tag--${tone}${selected ? ' is-selected' : ''}`
-
-  if (onClick) {
-    return (
-      <button className={className} type="button" aria-pressed={selected} onClick={onClick}>
-        {label}
-      </button>
-    )
-  }
-
-  return <span className={className}>{label}</span>
-}
-
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <article className="stat-card panel">
+    <div className="plan-summary-item">
       <span>{label}</span>
       <strong>{value}</strong>
       <small className="table-sub">{hint}</small>
-    </article>
+    </div>
   )
 }
 
@@ -131,8 +107,8 @@ function PlanPassCard({
   const progress = normalizePlannedPassProgress(pass.progress)
 
   return (
-    <article className={`plan-pass-card panel plan-pass-card--${plannedPassProgressTone(progress)}`}>
-      <div className="plan-pass-card-header">
+    <article className="plan-list-row">
+      <div className="plan-list-identity">
         <PassIdentity
           name={pass.name}
           passKind={pass.passKind}
@@ -148,53 +124,45 @@ function PlanPassCard({
             </>
           }
         />
-        <button className="button danger compact" type="button" onClick={onRemove}>
-          Remove
-        </button>
       </div>
-
-      <div className="plan-pass-tag-row" role="group" aria-label="Plan section tag">
-        {PLANNED_PASS_PROGRESS_OPTIONS.map((option) => (
-          <PlanTagPill
-            key={option.value}
-            progress={option.value}
-            selected={progress === option.value}
-            onClick={() => onProgressChange(option.value)}
-          />
-        ))}
-      </div>
-
+      <label className="plan-list-progress">
+        <span>Progress</span>
+        <select value={progress} onChange={(event) => onProgressChange(event.target.value as PlannedPassProgress)}>
+          {PLANNED_PASS_PROGRESS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{plannedPassProgressLabel(option.value)}</option>)}
+        </select>
+      </label>
+      <div className="plan-list-gain">
       {ownedAtIconic ? (
-        <p className="import-hint plan-pass-status owned">Already in your collection at Iconic 1+</p>
+        <span className="plan-pass-status owned">Owned at Iconic 1+</span>
       ) : missingProfile ? (
-        <p className="import-hint plan-pass-status warning">Catalog profile not loaded yet</p>
+        <span className="plan-pass-status warning">Catalog profile not loaded</span>
       ) : missingRows ? (
-        <p className="import-hint plan-pass-status warning">No catalog earnings rows for this pass</p>
+        <span className="plan-pass-status warning">No catalog earnings</span>
       ) : net != null ? (
-        <div className="plan-pass-metrics">
-          <div className="plan-pass-metric highlight">
+        <>
             <span>Plan net gain</span>
             <strong className={signedRaxClass(net)}>
               {formatSignedRax(displayRaxValue(net))}
             </strong>
-            <small>contribution vs rest of plan</small>
-          </div>
-        </div>
+            <small>vs rest of plan</small>
+        </>
       ) : (
-        <p className="import-hint plan-pass-status warning">Could not analyze this pass</p>
+        <span className="plan-pass-status warning">Could not analyze</span>
       )}
-
-      <div className="plan-pass-footer">
-        <span className="badge">{sourceBadgeLabel(pass.source)}</span>
+      </div>
+      <div className="plan-list-actions">
+        <small>{sourceBadgeLabel(pass.source)}</small>
         <Link className="link-button" to="/potential">
-          Analyze in Potential
+          Analyze
         </Link>
+        <button className="button danger compact" type="button" onClick={onRemove}>Remove</button>
       </div>
     </article>
   )
 }
 
 export default function PlanPage() {
+  const [showAddPass, setShowAddPass] = useState(false)
   const {
     data,
     addPlannedPass,
@@ -780,16 +748,14 @@ export default function PlanPage() {
 
   return (
     <div className="page-stack plan-page">
-      <section className="hero-card">
-        <p className="eyebrow">Purchase plan</p>
-        <h1>Plan</h1>
-        <p>
-          Save catalog passes you are considering. Packs ETA auto-tags Nearly finished / On the way /
-          Future. Use <strong>Sell rank after plan</strong> to simulate finishing the plan (buys at{' '}
-          {RECOMMENDATION_SIMULATED_RARITY}) and rank every pass like If sold — see which planned buys
-          to drop and which owned passes become unused.
-        </p>
-        <div className="button-row">
+      <section className="plan-heading">
+        <div><p className="eyebrow">Purchase plan</p><h1>Plan</h1><p>Track the passes you want and their impact on your collection.</p></div>
+        <div className="plan-heading-actions">
+<button className="button primary" type="button" onClick={() => { setShowAddPass(true); window.setTimeout(() => document.getElementById('plan-catalog-search')?.scrollIntoView({ behavior: 'smooth' }), 0) }}>Add a pass</button>
+          <Link className="button" to="/packs">Track packs</Link>
+        </div>
+      </section>
+      <details className="plan-quick-links"><summary>More tools</summary><div className="button-row">
           <Link className="button" to="/potential">
             Rank OTD Net
           </Link>
@@ -804,8 +770,7 @@ export default function PlanPage() {
           <Link className="button" to="/entry">
             Add to collection
           </Link>
-        </div>
-      </section>
+      </div></details>
 
       <section className="stats-grid plan-summary-grid">
         <StatCard
@@ -847,6 +812,239 @@ export default function PlanPage() {
         ) : null}
       </section>
 
+
+      {profilesLoading ? <p className="import-progress">{profilesStatus || 'Loading plan…'}</p> : null}
+      {profilesStatus && !profilesLoading ? <p className="import-status">{profilesStatus}</p> : null}
+      {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
+      {ownedAddStatus ? <p className="import-status">{ownedAddStatus}</p> : null}
+
+
+      <div className="planning-section-heading">
+        <div><h2>Your planned passes</h2><p>Track progress and compare each pass’s impact.</p></div>
+        <span className="planning-count">{plannedPasses.length} planned</span>
+      </div>
+      {plannedPasses.length > 0 ? (
+        <>
+          {analysis.bundle && analysis.bundle.rows.length > 1 ? (
+            <CollapsiblePanel
+              className="nested-panel"
+              title="Combined plan order"
+              description="Each pass’s plan net is what it adds on top of the rest of the plan (leave-one-out), after collection overlap."
+              defaultOpen={false}
+            >
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Pass</th>
+                      <th>Plan net gain</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...analysis.bundle.rows]
+                      .sort(
+                        (a, b) =>
+                          b.marginalNetDelta - a.marginalNetDelta ||
+                          a.name.localeCompare(b.name),
+                      )
+                      .map((row, index) => (
+                        <tr key={row.key}>
+                          <td>{index + 1}</td>
+                          <td>
+                            <PassIdentity
+                              name={row.name}
+                              passKind={row.passKind}
+                              sport={row.sport}
+                              avatar={row.avatar}
+                              meta={
+                                <>
+                                  {row.sport} · {row.season}
+                                </>
+                              }
+                            />
+                          </td>
+                          <td>
+                            <strong className={signedRaxClass(row.marginalNetDelta)}>
+                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
+                            </strong>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </CollapsiblePanel>
+          ) : null}
+
+          <div className="sort-controls plan-pass-sort-controls">
+            <ThemedSelect
+              label="Sort passes"
+              value={passSortMode}
+              onChange={(value) => setPassSortMode(value as PlanPassSortMode)}
+              options={[
+                { value: 'progress', label: 'By section tags' },
+                { value: 'recent', label: 'Recently added' },
+              ]}
+            />
+          </div>
+
+          {passSortMode === 'progress' && planPassSections ? (
+            <div className="plan-pass-sections">
+              {planPassSections.filter((section) => section.entries.length > 0).map((section) => (
+                <details
+                  key={section.value}
+                  className="plan-list-group"
+                  open={section.value !== 'future'}
+                >
+                  <summary><strong>{section.label}</strong><span>{section.entries.length}</span></summary>
+                    <div className="plan-pass-grid">
+                      {section.entries.map((entry) => (
+                        <PlanPassCard
+                          key={entry.pass.id}
+                          entry={entry}
+                          planNetGain={
+                            marginalByExternalKey.get(entry.pass.externalKey) ?? null
+                          }
+                          onProgressChange={(progress) =>
+                            updatePlannedPass(entry.pass.id, { progress })
+                          }
+                          onRemove={() => removePlannedPass(entry.pass.id)}
+                        />
+                      ))}
+                    </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <section className="plan-pass-grid">
+              {sortedPlanPasses.map((entry) => (
+                <PlanPassCard
+                  key={entry.pass.id}
+                  entry={entry}
+                  planNetGain={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
+                  onProgressChange={(progress) =>
+                    updatePlannedPass(entry.pass.id, { progress })
+                  }
+                  onRemove={() => removePlannedPass(entry.pass.id)}
+                />
+              ))}
+            </section>
+          )}
+        </>
+      ) : (
+        <section className="panel plan-empty">
+          <p className="empty">No passes yet. Add a pass above or send ranked picks here from Optimization.</p>
+        </section>
+      )}
+
+      <details className="plan-add-workspace" id="plan-catalog-search" open={showAddPass} onToggle={(event) => setShowAddPass(event.currentTarget.open)}>
+        <summary>Add passes to your plan</summary>
+      <CatalogSearchPanel
+        embedded
+        title="Add catalog passes to your plan"
+        description={`Add at your OTD tier (default ${RECOMMENDATION_SIMULATED_RARITY}). Stays until you remove it or add to your collection.`}
+        passKind="player"
+        actionLabel="Add to plan"
+        loadingKey={catalogLoadingKey}
+        loadingLabel="Adding…"
+        disabled={profilesLoading}
+        collectionAdd={{
+          defaultRarity,
+          onDefaultRarityChange: setDefaultRarity,
+          rarityOptions: PLAN_RARITY_OPTIONS,
+          rarityForResult: (result) => rarityByKey[result.externalKey] ?? defaultRarity,
+          onRarityForResultChange: (externalKey, rarity) =>
+            setRarityByKey((current) => ({ ...current, [externalKey]: rarity })),
+        }}
+        planAdd={{
+          plannedExternalKeys,
+          onPlanLabel: 'On plan',
+        }}
+        onSelect={handleCatalogSelect}
+      />
+      {ownedAdjustableCards.length > 0 ? (
+        <CollapsiblePanel
+          className="nested-panel"
+          title="From your collection"
+          description={`Auto-add non-Iconic player passes as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY} upgrades — same idea as baseline adjustments.`}
+          badge={`${ownedAdjustableCards.length} eligible`}
+          defaultOpen={false}
+        >
+          <div className="sort-controls">
+            <ThemedSelect
+              label="Assume rarity"
+              value={ownedAddRarity}
+              onChange={(value) => setOwnedAddRarity(value)}
+              options={PLAN_RARITY_OPTIONS.map((option) => ({ value: option, label: option }))}
+            />
+            <label className="field inline-field recommendation-adjustment-owned-search">
+              <span>Filter your collection</span>
+              <input
+                value={ownedQuickAddFilter}
+                placeholder="Name, sport, season, or rarity"
+                onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
+              />
+            </label>
+            <button
+              className="button"
+              type="button"
+              disabled={addableFilteredOwnedCards.length === 0}
+              onClick={addAllFilteredOwnedToPlan}
+            >
+              Add all
+              {addableFilteredOwnedCards.length > 0
+                ? ` (${addableFilteredOwnedCards.length})`
+                : ''}
+            </button>
+          </div>
+          {filteredOwnedQuickAddCards.length > 0 ? (
+            <div className="recommendation-adjustment-owned-list button-row wrap-row">
+              {filteredOwnedQuickAddCards.map((card) => {
+                const alreadyAdded = Boolean(
+                  card.externalKey && plannedExternalKeys.has(card.externalKey),
+                )
+                const missingCatalogLink = !card.externalKey
+                return (
+                  <button
+                    className="button compact"
+                    type="button"
+                    key={card.id}
+                    disabled={missingCatalogLink || alreadyAdded}
+                    title={
+                      missingCatalogLink
+                        ? 'No catalog link on this card'
+                        : alreadyAdded
+                          ? 'Already on your plan'
+                          : `Add as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY}`
+                    }
+                    onClick={() => addOwnedCardToPlan(card)}
+                  >
+                    <PassIdentity
+                      name={card.name}
+                      passKind={card.passKind === 'team' ? 'team' : 'player'}
+                      sport={card.sport}
+                      avatar={card.avatar}
+                      meta={
+                        <>
+                          {[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
+                          {alreadyAdded ? ' · on plan' : ''}
+                        </>
+                      }
+                    />
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="empty">No collection passes match that filter.</p>
+          )}
+        </CollapsiblePanel>
+      ) : null}
+      </details>
+
+      <details className="planning-tools">
+        <summary><span><strong>Plan scenarios</strong><small>Explore planned sales and rank your finished plan</small></span></summary>
       {sellableCards.length > 0 ? (
         <CollapsiblePanel
           className="nested-panel"
@@ -1238,239 +1436,8 @@ export default function PlanPage() {
           </p>
         )}
       </CollapsiblePanel>
+      </details>
 
-      {profilesLoading ? <p className="import-progress">{profilesStatus || 'Loading plan…'}</p> : null}
-      {profilesStatus && !profilesLoading ? <p className="import-status">{profilesStatus}</p> : null}
-      {catalogStatus ? <p className="import-status">{catalogStatus}</p> : null}
-      {ownedAddStatus ? <p className="import-status">{ownedAddStatus}</p> : null}
-
-      {ownedAdjustableCards.length > 0 ? (
-        <CollapsiblePanel
-          className="nested-panel"
-          title="From your collection"
-          description={`Auto-add non-Iconic player passes as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY} upgrades — same idea as baseline adjustments.`}
-          badge={`${ownedAdjustableCards.length} eligible`}
-          defaultOpen={false}
-        >
-          <div className="sort-controls">
-            <ThemedSelect
-              label="Assume rarity"
-              value={ownedAddRarity}
-              onChange={(value) => setOwnedAddRarity(value)}
-              options={PLAN_RARITY_OPTIONS.map((option) => ({ value: option, label: option }))}
-            />
-            <label className="field inline-field recommendation-adjustment-owned-search">
-              <span>Filter your collection</span>
-              <input
-                value={ownedQuickAddFilter}
-                placeholder="Name, sport, season, or rarity"
-                onChange={(event) => setOwnedQuickAddFilter(event.target.value)}
-              />
-            </label>
-            <button
-              className="button"
-              type="button"
-              disabled={addableFilteredOwnedCards.length === 0}
-              onClick={addAllFilteredOwnedToPlan}
-            >
-              Add all
-              {addableFilteredOwnedCards.length > 0
-                ? ` (${addableFilteredOwnedCards.length})`
-                : ''}
-            </button>
-          </div>
-          {filteredOwnedQuickAddCards.length > 0 ? (
-            <div className="recommendation-adjustment-owned-list button-row wrap-row">
-              {filteredOwnedQuickAddCards.map((card) => {
-                const alreadyAdded = Boolean(
-                  card.externalKey && plannedExternalKeys.has(card.externalKey),
-                )
-                const missingCatalogLink = !card.externalKey
-                return (
-                  <button
-                    className="button compact"
-                    type="button"
-                    key={card.id}
-                    disabled={missingCatalogLink || alreadyAdded}
-                    title={
-                      missingCatalogLink
-                        ? 'No catalog link on this card'
-                        : alreadyAdded
-                          ? 'Already on your plan'
-                          : `Add as ${ownedAddRarity || RECOMMENDATION_SIMULATED_RARITY}`
-                    }
-                    onClick={() => addOwnedCardToPlan(card)}
-                  >
-                    <PassIdentity
-                      name={card.name}
-                      passKind={card.passKind === 'team' ? 'team' : 'player'}
-                      sport={card.sport}
-                      avatar={card.avatar}
-                      meta={
-                        <>
-                          {[card.season, card.rarityLabel].filter(Boolean).join(' · ')}
-                          {alreadyAdded ? ' · on plan' : ''}
-                        </>
-                      }
-                    />
-                  </button>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="empty">No collection passes match that filter.</p>
-          )}
-        </CollapsiblePanel>
-      ) : null}
-
-      {plannedPasses.length > 0 ? (
-        <>
-          {analysis.bundle && analysis.bundle.rows.length > 1 ? (
-            <CollapsiblePanel
-              className="nested-panel"
-              title="Combined plan order"
-              description="Each pass’s plan net is what it adds on top of the rest of the plan (leave-one-out), after collection overlap."
-              defaultOpen={false}
-            >
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Pass</th>
-                      <th>Plan net gain</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...analysis.bundle.rows]
-                      .sort(
-                        (a, b) =>
-                          b.marginalNetDelta - a.marginalNetDelta ||
-                          a.name.localeCompare(b.name),
-                      )
-                      .map((row, index) => (
-                        <tr key={row.key}>
-                          <td>{index + 1}</td>
-                          <td>
-                            <PassIdentity
-                              name={row.name}
-                              passKind={row.passKind}
-                              sport={row.sport}
-                              avatar={row.avatar}
-                              meta={
-                                <>
-                                  {row.sport} · {row.season}
-                                </>
-                              }
-                            />
-                          </td>
-                          <td>
-                            <strong className={signedRaxClass(row.marginalNetDelta)}>
-                              {formatSignedRax(displayRaxValue(row.marginalNetDelta))}
-                            </strong>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </CollapsiblePanel>
-          ) : null}
-
-          <div className="sort-controls plan-pass-sort-controls">
-            <ThemedSelect
-              label="Sort passes"
-              value={passSortMode}
-              onChange={(value) => setPassSortMode(value as PlanPassSortMode)}
-              options={[
-                { value: 'progress', label: 'By section tags' },
-                { value: 'recent', label: 'Recently added' },
-              ]}
-            />
-          </div>
-
-          {passSortMode === 'progress' && planPassSections ? (
-            <div className="plan-pass-sections">
-              {planPassSections.map((section) => (
-                <CollapsiblePanel
-                  key={section.value}
-                  className={`nested-panel plan-tag-section plan-tag-section--${section.tone}`}
-                  title={section.label}
-                  description={section.description}
-                  badge={`${section.entries.length}`}
-                  defaultOpen={section.value !== 'future'}
-                  actions={<PlanTagPill progress={section.value} />}
-                >
-                  {section.entries.length > 0 ? (
-                    <div className="plan-pass-grid">
-                      {section.entries.map((entry) => (
-                        <PlanPassCard
-                          key={entry.pass.id}
-                          entry={entry}
-                          planNetGain={
-                            marginalByExternalKey.get(entry.pass.externalKey) ?? null
-                          }
-                          onProgressChange={(progress) =>
-                            updatePlannedPass(entry.pass.id, { progress })
-                          }
-                          onRemove={() => removePlannedPass(entry.pass.id)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="empty plan-tag-section-empty">
-                      No passes tagged {section.label.toLowerCase()} yet. Use the color tags on a
-                      pass to move it here.
-                    </p>
-                  )}
-                </CollapsiblePanel>
-              ))}
-            </div>
-          ) : (
-            <section className="plan-pass-grid">
-              {sortedPlanPasses.map((entry) => (
-                <PlanPassCard
-                  key={entry.pass.id}
-                  entry={entry}
-                  planNetGain={marginalByExternalKey.get(entry.pass.externalKey) ?? null}
-                  onProgressChange={(progress) =>
-                    updatePlannedPass(entry.pass.id, { progress })
-                  }
-                  onRemove={() => removePlannedPass(entry.pass.id)}
-                />
-              ))}
-            </section>
-          )}
-        </>
-      ) : (
-        <section className="panel plan-empty">
-          <p className="empty">No passes yet. Search below, add from your collection, or use Rank OTD Net on Potential.</p>
-        </section>
-      )}
-
-      <CatalogSearchPanel
-        sectionId="plan-catalog-search"
-        title="Add catalog passes to your plan"
-        description={`Add at your OTD tier (default ${RECOMMENDATION_SIMULATED_RARITY}). Stays until you remove it or add to your collection.`}
-        passKind="player"
-        actionLabel="Add to plan"
-        loadingKey={catalogLoadingKey}
-        loadingLabel="Adding…"
-        disabled={profilesLoading}
-        collectionAdd={{
-          defaultRarity,
-          onDefaultRarityChange: setDefaultRarity,
-          rarityOptions: PLAN_RARITY_OPTIONS,
-          rarityForResult: (result) => rarityByKey[result.externalKey] ?? defaultRarity,
-          onRarityForResultChange: (externalKey, rarity) =>
-            setRarityByKey((current) => ({ ...current, [externalKey]: rarity })),
-        }}
-        planAdd={{
-          plannedExternalKeys,
-          onPlanLabel: 'On plan',
-        }}
-        onSelect={handleCatalogSelect}
-      />
     </div>
   )
 }

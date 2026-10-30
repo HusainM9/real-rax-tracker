@@ -1,12 +1,12 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { cachedProfilesToCatalogPayload } from '../../lib/meowbotCatalogProfiles'
+import { requireAppSession } from '../admin/_helpers.js'
+import { cachedProfilesToCatalogPayload } from '../../lib/meowbotCatalogProfiles.js'
 import {
   attachPassTotals,
   meowbotCatalogConfigured,
   upsertCatalogSnapshot,
-} from '../../lib/meowbotCatalogStore'
+} from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',

@@ -28,11 +28,7 @@ import {
 } from '../lib/trackerPersistence'
 import { loadAccountData, saveAccountData, AccountDataConflictError, AccountAuthRequiredError } from '../lib/accountData'
 import { useAccountAuth } from './AccountAuthContext'
-import {
-  importFromUsername as runUsernameImport,
-  retryFailedEarnings as runRetryFailedEarnings,
-  type UsernameImportResult,
-} from '../lib/usernameImport'
+import type { UsernameImportResult } from '../lib/usernameImport'
 import { createId } from '../lib/id'
 import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from '../lib/realMedia'
 import { buildSavedSellRankings } from '../lib/sellRankings'
@@ -66,13 +62,32 @@ function nowIso(): string {
 }
 
 export function RaxDataProvider({ children }: { children: ReactNode }) {
+  const { username, devBypass } = useAccountAuth()
+  const scopeKey = devBypass ? 'development' : `account:${username?.trim().toLowerCase() ?? ''}`
+  // A different account must not render, persist, or complete saves from the old one.
+  return <ScopedRaxDataProvider key={scopeKey}>{children}</ScopedRaxDataProvider>
+}
+
+function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
   const { username: accountUsername, devBypass: accountDevBypass, refresh: refreshAccount } =
     useAccountAuth()
   const [data, setData] = useState<RaxTrackerData>(createEmptyData)
   const [storageReady, setStorageReady] = useState(false)
   const [storageWarning, setStorageWarning] = useState<string | null>(null)
+  const [cloudIssue, setCloudIssue] = useState<string | null>(null)
+  const persistenceScope = useMemo(() => accountDevBypass ? undefined : {
+    accountUsername: accountUsername?.trim().toLowerCase() ?? '',
+  }, [accountUsername, accountDevBypass])
   const accountUpdatedAtRef = useRef<string | undefined>(undefined)
   const skipNextAccountSaveRef = useRef(true)
+  const cloudSaveBlockedRef = useRef(true)
+  const saveQueueRef = useRef(Promise.resolve())
+  const liveRef = useRef(true)
+
+  useEffect(() => {
+    liveRef.current = true
+    return () => { liveRef.current = false }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -80,25 +95,31 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
 
     const bootstrap = async () => {
       if (!accountDevBypass) {
+        if (!accountUsername) return
         try {
           const loaded = await loadAccountData()
           if (cancelled) return
           accountUpdatedAtRef.current = loaded.meta.updatedAt
+          cloudSaveBlockedRef.current = false
+          setCloudIssue(null)
           skipNextAccountSaveRef.current = true
           setData(loaded.data)
           setStorageReady(true)
-          void persistTrackerData(loaded.data)
+          void persistTrackerData(loaded.data, persistenceScope)
           return
         } catch (error) {
+          if (cancelled) return
           if (error instanceof AccountAuthRequiredError) {
             await refreshAccount()
             return
           }
           console.warn('Could not load account data; falling back to local storage.', error)
+          cloudSaveBlockedRef.current = true
+          setCloudIssue('Account data is unavailable. Cloud saving is paused; your local work is retained. Export a backup before reloading from your account.')
         }
       }
 
-      const loaded = await loadPersistedTrackerData()
+      const loaded = await loadPersistedTrackerData(persistenceScope)
       if (cancelled) return
       skipNextAccountSaveRef.current = true
       setData(loaded.data)
@@ -109,12 +130,13 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [accountUsername, accountDevBypass, refreshAccount])
+  }, [accountUsername, accountDevBypass, refreshAccount, persistenceScope])
 
   useEffect(() => {
     if (!storageReady) return
     const handle = window.setTimeout(() => {
-      void persistTrackerData(data).then((result) => {
+      void persistTrackerData(data, persistenceScope).then((result) => {
+        if (!liveRef.current) return
         const warning = storageWarningMessage(result)
         setStorageWarning(warning || null)
         if (!result.ok) {
@@ -123,7 +145,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       })
     }, 250)
     return () => window.clearTimeout(handle)
-  }, [data, storageReady])
+  }, [data, storageReady, persistenceScope])
 
   useEffect(() => {
     if (!storageReady || accountDevBypass) return
@@ -133,27 +155,28 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     }
 
     const handle = window.setTimeout(() => {
-      const save = async (ifUnmodifiedSince: string | undefined, allowRetry: boolean) => {
+      const save = async () => {
+        if (!liveRef.current || cloudSaveBlockedRef.current) return
         try {
-          const result = await saveAccountData(data, { ifUnmodifiedSince })
+          const result = await saveAccountData(data, { ifUnmodifiedSince: accountUpdatedAtRef.current })
+          if (!liveRef.current) return
           accountUpdatedAtRef.current = result.meta.updatedAt
-          setStorageWarning(null)
+          setCloudIssue(null)
         } catch (error) {
+          if (!liveRef.current) return
+          cloudSaveBlockedRef.current = true
           if (error instanceof AccountAuthRequiredError) {
+            setCloudIssue('Your session expired. Cloud saving is paused; export a backup before signing in again.')
             await refreshAccount()
             return
           }
-          if (error instanceof AccountDataConflictError && allowRetry) {
-            accountUpdatedAtRef.current = error.existingUpdatedAt
-            await save(error.existingUpdatedAt, false)
-            return
-          }
-          const message = error instanceof Error ? error.message : 'Could not save account data.'
-          setStorageWarning(message)
+          setCloudIssue(error instanceof AccountDataConflictError
+            ? 'Another device changed your collection. Cloud saving is paused to protect both copies. Export your local backup before reloading from your account.'
+            : 'Could not confirm the account save. Cloud saving is paused; export a backup before reloading from your account.')
           console.warn('Could not save account data:', error)
         }
       }
-      void save(accountUpdatedAtRef.current, true)
+      saveQueueRef.current = saveQueueRef.current.then(save)
     }, 800)
 
     return () => window.clearTimeout(handle)
@@ -200,7 +223,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
     () => ({
       data,
       storageReady,
-      storageWarning,
+      storageWarning: cloudIssue || storageWarning,
       setSettings: (patch) => {
         setData((current) => ({
           ...current,
@@ -1086,6 +1109,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       importJson: (json) => setData(importTrackerData(json)),
       replaceData: (next) => setData(normalizeData(next)),
       importFromUsername: async (username, options) => {
+        const { importFromUsername: runUsernameImport } = await import('../lib/usernameImport')
         const { data: nextData, result } = await runUsernameImport(data, username, options)
         const trimmed = username.replace(/^@/, '').trim()
         setData({
@@ -1095,6 +1119,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
         return result
       },
       retryFailedEarnings: async (passes, options) => {
+        const { retryFailedEarnings: runRetryFailedEarnings } = await import('../lib/usernameImport')
         const { data: nextData, result } = await runRetryFailedEarnings(data, passes, options)
         setData(nextData)
         return result
@@ -1132,7 +1157,7 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
       },
       resetAll: () => setData(createEmptyData()),
     }),
-    [data, storageReady, storageWarning],
+    [data, storageReady, storageWarning, cloudIssue],
   )
 
   return <RaxDataContext.Provider value={value}>{children}</RaxDataContext.Provider>

@@ -1,4 +1,5 @@
 import { gunzipBase64ToJson } from '../../lib/cloudSyncCompression'
+import { safeImportFetch } from './safeImportFetch'
 import type { MeowbotPlayerPass } from './meowbotApi'
 
 export type RealPassImportResult = {
@@ -38,7 +39,7 @@ export async function fetchRealUserPasses(
     throw new Error('Enter a Real username.')
   }
 
-  const response = await fetch(REAL_PASSES_ENDPOINT, {
+  const response = await safeImportFetch(REAL_PASSES_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: trimmed }),

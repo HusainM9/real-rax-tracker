@@ -1,0 +1,42 @@
+.optimization-page { gap: 1.15rem; }
+.optimization-page .hero-card { padding: 0.4rem 0 0.6rem; border: 0; background: transparent; }
+.optimization-page .hero-card h1 { margin: 0.3rem 0 0.6rem; font-size: clamp(2rem, 4vw, 2.65rem); letter-spacing: -0.04em; }
+.optimization-page .hero-card p:not(.eyebrow) { max-width: 65ch; }
+.optimization-page > .collapsible-panel,
+.optimization-page .optimization-comparison-card { padding: 1.4rem; border: 1px solid #343438; border-radius: 0.8rem; background: #161618; }
+.optimization-page .collapsible-title,
+.optimization-comparison-card h2 { font-size: 1.2rem; }
+.optimization-upgrades-heading { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
+.optimization-upgrades-heading h2 { display: flex; align-items: center; gap: 0.7rem; font-size: 1.15rem; margin: 0 0 0.5rem; }
+.optimization-upgrades-heading h2 span { color: #71717a; font-size: 0.7rem; font-weight: 400; letter-spacing: normal; }
+.optimization-upgrades-heading p { color: #a1a1aa; font-size: 0.85rem; margin: 0; line-height: 1.6; max-width: 70ch; }
+.optimization-upgrades-heading > .button { flex: 0 0 auto; }
+.optimization-page [hidden] { display: none; }
+.optimization-plan-selection-tools { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.25rem; padding-bottom: 0.75rem; color: #a1a1aa; font-size: 0.8rem; border-bottom: 1px solid #343438; }
+.optimization-plan-selection-tools .button-row { gap: 1rem; }
+.optimization-plan-upgrades { max-height: 22rem; overflow: auto; }
+.optimization-plan-upgrade { display: flex; align-items: center; gap: 0.85rem; padding: 0.85rem 0.35rem; border-bottom: 1px solid #29292d; cursor: pointer; }
+.optimization-plan-upgrade:last-child { border-bottom: 0; }
+.optimization-plan-upgrade.is-selected { background: rgba(228,160,36,0.04); }
+.optimization-plan-upgrade input { accent-color: #e4a024; width: 1rem; height: 1rem; flex: 0 0 auto; }
+.optimization-plan-upgrade .pass-identity { flex: 1; min-width: 0; }
+.optimization-plan-upgrade-tier { color: #71717a; font-size: 0.75rem; white-space: nowrap; }
+.optimization-plan-upgrade.is-selected .optimization-plan-upgrade-tier { color: #f0c060; }
+.optimization-plan-empty { margin: 1.1rem 0 0; padding-top: 1rem; border-top: 1px solid #343438; color: #a1a1aa; font-size: 0.85rem; }
+.optimization-period-tabs { display: inline-flex; gap: 0.25rem; margin-bottom: 1.25rem; padding: 0.25rem; border: 1px solid #343438; border-radius: 0.5rem; background: #101012; }
+.optimization-period-tabs .button { border: 0; border-radius: 0.3rem; background: transparent; }
+.optimization-period-tabs .button.primary { color: #17120b; background: #e4a024; }
+.optimization-page #month-boost-passes, .optimization-page #day-boost-passes { border: 0; padding: 0; border-radius: 0; background: transparent; }
+.optimization-page #month-boost-passes > .collapsible-header, .optimization-page #day-boost-passes > .collapsible-header { display: none; }
+.optimization-page #month-boost-passes > .collapsible-body, .optimization-page #day-boost-passes > .collapsible-body { border: 0; padding: 0; }
+.optimization-page .collapsible-description { max-width: 75ch; font-size: 0.85rem; }
+.optimization-page .rank-catalog-controls { padding: 1rem; border: 1px solid #303035; background: #101012; border-radius: 0.6rem; display: grid; grid-template-columns: 1fr 1fr 140px auto; align-items: end; gap: 1rem; }
+.optimization-page .rank-catalog-controls > .themed-select { width: 100%; }
+.optimization-page .rank-catalog-controls > .field { width: 100%; }
+.optimization-page .rank-catalog-controls .rank-include-ufc { margin-bottom: 0.2rem; }
+@media (max-width: 900px) { .optimization-page .rank-catalog-controls { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) {
+  .optimization-upgrades-heading { flex-direction: column; align-items: flex-start; gap: 0.8rem; }
+  .optimization-plan-selection-tools { flex-wrap: wrap; }
+  .optimization-page > .collapsible-panel, .optimization-page .optimization-comparison-card { padding: 1rem; }
+}

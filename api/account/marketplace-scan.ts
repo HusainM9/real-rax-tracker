@@ -1,6 +1,10 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { MARKETPLACE_ALERTS_ENABLED, MARKETPLACE_SCAN_INTERVAL_MINUTES, marketplaceDisabledResponse } from '../../lib/marketplaceAvailability.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
 import {
+  acquireMarketplaceScanLease,
+  releaseMarketplaceScanLease,
   markMarketplaceNotificationsDelivered,
   marketplaceAccountRoutingEnabled,
   readMarketplaceAlertRules,
@@ -9,17 +13,18 @@ import {
   readPendingMarketplaceNotifications,
   saveMarketplaceScanStatus,
   type MarketplaceScanStatus,
-} from '../../lib/marketplaceAlertStore'
-import { scanMarketplaceAlerts } from '../../lib/marketplaceMonitor'
-import { deliverMarketplaceNotifications } from '../../lib/marketplaceNotificationDelivery'
-import { requireEarningsSession } from '../../lib/earningsAuth'
-import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
-import { requireAccountSession } from '../admin/_helpers'
+} from '../../lib/marketplaceAlertStore.js'
+import { scanMarketplaceAlerts } from '../../lib/marketplaceMonitor.js'
+import { deliverMarketplaceNotifications } from '../../lib/marketplaceNotificationDelivery.js'
+import { requireEarningsSession } from '../../lib/earningsAuth.js'
+import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi.js'
+import { requireAccountSession } from '../admin/_helpers.js'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed()
+  if (!MARKETPLACE_ALERTS_ENABLED) return marketplaceDisabledResponse()
   const accessError = await requireEarningsSession(request, 'Marketplace')
   if (accessError) return accessError
   const session = await requireAccountSession(request)
@@ -31,6 +36,9 @@ export default async function handler(request: Request): Promise<Response> {
 
   const body = await request.json().catch(() => null) as { source?: unknown } | null
   const source = body?.source === 'page' ? 'page' : 'manual'
+
+  const lease = await acquireMarketplaceScanLease()
+  if (!lease) return Response.json({ ok: true, skipped: true, intervalMinutes: MARKETPLACE_SCAN_INTERVAL_MINUTES, reason: 'scan_in_progress_or_cooldown' }, { status: 202 })
 
   const startedAt = new Date().toISOString()
   try {
@@ -89,6 +97,7 @@ export default async function handler(request: Request): Promise<Response> {
       scanStatus,
     })
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     const message = error instanceof Error ? error.message : 'Marketplace scan failed.'
     const scanStatus: MarketplaceScanStatus = {
       startedAt,
@@ -106,5 +115,7 @@ export default async function handler(request: Request): Promise<Response> {
       error: message,
       scanStatus,
     }, { status: 502 })
+  } finally {
+    await releaseMarketplaceScanLease(lease)
   }
 }

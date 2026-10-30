@@ -1,9 +1,9 @@
-import { methodNotAllowed } from '../../lib/httpResponses'
+import { methodNotAllowed } from '../../lib/httpResponses.js'
+import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
-import { requireAppSession } from '../admin/_helpers'
-import { resolveCatalogAvatars } from '../../lib/catalogAvatarResolve'
-import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore'
-import { resolveRealApiConfig, type RealApiContext } from '../../lib/realApi'
+import { requireAppSession } from '../admin/_helpers.js'
+import { resolveCatalogAvatars } from '../../lib/catalogAvatarResolve.js'
+import { BULK_PROFILE_KEYS_MAX_REQUEST } from '../../lib/meowbotCatalogStore.js'
 
 export const config = {
   runtime: 'edge',
@@ -42,18 +42,13 @@ export default async function handler(request: Request): Promise<Response> {
       )
     }
 
-    const realConfig = resolveRealApiConfig()
-    const realContext: RealApiContext | null = realConfig
-      ? { config: realConfig, signal: request.signal }
-      : null
-
     const result = await resolveCatalogAvatars(externalKeys, {
       signal: request.signal,
-      realContext,
     })
 
     return Response.json(result)
   } catch (error) {
+    if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
     return Response.json(
       {
         error: error instanceof Error ? error.message : 'Catalog avatar resolve failed.',

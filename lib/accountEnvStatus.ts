@@ -1,6 +1,6 @@
-import { accountsConfigured } from './trackerProfileStore'
-import { authConfigured, getSigningSecret } from './authCookie'
-import { stripEnvQuotes } from './syncPassphrase'
+import { accountsConfigured } from './trackerProfileStore.js'
+import { authConfigured, getSigningSecret } from './authCookie.js'
+import { stripEnvQuotes } from './syncPassphrase.js'
 
 export type AccountEnvStatus = {
   vercelEnv: string

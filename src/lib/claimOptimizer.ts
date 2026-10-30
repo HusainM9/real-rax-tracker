@@ -151,7 +151,8 @@ export function computeClaimDayResults(data: RaxTrackerData): ClaimDayResult[] {
     )
 }
 
-function computeClaimDay(
+/** Rank already-collapsed, effective candidates; callers must supply fresh candidate objects. */
+export function computeClaimDay(
   claimDay: string,
   dayCandidates: IndexedCandidate[],
   proBonusEnabled: boolean,
@@ -164,34 +165,17 @@ function computeClaimDay(
   }
 
   const sports: SportClaimResult[] = []
-  const remainingForBonus: IndexedCandidate[] = []
+  const remainingForBonus: ClaimCandidate[] = []
 
   for (const [sport, sportCandidates] of [...bySport.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const ranked = [...sportCandidates].sort(byRaxThenName)
-    const guaranteed = ranked.slice(0, 2).map((candidate, index) => {
-      candidate.status = 'guaranteed'
-      candidate.rankInSport = index + 1
-      return toClaimCandidate(candidate)
-    })
-    const overlaps = ranked.slice(2).map((candidate, index) => {
-      candidate.status = 'overlap'
-      candidate.rankInSport = index + 3
-      remainingForBonus.push(candidate)
-      return toClaimCandidate(candidate)
-    })
-
-    sports.push({
-      sport,
-      guaranteed,
-      overlaps,
-      totalGuaranteedRax: guaranteed.reduce((sum, item) => sum + item.performance.raxEarned, 0),
-      totalOverlapRax: overlaps.reduce((sum, item) => sum + item.performance.raxEarned, 0),
-    })
+    const result = computeSportClaim(sport, sportCandidates)
+    remainingForBonus.push(...result.overlaps)
+    sports.push(result)
   }
 
   let proBonus: ClaimCandidate | null = null
   if (proBonusEnabled && remainingForBonus.length > 0) {
-    const [bestBonus] = [...remainingForBonus].sort(byRaxThenName)
+    const bestBonus = chooseProBonus(remainingForBonus)
     if (bestBonus) {
       bestBonus.status = 'pro-bonus'
       proBonus = toClaimCandidate(bestBonus)
@@ -218,6 +202,31 @@ function computeClaimDay(
     totalClaimableRax: totalGuaranteedRax + totalProBonusRax,
     totalOverlapRax,
   }
+}
+
+/** The shared top-two sport rule, for already-collapsed effective candidates. */
+export function computeSportClaim(sport: Sport, candidates: IndexedCandidate[]): SportClaimResult {
+  const ranked = [...candidates].sort(byRaxThenName)
+  const guaranteed = ranked.slice(0, 2).map((candidate, index) => ({
+    ...toClaimCandidate(candidate), status: 'guaranteed' as const, rankInSport: index + 1,
+  }))
+  const overlaps = ranked.slice(2).map((candidate, index) => ({
+    ...toClaimCandidate(candidate), status: 'overlap' as const, rankInSport: index + 3,
+  }))
+  return {
+    sport, guaranteed, overlaps,
+    totalGuaranteedRax: guaranteed.reduce((sum, item) => sum + item.performance.raxEarned, 0),
+    totalOverlapRax: overlaps.reduce((sum, item) => sum + item.performance.raxEarned, 0),
+  }
+}
+
+/** A linear stable maximum is equivalent to sorting all overlaps and taking the first. */
+export function chooseProBonus(candidates: readonly ClaimCandidate[]): ClaimCandidate | null {
+  let best: ClaimCandidate | null = null
+  for (const candidate of candidates) {
+    if (!best || byRaxThenName(candidate, best) < 0) best = candidate
+  }
+  return best
 }
 
 export function computeYearRollup(data: RaxTrackerData, results = computeClaimDayResults(data)): YearRollup {

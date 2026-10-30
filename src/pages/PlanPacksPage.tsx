@@ -6,6 +6,7 @@ import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { useRaxData } from '../context/RaxDataContext'
 import { createId } from '../lib/id'
+import { runWithConcurrency } from '../lib/meowbotApi'
 import type { CatalogSearchResult } from '../lib/catalogApi'
 import { RECOMMENDATION_SIMULATED_RARITY } from '../lib/passRecommendation'
 import {
@@ -33,6 +34,7 @@ import type {
   PlannedPass,
   WeeklyPackOpen,
 } from '../types/rax'
+import './PlanningPages.css'
 
 function formatDays(days: number | null): string {
   if (days === null) return '—'
@@ -647,6 +649,10 @@ export default function PlanPacksPage() {
     total: number
   } | null>(null)
   const [syncStatus, setSyncStatus] = useState('')
+  const [forceRefreshRatings, setForceRefreshRatings] = useState(false)
+  const [lastRatingsCheck, setLastRatingsCheck] = useState<{
+    username: string; fetchedAt: string; source?: 'real' | 'cache'
+  } | null>(null)
   const [applyTemplatesStatus, setApplyTemplatesStatus] = useState('')
   const [trackAllStatus, setTrackAllStatus] = useState('')
   const [importBusyKey, setImportBusyKey] = useState('')
@@ -660,7 +666,7 @@ export default function PlanPacksPage() {
   const plannedPasses = data.plannedPasses ?? []
   const packTrackers = data.packTrackers ?? []
   const packAccountTemplates = data.packAccountTemplates ?? []
-  const anyImportBusy = syncBusyUsername !== '' || importBusyKey !== ''
+  const anyImportBusy = syncBusyUsername !== '' || syncAllProgress !== null || importBusyKey !== ''
   const isSyncAllRunning = syncAllProgress !== null
 
   const playerPasses = useMemo(
@@ -894,6 +900,14 @@ export default function PlanPacksPage() {
     return ratingsByExternalKey
   }
 
+  const loadPackRatings = async (username: string) => {
+    const result = await fetchPackRatings(username, undefined, { forceRefresh: forceRefreshRatings })
+    if (result.fetchedAt && Number.isFinite(Date.parse(result.fetchedAt))) {
+      setLastRatingsCheck({ username: result.username, fetchedAt: result.fetchedAt, source: result.source })
+    }
+    return result
+  }
+
   const runSyncUsername = async (
     rawUsername: string,
   ): Promise<
@@ -905,7 +919,7 @@ export default function PlanPacksPage() {
       return { ok: false, username: rawUsername, error: 'Empty username.' }
     }
     try {
-      const result = await fetchPackRatings(username)
+      const result = await loadPackRatings(username)
       const ratingsByExternalKey = ratingsMapFromResult(result.passes)
       const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
         ensureAccounts: true,
@@ -945,9 +959,7 @@ export default function PlanPacksPage() {
         return
       }
       setSyncStatus(
-        outcome.updatedAccounts > 0
-          ? `Synced ${outcome.updatedAccounts} account row${outcome.updatedAccounts === 1 ? '' : 's'} for @${outcome.username} across tracked passes.${outcome.missingPasses ? ` ${outcome.missingPasses} not owned.` : ''}`
-          : `@${outcome.username} does not own any of your currently tracked passes.`,
+        `Synced ratings for @${outcome.username}. Check tracked passes for ownership status.`,
       )
     } finally {
       setSyncBusyUsername('')
@@ -965,39 +977,24 @@ export default function PlanPacksPage() {
     }
 
     const total = knownUsernames.length
-    let syncedOk = 0
-    let totalUpdated = 0
-    let totalMissing = 0
-    const errors: string[] = []
+    let completed = 0
 
     try {
-      for (let i = 0; i < knownUsernames.length; i++) {
-        const username = knownUsernames[i]!
-        setSyncBusyUsername(username)
-        setSyncAllProgress({ index: i + 1, total })
-        setSyncStatus(`Syncing @${username}… ${i + 1}/${total}`)
-
+      setSyncAllProgress({ index: 0, total })
+      setSyncStatus(`Syncing accounts… 0/${total}`)
+      const outcomes = await runWithConcurrency(knownUsernames, 2, async (username) => {
         const outcome = await runSyncUsername(username)
-        if (!outcome.ok) {
-          errors.push(`@${username}: ${outcome.error}`)
-          continue
-        }
-        syncedOk += 1
-        totalUpdated += outcome.updatedAccounts
-        totalMissing += outcome.missingPasses
-      }
+        completed += 1
+        setSyncAllProgress({ index: completed, total })
+        setSyncStatus(`Syncing accounts… ${completed}/${total}`)
+        return outcome
+      })
 
+      const syncedOk = outcomes.filter((outcome) => outcome.ok).length
+      const errors = outcomes.flatMap((outcome) => outcome.ok ? [] : [`@${outcome.username}: ${outcome.error}`])
       const parts = [
         `Synced ${syncedOk}/${total} account${total === 1 ? '' : 's'}.`,
       ]
-      if (totalUpdated > 0) {
-        parts.push(
-          `Updated ${totalUpdated} account row${totalUpdated === 1 ? '' : 's'}.`,
-        )
-      }
-      if (totalMissing > 0) {
-        parts.push(`${totalMissing} not owned.`)
-      }
       if (errors.length > 0) {
         parts.push(errors.join(' '))
       }
@@ -1080,7 +1077,7 @@ export default function PlanPacksPage() {
     }))
 
     try {
-      const result = await fetchPackRatings(username)
+      const result = await loadPackRatings(username)
       const ratingsByExternalKey = ratingsMapFromResult(result.passes)
       const match = ratingsByExternalKey[pass.externalKey]
       if (!match) {
@@ -1141,17 +1138,17 @@ export default function PlanPacksPage() {
     const errors: string[] = []
 
     try {
-      for (const [usernameKey, group] of byUsername) {
+      await runWithConcurrency([...byUsername], 2, async ([usernameKey, group]) => {
         const username = accountUsername(group[0]!) || usernameKey
         try {
-          const result = await fetchPackRatings(username)
+          const result = await loadPackRatings(username)
           const ratingsByExternalKey = ratingsMapFromResult(result.passes)
           if (!ratingsByExternalKey[pass.externalKey]) {
             missing += group.length
             applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
               plannedPassId: pass.id,
             })
-            continue
+            return
           }
           for (const account of group) {
             const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
@@ -1165,7 +1162,7 @@ export default function PlanPacksPage() {
             `@${username}: ${error instanceof Error ? error.message : 'import failed'}`,
           )
         }
-      }
+      })
 
       const parts = [
         updated > 0
@@ -1335,8 +1332,8 @@ export default function PlanPacksPage() {
         <div className="packs-command-copy">
           <div>
             <p className="eyebrow">Player pack tracking</p>
-            <h1>Pack command center</h1>
-            <p>See what is closest to Iconic, which accounts need attention, and where every daily or weekly pack is going.</p>
+            <h1>Packs</h1>
+            <p>Track progress to Iconic across your players and accounts.</p>
           </div>
           <div className="packs-command-actions">
             <button className="button primary compact" type="button" aria-expanded={showQuickAdd} onClick={() => setShowQuickAdd((current) => !current)}>
@@ -1368,17 +1365,24 @@ export default function PlanPacksPage() {
         </div>
       </section>
 
+      <details className="planning-tools packs-settings">
+        <summary><span><strong>Sync and account settings</strong><small>Update ratings, manage shared accounts, and view finish order</small></span></summary>
       <section className="panel pack-sync-panel pack-sync-dock">
         <div className="pack-sync-copy">
           <span className="pack-sync-kicker">Live ratings</span>
           <h2>Sync your pack board</h2>
           <p className="table-sub">
-            Sync one Real account, or Sync all to walk each username one by one — pulls live ratings
+            Sync one Real account, or Sync all to update accounts two at a time — pulls live ratings
             across every tracked player. Avg from plays pulls each player’s Real play ratings
             (packs = {PLAYS_PER_PACK} plays) to set rating/pack.
           </p>
         </div>
         <div className="button-row pack-sync-accounts">
+          <label className="pack-opens-toggle">
+            <input type="checkbox" aria-label="Always refresh ratings from Real" checked={forceRefreshRatings}
+              disabled={anyImportBusy} onChange={(event) => setForceRefreshRatings(event.target.checked)} />
+            <span>Always refresh from Real</span>
+          </label>
           <button
             className="button"
             type="button"
@@ -1396,7 +1400,7 @@ export default function PlanPacksPage() {
                 onClick={() => void syncAllKnownUsernames()}
               >
                 {isSyncAllRunning && syncAllProgress
-                  ? `Syncing @${syncBusyUsername}… ${syncAllProgress.index}/${syncAllProgress.total}`
+                  ? `Syncing… ${syncAllProgress.index}/${syncAllProgress.total}`
                   : 'Sync all'}
               </button>
               {knownUsernames.map((username) => (
@@ -1415,6 +1419,11 @@ export default function PlanPacksPage() {
             </>
           )}
         </div>
+        <p className="table-sub">Successful ownership scans can be reused for up to 30 seconds across players. Enable refresh to fetch current ratings from Real.</p>
+        {lastRatingsCheck ? <p className="import-hint">
+          {lastRatingsCheck.source === 'cache' ? 'Recent scan' : 'Real scan'} · @{lastRatingsCheck.username} ·{' '}
+          <time dateTime={lastRatingsCheck.fetchedAt}>{new Date(lastRatingsCheck.fetchedAt).toLocaleTimeString()}</time>
+        </p> : null}
         {knownUsernames.length === 0 ? (
           <p className="import-hint">
             Add a Real username on a shared account or pass row below to sync live ownership ratings.
@@ -1548,22 +1557,23 @@ export default function PlanPacksPage() {
           </div>
         </CollapsiblePanel>
       ) : null}
+      </details>
 
       {playerPasses.length === 0 ? (
         <section className="panel plan-empty">
           <p className="empty">
-            Add player passes on the{' '}
+            Add a player above, or add passes to your{' '}
             <Link className="link-button" to="/plan">
               purchase plan
             </Link>{' '}
-            first, then track pack progress here.
+            to track pack progress here.
           </p>
         </section>
       ) : (
         <section className="pack-tracker-list">
           <div className="pack-tracker-list-header">
             <div className="pack-sync-copy">
-              <h2>Planned players</h2>
+              <h2>Your players</h2>
               <p className="table-sub">
                 {untrackedPlayerPasses.length === 0
                   ? 'Every planned player pass is already tracked.'

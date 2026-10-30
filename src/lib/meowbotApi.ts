@@ -1,4 +1,5 @@
 import type { Sport } from '../types/rax'
+import { safeImportFetch } from './safeImportFetch'
 import { seasonLabelFromPass } from './seasonLabel'
 
 const DEFAULT_SUPABASE_URL = 'https://mfsyhtuqybbxprgwwykd.supabase.co'
@@ -83,7 +84,7 @@ async function invokeFunction(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const response = await fetch(`${supabaseUrl()}/functions/v1/${functionName}`, {
+  const response = await safeImportFetch(`${supabaseUrl()}/functions/v1/${functionName}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -385,15 +386,19 @@ export async function runWithConcurrency<T, R>(
   if (items.length === 0) return []
   const results: R[] = new Array(items.length)
   let nextIndex = 0
+  let stopped = false
 
   async function runWorker(): Promise<void> {
-    while (nextIndex < items.length) {
+    while (!stopped && nextIndex < items.length) {
       if (signal?.aborted) {
         throw new DOMException('Import cancelled.', 'AbortError')
       }
       const index = nextIndex
       nextIndex += 1
-      results[index] = await worker(items[index]!, index)
+      try { results[index] = await worker(items[index]!, index) } catch (error) {
+        stopped = true
+        throw error
+      }
     }
   }
 
