@@ -50,6 +50,17 @@ export function seasonYearKindForSport(sport: string): SeasonYearKind {
   return 'end'
 }
 
+/**
+ * Real season key for the season in progress on a given day.
+ * Split seasons roll over in August; end-year sports (NBA/NHL/CBB) therefore
+ * use the following calendar year from August onward.
+ */
+export function currentRealSeasonYear(sport: string, now = new Date()): number {
+  const year = now.getUTCFullYear()
+  if (seasonYearKindForSport(sport) !== 'end') return year
+  return now.getUTCMonth() >= 7 ? year + 1 : year
+}
+
 export type PassSeasonDateWindow = {
   start: string
   end: string

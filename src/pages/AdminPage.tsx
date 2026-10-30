@@ -42,8 +42,10 @@ import {
   type ShopCrawlResumeCursor,
 } from '../lib/shopCrawlClient'
 import {
-  CURRENT_SPLIT_SEASON_SPORTS,
-  CURRENT_SPLIT_SEASON_YEAR,
+  CURRENT_SPLIT_SEASON_END_YEAR,
+  CURRENT_SPLIT_SEASON_END_YEAR_SPORTS,
+  CURRENT_SPLIT_SEASON_START_YEAR,
+  CURRENT_SPLIT_SEASON_START_YEAR_SPORTS,
   EVENT_TYPE_LABELS,
   LIVE_SHOP_CRAWL_SPORTS,
   type CatalogImportResponse,
@@ -1083,8 +1085,8 @@ export default function AdminPage() {
                 Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
                 Continue resumes without redoing finished pages. Use{' '}
                 <strong>Backfill faces · top {AVATAR_BACKFILL_TOP_N}</strong> for a fast avatars-only
-                pass (college players, teams, UFC) — enter seasons first. NFL, CFB, and FC encode
-                2026–27 as season year 2026.
+                pass (college players, teams, UFC) — enter seasons first. For 2026–27, NFL, CFB,
+                and FC use season year 2026; NBA and NHL use season year 2027.
               </p>
             </div>
           </div>
@@ -1109,13 +1111,28 @@ export default function AdminPage() {
               onClick={() =>
                 setShopCrawl((current) => ({
                   ...current,
-                  seasons: CURRENT_SPLIT_SEASON_YEAR,
-                  sports: [...CURRENT_SPLIT_SEASON_SPORTS],
+                  seasons: CURRENT_SPLIT_SEASON_START_YEAR,
+                  sports: [...CURRENT_SPLIT_SEASON_START_YEAR_SPORTS],
                   includeUfc: false,
                 }))
               }
             >
               2026–27 · CFB + NFL + FC
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={shopCrawlBusy}
+              onClick={() =>
+                setShopCrawl((current) => ({
+                  ...current,
+                  seasons: CURRENT_SPLIT_SEASON_END_YEAR,
+                  sports: [...CURRENT_SPLIT_SEASON_END_YEAR_SPORTS],
+                  includeUfc: false,
+                }))
+              }
+            >
+              2026–27 · NBA + NHL
             </button>
             {LIVE_SHOP_CRAWL_SPORTS.map((sport) => {
               const checked = shopCrawl.sports.includes(sport.value)

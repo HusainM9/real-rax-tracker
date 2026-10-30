@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  currentRealSeasonYear,
   catalogExternalKeyCandidates,
   claimDayInPassSeason,
   filterDailyRowsToPassSeason,
@@ -26,6 +27,22 @@ describe('seasonYearKindForSport', () => {
     expect(seasonYearKindForSport('WNBA')).toBe('calendar')
     expect(seasonYearKindForSport('Golf')).toBe('calendar')
     expect(seasonYearKindForSport('UFC')).toBe('calendar')
+  })
+})
+
+describe('currentRealSeasonYear', () => {
+  it('uses the following year for active NBA and NHL seasons after the August rollover', () => {
+    const october2026 = new Date('2026-10-30T12:00:00Z')
+    expect(currentRealSeasonYear('NBA', october2026)).toBe(2027)
+    expect(currentRealSeasonYear('NHL', october2026)).toBe(2027)
+    expect(currentRealSeasonYear('NFL', october2026)).toBe(2026)
+    expect(currentRealSeasonYear('FC', october2026)).toBe(2026)
+  })
+
+  it('keeps the current end year before the August rollover', () => {
+    const july2027 = new Date('2027-07-15T12:00:00Z')
+    expect(currentRealSeasonYear('NBA', july2027)).toBe(2027)
+    expect(currentRealSeasonYear('NHL', july2027)).toBe(2027)
   })
 })
 

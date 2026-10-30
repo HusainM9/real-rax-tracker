@@ -12,6 +12,7 @@ import type { MarketplaceScanLogEntry, MarketplaceScanStatus } from '../../lib/m
 import { ThemedSelect } from '../components/ThemedSelect'
 import { useAccountAuth } from '../context/AccountAuthContext'
 import { useRaxData } from '../context/RaxDataContext'
+import { currentRealSeasonYear } from '../../lib/seasonClaimWindow'
 import {
   ignoreMarketplaceAlertListing,
   loadMarketplaceAlerts,
@@ -37,7 +38,7 @@ type Draft = Omit<MarketplaceAlertRule, 'id' | 'createdAt' | 'updatedAt' | 'enab
   pricePerRatingMax: number | null
 }
 
-const currentSeason = new Date().getUTCFullYear()
+const currentSeason = currentRealSeasonYear('nfl')
 const PLAYER_PAGE_SIZE = 12
 const PLAYER_PICKER_PAGE_SIZE = 16
 const initialDraft: Draft = {
@@ -586,8 +587,8 @@ export default function MarketplaceAlertsPage() {
           </div>
 
           <div className="marketplace-form-grid marketplace-essentials">
-            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
-            <label className="field"><span>Season</span><input type="number" min="2000" max="2200" value={draft.season} onChange={(event) => { setDraft({ ...draft, season: Number(event.target.value) || currentSeason, players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} /></label>
+            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, season: currentRealSeasonYear(sport), players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
+            <label className="field"><span>Season</span><input type="number" min="2000" max="2200" value={draft.season} onChange={(event) => { setDraft({ ...draft, season: Number(event.target.value) || currentRealSeasonYear(draft.sport), players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} /></label>
 
             <section className="marketplace-owned-picker marketplace-span-2">
               <div className="marketplace-owned-picker-heading">

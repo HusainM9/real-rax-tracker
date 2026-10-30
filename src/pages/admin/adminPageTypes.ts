@@ -101,8 +101,10 @@ export const LIVE_SHOP_CRAWL_SPORTS = [
   { label: 'FC', value: 'soccer' },
 ] as const
 
-export const CURRENT_SPLIT_SEASON_YEAR = '2026'
-export const CURRENT_SPLIT_SEASON_SPORTS = ['nfl', 'ncaaf', 'soccer'] as const
+export const CURRENT_SPLIT_SEASON_START_YEAR = '2026'
+export const CURRENT_SPLIT_SEASON_START_YEAR_SPORTS = ['nfl', 'ncaaf', 'soccer'] as const
+export const CURRENT_SPLIT_SEASON_END_YEAR = '2027'
+export const CURRENT_SPLIT_SEASON_END_YEAR_SPORTS = ['nba', 'nhl'] as const
 
 export const EVENT_TYPE_LABELS: Record<AdminEvent['type'], string> = {
   import_complete: 'Import complete',
