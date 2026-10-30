@@ -24,6 +24,8 @@ This policy **supersedes the earlier blanket 500–599 / site-wide permanent-blo
 
 ## Historical incident evidence
 
+Current recovery release: source `5bac90ab6e3d15d1141b0b7de0e2ad82896cbcbd`, production `dpl_35PfmjE5SdHxhGxAnAsHSatdiTeJ`, READY and canonical/team aliases assigned. Remote 383-test safety gate passed (local full suite 1,159). Temporary internal-login and retired-snapshot firewall pauses are inactive; unsafe legacy hosts remain denied. Production auth checks returned 401 because local gate credentials were not accepted; do not claim successful deployed account authentication/storage verification. No Real request/import was run. See `docs/real-500-only-results-2026-10-31.md` for current evidence and limits.
+
 Production `dpl_7Hd2R4FRVcbEk79V8B6isem7fDit` was released from `e80430e61db49d0170764fa0c6b09827d8692724`. At October 31 02:09 Riyadh (`2026-10-30T23:09:14.469Z`), our POST `/api/account/login` returned 500 after a storage transport exception (request ID `xf87w-1793401754469-ccda8bf14d45`); it was **not a Real request**. Its temporary hosting pause is authorized for removal under the clarified policy. The original fetch cause was not retained, so do not claim a proven storage outage or Real 500. Official SDK and custom-transport read-only KV PINGs later both succeeded locally; this alone does not prove deployed login recovered.
 
 Earlier reports in `docs/*2026-10-31.md` describe the old broader policy and are historical unless explicitly updated. The current reconciliation design/plan/report takes precedence. Do not resurrect the obsolete blanket rule from those documents.

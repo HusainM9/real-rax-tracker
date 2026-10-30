@@ -33,4 +33,10 @@ Solo review found and fixed the skipped-pass attribution and blanket import-form
 
 ## Release evidence
 
-Pending the final clean-source build and controlled hosting reconciliation. The temporary account-login and retired internal-error firewall pauses will be disabled; private access and unsafe legacy-host denial remain. Retired handlers remain retired.
+- App source committed/pushed as **`5bac90ab6e3d15d1141b0b7de0e2ad82896cbcbd`**, branch `codex/performance-phase-two`.
+- Production deployment **`dpl_35PfmjE5SdHxhGxAnAsHSatdiTeJ`**, READY, exact source commit verified; canonical and team aliases assigned. Unique host: `real-rax-tracker-9u0x7n051-sniperhusain-9147s-projects.vercel.app`.
+- Remote build independently passed **383 tests / 22 files**, the 221-module audit, native ESM check and TypeScript/Vite build. Hosting emitted an existing Edge-runtime deprecation warning; runtime migration is a separate follow-up, not silently included here.
+- Read-back confirms the project is unpaused, preview creation remains disabled, and the host rule admits only the canonical/team/new unique hosts. Unsafe older deployments remain denied.
+- The exact temporary account-login and retired snapshot internal-error firewall rules are now **inactive**, verified by read-back. Retired handlers remain retired; no retired endpoint/cron was executed, and no remote schedule changed.
+- Production login routes returned normal **401**, not 500, in verification. However the local site-gate token/password were not accepted by production, so these checks did **not** reach account storage or prove successful tracker authentication. No password was changed, no access protection weakened and no user tracker password was used. The owner must reload and sign in normally to finish that check; offline real-handler/UI regressions cover storage and form behavior.
+- Public `/login` returned **200** and referenced the exact newly built `index-CEGnP8sN.js` bundle. This verifies the new UI is served, not account authentication.
