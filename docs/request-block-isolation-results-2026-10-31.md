@@ -2,7 +2,7 @@
 
 ## Outcome
 
-The reproduced blocking cascade is fixed in the local source and passes the offline gates. **Not deployed; the unresolved live collection-import records remain preserved.** No Real request, live import, production database call, safety-record deletion, scheduler change or development-server restart was performed in this implementation pass. Work stayed solo on `codex/performance-phase-two`, preserving earlier uncommitted changes.
+The reproduced blocking cascade is fixed and passes the offline gates. The owner subsequently authorized commit/deploy: **source commit `e80430e61db49d0170764fa0c6b09827d8692724` is now deployed to production** as `dpl_7Hd2R4FRVcbEk79V8B6isem7fDit`, with cloud gates passed. The unresolved live collection-import records remain preserved. No Real request, live import, production database call, safety-record deletion, scheduler change or development-server restart was performed in this implementation/release pass. Work stayed solo on `codex/performance-phase-two`, retaining and committing the earlier approved changes. Exact release evidence is recorded in `docs/deployment-resume-2026-10-31.md`.
 
 The original `gordon` incident still has no recorded HTTP status or transport cause. These fixes address demonstrated defects in our safeguards; they do not establish why that original request lost its response or prove that Real rejected it.
 
@@ -39,7 +39,8 @@ No broad volume caps, automatic expiry, force override, fallback around 5xx or p
 | Actual safety Lua in isolated VM | Passed: all 100 5xx statuses, late success, unknown-operation isolation, ownership, legacy records, malformed state and clean completion |
 | Source package dry run | Passed; zero API test functions / private fixture or scratch-tool files |
 | Diff whitespace check | Passed; existing Windows line-ending warnings only |
-| Live import / deployment | **Not performed** |
+| Live import | **Not performed**; existing incident records preserved |
+| Production deployment | **READY**, exact committed source verified through management metadata and cloud build logs |
 
 The full suite's 15.93 seconds is test-runner time, not an import/ranking benchmark. No new production performance claim is made.
 
@@ -57,7 +58,7 @@ This run used Fengari 0.1.5 from an ignored disposable tool directory. Normal `n
 ## Remaining boundaries, not silently resolved
 
 1. **Live import is still paused by its old records.** The preserved Real username and shared catalog reservations need an explicit incident-review/recovery decision; this fix does not authorize erasing unknown history or repeating any known 5xx. Do not use another account, parameter or deployment to bypass them.
-2. **Production deployment and normal-use verification remain separate.** This pass did not change aliases, firewall rules, schedulers or stopped dev hosts. Old denied preview URLs do not become valid because source tests pass.
+2. **Normal-use verification remains separate from deployment.** The authorized follow-up assigned the guarded production build and updated its hostname allowlist; no scheduler or stopped dev-host changes were made. Old preview URLs remain denied. The one successful public login-page check does not certify imports, rankings or account API behavior.
 3. **Storage-outage durability has limits.** KV cannot persist its own HTTP outage into the unavailable store. Its transport latch is warm-instance only. If a provider failure cannot be finalized durably, its exact reservation remains, but cross-instance family-wide failure propagation cannot be guaranteed until storage is available and the incident is reviewed. Already-dispatched concurrent catalog reads cannot be unsent. Do not call this a universal distributed no-repeat guarantee.
 4. **Review was solo**, as requested; it is not independent review. Known live incident recovery, production Redis behavior and new production speed measurements were explicitly set aside, not graded as passing.
 
