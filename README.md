@@ -1,5 +1,7 @@
 # Real RAX Tracker
 
+Current safety policy: only **confirmed HTTP 500 from Real** creates a persistent endpoint pause. Internal API/storage/notification errors, unknown responses and other 5xx do not permanently disable the site. See [the current reconciliation report](docs/real-500-only-results-2026-10-31.md); older broad safety reports are historical.
+
 Real RAX Tracker is a private planning and analysis app for Real Sports On This Day (OTD) claims. It imports owned player and team passes, tracks daily RAX earnings, identifies claim overlaps, and helps compare potential purchases, sales, and pack plans.
 
 ## What it does
@@ -43,7 +45,7 @@ Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Nev
 | `npm run build` | Type-check and create the production bundle in `dist/` |
 | `npm run preview` | Preview the production bundle locally |
 | `npm run seed:catalog` | Run the shared-catalog seed script |
-| `npm run bench:collection -- gordon --live --label repeat` | Benchmark an isolated import against the local API on port 5174 |
+| `npm run bench:collection` | Offline recorded-fixture benchmark; live import bursts are not authorized |
 | `node scripts/audit-runtime-modules.mjs` | Report conservative dependency-cleanup candidates |
 
 GitHub Actions runs lint, tests, and the production build for pushes and pull requests.
@@ -75,7 +77,7 @@ The app has three access layers:
 | `/` | Dashboard, collection import, backup controls, and summary |
 | `/entry` | Legacy import link; redirects to Dashboard's import section |
 | `/earnings`, `/earnings/access` | Retired; redirect to Dashboard |
-| `/marketplace` | Marketplace alerts and player listings; currently hidden from the navbar |
+| `/marketplace` | Marketplace alerts; hidden from the navbar (individual player listings retired) |
 | `/calendar` | Calendar view of claimable and overlapping RAX |
 | `/otd` | Browse OTD opportunities |
 | `/overlaps` | Analyze overlap days and unclaimable RAX |
@@ -110,9 +112,9 @@ The standalone Earnings page was removed on October 31. Its manual/tracking APIs
 
 Marketplace alerts use Real's authenticated listing feed and the shared catalog for sport-aware player selection. Rules, Discord recipients, deduplicated matches, pending deliveries, and the last scan result are stored in KV per tracker account. The page can scan on demand and refreshes its saved feed once per minute without making another Real request. Discord DM delivery opens a private channel with that account's saved Discord user and sends from the installed bot; the bot token remains server-side and never enters the browser bundle. Once any account saves a Discord recipient, accounts without one keep their matches pending rather than falling back to another user's DMs.
 
-Marketplace monitoring is configured in code for a four-minute interval, even when the page is closed. On a separately approved rollout, set the primary QStash schedule to `*/4 * * * *`, with delivery retries disabled, forwarding `MARKETPLACE_QSTASH_SECRET` as an `Authorization: Bearer` header to `/api/cron/marketplace-alerts`. The server enforces one scan start per four minutes across scheduled/manual requests, including arrivals from an old two-minute trigger. It loads each account's rules and Discord recipient and deduplicates matches. HTTP 500–599 or an uncertain notification outcome is blocked, not retried on the next run. Non-terminal undelivered alerts remain pending. The repository workflow retains its independent ten-minute fallback using `MARKETPLACE_SCAN_SECRET`; neither it nor this local configuration change is permission to resume the paused live site. Remote scheduler settings have not been changed by these edits.
+Marketplace monitoring uses a four-minute interval, even when the page is closed. The primary QStash schedule uses `*/4 * * * *`, with delivery retries disabled and `MARKETPLACE_QSTASH_SECRET` forwarded as an `Authorization: Bearer` header to `/api/cron/marketplace-alerts`. The server enforces one scan start per four minutes across scheduled/manual requests. It loads each account's rules and Discord recipient and deduplicates matches. Confirmed Real HTTP 500 pauses that Real endpoint; notification failures do not create permanent bans, and undelivered alerts remain pending. The repository workflow retains its independent ten-minute fallback using `MARKETPLACE_SCAN_SECRET`. This safety reconciliation does not change remote schedules.
 
-Every release must use `npm run build`, whose `prebuild` runs the request-boundary audit and offline 5xx safety regressions. The rule is site-wide: shared browser transport, guarded server outbound HTTP, and no-retry KV access. No deployment, live probe or known-failure reproduction is authorized by a green build. See `AGENTS.md` and the request-safety reports for shutdown state and control-plane limitations.
+Every release must use `npm run build`, whose `prebuild` runs the request-boundary audit and offline Real-500 safety regressions. Every Real consumer uses the shared backend guard. Browser requests and non-Real services have ordinary error handling, and the official KV SDK makes one attempt per operation. A green build does not authorize a Real probe or repeating a known Real 500. See `AGENTS.md` and the current reconciliation report for policy and durability limitations.
 
 `Serial number` and `Bulk rating` are separate rule choices and feeds: serial-number rules request `listingType=userpassserial`, while bulk-rating rules request `listingType=userpassfull`. An `All` rule scans both pass feeds plus the card feed.
 

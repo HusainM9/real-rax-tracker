@@ -7,7 +7,7 @@
     "dev": "vite",
     "lint": "tsc --noEmit",
     "safety:check": "node scripts/audit-request-safety.mjs",
-    "test:safety": "vitest run lib/guardedUpstreamFetch.test.ts lib/noRetryKv.test.ts lib/requestSafetyStore.test.ts lib/catalogRequestSafety.test.ts lib/marketplaceNotificationDelivery.test.ts lib/marketplaceAlertStore.test.ts lib/accountEarningsHandler.test.ts tests/safety/account/earnings-retired.test.ts tests/safety/account/marketplace-scan.test.ts tests/safety/cron/marketplace-alerts-handler.test.ts src/lib/safeImportFetch.test.ts src/lib/requestSafetySitewide.test.ts scripts/audit-request-safety.test.mjs scripts/server-esm.test.mjs",
+    "test:safety": "vitest run lib/guardedUpstreamFetch.test.ts lib/real500Policy.test.ts lib/httpFailurePolicy.test.ts lib/noRetryKv.test.ts lib/requestSafetyStore.test.ts lib/catalogRequestSafety.test.ts lib/marketplaceNotificationDelivery.test.ts lib/marketplaceAlertStore.test.ts lib/accountEarningsHandler.test.ts lib/realEarningsBackfill.test.ts tests/safety/account/login.test.ts tests/safety/account/earnings-retired.test.ts tests/safety/account/marketplace-scan.test.ts tests/safety/cron/marketplace-alerts-handler.test.ts src/lib/safeImportFetch.test.ts src/lib/browserFailureScope.test.ts src/lib/requestSafetySitewide.test.ts src/lib/realEarningsImport.test.ts src/pages/EntryPage.test.tsx src/pages/SignIn.test.tsx scripts/audit-request-safety.test.mjs scripts/server-esm.test.mjs",
     "prebuild": "npm run safety:check && npm run test:safety",
     "build": "tsc && vite build",
     "preview": "vite preview",

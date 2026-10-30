@@ -11,14 +11,16 @@ afterEach(() => {
 })
 
 describe('fetchDailyRaxRows', () => {
-  it('stops queued batches after an embedded 5xx while retaining successful partial rows', async () => {
+  it('retains partial rows and the actual Real 500 without falsely assigning it to unrequested batches', async () => {
     const passes = [1, 2, 3].map((entityId) => ({ externalKey: `${entityId}|2025|FC`, entityId, passKind: 'player' as const, sportRaw: 'fc', seasonYear: 2025, seasonLabel: '2025-26', name: `Player ${entityId}` }))
     const fetcher = vi.fn().mockResolvedValue(Response.json({ passes: [{ externalKey: passes[0]!.externalKey, source: 'cache', rows: [{ claimDay: '2025-02-01', baseRaxEarned: 12 }] }], failures: [{ externalKey: passes[1]!.externalKey, name: 'Player 2', kind: 'upstream', upstreamStatus: 500, retryable: false, message: 'Stopped' }] }))
     vi.stubGlobal('fetch', fetcher)
     const result = await fetchDailyRaxRows(passes, { batchSize: 2, concurrency: 1 })
     expect(result.rowsByExternalKey.get(passes[0]!.externalKey)?.[0]?.baseRaxEarned).toBe(12)
     expect(result.failures).toHaveLength(2)
-    expect(result.failures.every((failure) => failure.retryable === false && failure.upstreamStatus === 500)).toBe(true)
+    expect(result.failures[0]).toMatchObject({ externalKey: passes[1]!.externalKey, retryable: false, upstreamStatus: 500 })
+    expect(result.failures[1]).toMatchObject({ externalKey: passes[2]!.externalKey, kind: 'deferred', retryable: true })
+    expect(result.failures[1]?.upstreamStatus).toBeUndefined()
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
   it('stops queued cache probes on an authorization failure without falling back to Real', async () => {
@@ -161,7 +163,7 @@ describe('fetchDailyRaxRows', () => {
     )
   })
 
-  it('stops later batches after any 5xx instead of treating it as retryable partial work', async () => {
+  it('stops later batches after a Real 500 but leaves unrequested work available for a later manual attempt', async () => {
     const passes = [
       {
         externalKey: '1|2025|FC',
@@ -188,7 +190,7 @@ describe('fetchDailyRaxRows', () => {
       calls += 1
       const body = JSON.parse(String(init?.body ?? '{}')) as { passes: Array<{ externalKey: string }> }
       if (calls === 1) {
-        return Response.json({ error: 'temporary upstream failure' }, { status: 502 })
+        return Response.json({ error: 'Real endpoint paused', provider: 'real', upstreamStatus: 500, retryable: false }, { status: 423 })
       }
       return Response.json({
         ok: true,
@@ -218,7 +220,9 @@ describe('fetchDailyRaxRows', () => {
     const result = await fetchDailyRaxRows(passes, { batchSize: 1, concurrency: 1 })
 
     expect(result.failures).toHaveLength(2)
-    expect(result.failures.every((failure) => failure.upstreamStatus === 502 && failure.retryable === false)).toBe(true)
+    expect(result.failures[0]).toMatchObject({ externalKey: '1|2025|FC', upstreamStatus: 500, retryable: false })
+    expect(result.failures[1]).toMatchObject({ externalKey: '2|2025|FC', kind: 'deferred', retryable: true })
+    expect(result.failures[1]?.upstreamStatus).toBeUndefined()
     expect(result.rowsByExternalKey.size).toBe(0)
     expect(calls).toBe(1)
   })

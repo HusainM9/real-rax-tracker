@@ -422,9 +422,8 @@ export async function backfillRealPassEarnings(
   if (terminalError) {
     const resolvedKeys = new Set([...results, ...failures].map((pass) => pass.externalKey))
     for (const pass of toFetch) if (!resolvedKeys.has(pass.externalKey)) failures.push({
-      externalKey: pass.externalKey, name: pass.name, kind: 'request_blocked',
-      message: 'Not requested: this import stopped after a failed or uncertain upstream request.',
-      upstreamStatus: failureStatus(terminalError), retryable: false, pending: isPendingRequest(terminalError),
+      externalKey: pass.externalKey, name: pass.name, kind: 'deferred', retryable: true,
+      message: 'Not requested: this import stopped earlier. This pass can be attempted later.',
     })
   }
 

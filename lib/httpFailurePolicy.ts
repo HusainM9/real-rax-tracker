@@ -11,13 +11,17 @@ export function failureStatus(error: unknown): number | undefined {
 }
 
 export function isTerminalRequestFailure(error: unknown): boolean {
-  return isHttp5xx(failureStatus(error)) || Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
+  return isReal500Failure(error) || Boolean(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
+}
+
+export function isReal500Failure(error: unknown): boolean {
+  return failureStatus(error) === 500 && Boolean(error && typeof error === 'object' && 'provider' in error && error.provider === 'real')
 }
 
 /** Deferred/uncertain work is not a confirmed 5xx. Browser transport failures may
  * already have reached our server; that server's durable provider guard owns admission. */
 export function isPendingRequest(error: unknown): boolean {
-  return !isHttp5xx(failureStatus(error)) && Boolean(error && typeof error === 'object' && 'pending' in error && error.pending === true)
+  return !isReal500Failure(error) && Boolean(error && typeof error === 'object' && 'pending' in error && error.pending === true)
 }
 
 export class RequestSafetyError extends Error {
@@ -26,20 +30,23 @@ export class RequestSafetyError extends Error {
   readonly status?: number
   readonly code: string
   readonly pending: boolean
-  constructor(message: string, code = 'request_blocked', upstreamStatus?: number, pending = false) {
+  readonly provider?: string
+  constructor(message: string, code = 'request_blocked', upstreamStatus?: number, pending = false, provider?: string) {
     super(message)
     this.name = 'RequestSafetyError'
     this.code = code
     this.status = upstreamStatus
     this.upstreamStatus = upstreamStatus
     this.pending = pending
+    this.provider = provider
   }
 }
 
 export function requestFailureResponse(error: unknown): Response {
   return Response.json({
     error: error instanceof Error ? error.message : 'Request stopped for safety.',
-    code: 'request_blocked', retryable: false, upstreamStatus: failureStatus(error),
+    code: isReal500Failure(error) ? 'real_http_500' : 'request_blocked', retryable: false, upstreamStatus: failureStatus(error),
+    provider: error && typeof error === 'object' && 'provider' in error ? error.provider : undefined,
     pending: isPendingRequest(error),
   }, { status: 423, headers: { 'Cache-Control': 'no-store' } })
 }

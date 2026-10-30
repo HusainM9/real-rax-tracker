@@ -95,7 +95,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function formatSupabaseError(status: number, detail: string): string {
-  if (isHttp5xx(status)) return `Supabase catalog request failed (${status}). Stopped for safety; do not retry this operation.`
+  if (isHttp5xx(status)) return `Supabase catalog is temporarily unavailable (${status}). Try again later.`
   const trimmed = detail.trim()
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
     return `Supabase catalog request failed (${status}). The database gateway is temporarily unavailable — wait a minute and retry with a smaller import batch.`

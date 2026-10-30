@@ -1,5 +1,7 @@
 # Request-safety changes — October 30, 2026
 
+Historical checkpoint, not the current operating policy. See the owner-approved [Real-500-only reconciliation](real-500-only-results-2026-10-31.md). Marketplace alerts were subsequently resumed at four minutes; broad internal/unknown/other-5xx bans are removed.
+
 Implemented locally on `codex/performance-phase-two`, solo. **Not deployed.** Production shutdown was not lifted, no dev server was started, and no provider/service probes were made. Read-only OS inspection found no listeners on ports 5174 or 5175. This report is not production verification.
 
 ## Changes

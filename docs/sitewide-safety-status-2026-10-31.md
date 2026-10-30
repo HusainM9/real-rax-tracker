@@ -1,5 +1,7 @@
 # Site-wide safety, marketplace cadence and speed status
 
+Historical checkpoint. The later owner-approved [Real-500-only policy](real-500-only-results-2026-10-31.md) supersedes this report's blanket 5xx/unknown/internal-service pauses. Do not use this document as the current operating policy.
+
 Release update: the owner subsequently authorized resumption. Safeguards are now deployed in corrected production build `dpl_AUPL2KgXqbCmYMxTMoM7PyKz4znE`, with four-minute/zero-retry Marketplace scheduling active, Earnings retired, legacy deployment hosts denied, and the failed retired snapshot path still blocked. See `deployment-resume-2026-10-31.md` for the single preview boot failure, offline ESM fix, final 1,111-test suite / 298-test remote safety gate, and verified release state. The local-only statements below describe the earlier implementation checkpoint, not the final hosted state.
 
 October 31, 2026. Owner amendment implemented locally, solo, on `codex/performance-phase-two`. No deployment, hosting unpause, remote scheduler edit, live request/benchmark or dev-server restart was performed. Earlier shutdown remains the last confirmed hosted state, not a fresh remote verification.

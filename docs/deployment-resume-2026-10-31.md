@@ -1,5 +1,7 @@
 # Safeguarded deployment and resume
 
+Historical release log. The subsequent owner-approved [Real-500-only reconciliation](real-500-only-results-2026-10-31.md) supersedes blanket 500–599/unknown/internal-service blocking and records the current recovery release.
+
 Owner explicitly authorized deploying safeguards and reopening on October 31. No new traffic caps: retain the four-minute Marketplace interval. Every HTTP 500–599 must be logged immediately and the affected endpoint/operation remains paused until explicit operator review; no automatic expiry, retry, parameter/account bypass, or live failure reproduction.
 
 ## Execution plan

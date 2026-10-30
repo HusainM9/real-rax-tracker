@@ -1,74 +1,54 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 vi.unmock('./requestSafetyStore')
 vi.unmock('./noRetryKv')
-const mocks = vi.hoisted(() => ({ set: vi.fn(), get: vi.fn(), eval: vi.fn(), create: vi.fn(), use: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), eval: vi.fn(), set: vi.fn(), create: vi.fn() }))
 vi.mock('@vercel/kv', () => ({ createClient: mocks.create }))
-import { requestSafetyStore } from './requestSafetyStore'
-
-beforeEach(async () => {
+beforeEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
   vi.stubEnv('KV_REST_API_URL', 'https://offline.invalid')
   vi.stubEnv('KV_REST_API_TOKEN', 'fixture-token')
   mocks.create.mockReturnValue(mocks)
 })
-
-it('reserves atomically without TTL or SDK transport retries', async () => {
-  mocks.set.mockResolvedValue('OK')
-  expect(await requestSafetyStore.reserve('hashed-key', 'owner')).toBeNull()
-  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ retry: { retries: 0 }, enableAutoPipelining: false }))
-  expect(mocks.set).toHaveBeenCalledWith('hashed-key', { owner: 'owner', reservedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) }, { nx: true })
+it('reads an old confirmed 500 from the unchanged family key without creating a reservation', async () => {
+  mocks.get.mockResolvedValue({ owner: 'earlier', status: 500 })
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  expect(await requestSafetyStore.getFailure('original-family')).toEqual({ owner: 'earlier', status: 500 })
+  expect(mocks.get).toHaveBeenCalledWith('original-family')
+  expect(mocks.set).not.toHaveBeenCalled()
+  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ retry: { retries: 0 } }))
 })
-it('retains an uncertain incident without inventing a status or releasing its reservation', async () => {
+it.each([
+  null, 'unclassified', { owner: 'legacy' }, { owner: 'legacy', outcome: 'transport_unknown' },
+  { owner: 'old', status: 503 }, { owner: 'old', status: 500, provider: 'supabase-catalog' },
+])('does not treat unknown/non-Real/non-500 evidence as an admission ban: %j', async record => {
+  mocks.get.mockResolvedValue(record)
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  expect(await requestSafetyStore.getFailure('family')).toBeNull()
+  expect(mocks.set).not.toHaveBeenCalled()
+  expect(mocks.eval).not.toHaveBeenCalled()
+})
+it('preserves a confirmed 500 nested in the former operation envelope', async () => {
+  const failure = { owner: 'known', provider: 'real', status: 500 }
+  mocks.get.mockResolvedValue({ version: 2, status: 503, operations: { earlier: { owner: 'other', status: 503 }, actual: failure } })
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  expect(await requestSafetyStore.getFailure('family')).toEqual(failure)
+})
+it('writes only an actual Real 500 atomically to its original family key', async () => {
   mocks.eval.mockResolvedValue(1)
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  const context = { provider: 'real', method: 'GET', recordedAt: '2026-10-31T00:00:00.000Z', outcome: 'transport_unknown' as const, reason: 'connection_reset', incidentId: 'incident-id' }
-  await fresh.finish('hashed-key', 'owner', undefined, context)
-  expect(mocks.eval).toHaveBeenCalledWith(expect.any(String), ['hashed-key'], ['owner', '', 'real', 'GET', '2026-10-31T00:00:00.000Z', JSON.stringify({ outcome: 'transport_unknown', reason: 'connection_reset', incidentId: 'incident-id' }), ''])
-})
-it('reads existing durable failure metadata for a new caller', async () => {
-  mocks.set.mockResolvedValue(null)
-  mocks.get.mockResolvedValue({ owner: 'earlier-process', status: 500 })
-  expect(await requestSafetyStore.reserve('hashed-key', 'new-owner')).toEqual({ owner: 'earlier-process', status: 500 })
-})
-it('atomically scopes catalog admission within the original family key', async () => {
-  mocks.eval.mockResolvedValue(null)
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  expect(await fresh.reserve('original-family', 'owner', 'query-hash')).toBeNull()
-  expect(mocks.eval).toHaveBeenCalledWith(expect.any(String), ['original-family'], ['owner', expect.any(String), 'query-hash'])
-  expect(mocks.set).not.toHaveBeenCalled()
-  expect(mocks.get).not.toHaveBeenCalled()
-})
-it.each([{ owner: 'legacy' }, { owner: 'legacy', status: 503 }])('retains a legacy family block during scoped admission: %j', async record => {
-  mocks.eval.mockResolvedValue(record)
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  expect(await fresh.reserve('original-family', 'new-owner', 'query-hash')).toEqual(record)
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  const failure = { owner: 'incident', provider: 'real', method: 'GET', status: 500, recordedAt: '2026-10-31T00:00:00.000Z' }
+  await requestSafetyStore.recordFailure('family', failure)
+  expect(mocks.eval).toHaveBeenCalledWith(expect.any(String), ['family'], [JSON.stringify(failure)])
   expect(mocks.set).not.toHaveBeenCalled()
 })
-it('passes scoped completion to the same atomic family record and refuses an owner mismatch', async () => {
+it.each([{ owner: 'other', status: 503, provider: 'real' }, { owner: 'other', status: 500, provider: 'kv' }])('rejects recording a non-Real-500 failure: %j', async failure => {
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  await expect(requestSafetyStore.recordFailure('family', failure)).rejects.toThrow('Only confirmed Real HTTP 500')
+  expect(mocks.eval).not.toHaveBeenCalled()
+})
+it('surfaces failed persistence instead of pretending the Real block was saved', async () => {
   mocks.eval.mockResolvedValue(0)
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  await expect(fresh.finish('original-family', 'wrong-owner', undefined, undefined, 'query-hash')).rejects.toThrow('could not be finalized')
-  expect(mocks.eval).toHaveBeenCalledWith(expect.any(String), ['original-family'], ['wrong-owner', '', '', '', '', '', 'query-hash'])
-})
-it.each([undefined, false, [], {}, { owner: 123 }])('fails closed on invalid scoped admission reply: %j', async reply => {
-  mocks.eval.mockResolvedValue(reply)
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  await expect(fresh.reserve('family', 'owner', 'query-hash')).rejects.toThrow('Invalid request-safety record')
-})
-it('uses owner-checked atomic finalization and retains 5xx metadata', async () => {
-  mocks.eval.mockResolvedValue(1)
-  await requestSafetyStore.finish('hashed-key', 'owner', 502)
-  expect(mocks.eval).toHaveBeenCalledWith(expect.stringContaining('record.owner ~= ARGV[1]'), ['hashed-key'], ['owner', 502, '', '', '', '', ''])
-})
-it('records first failure time and redacted context in the same atomic write as the block', async () => {
-  mocks.eval.mockResolvedValue(1)
-  await requestSafetyStore.finish('hashed-key', 'owner', 503, { provider: 'real', method: 'GET', recordedAt: '2026-10-31T00:00:00.000Z' })
-  expect(mocks.eval).toHaveBeenCalledWith(expect.stringContaining('record.recordedAt'), ['hashed-key'], ['owner', 503, 'real', 'GET', '2026-10-31T00:00:00.000Z', '{}', ''])
-})
-it('refuses admission without durable storage credentials', async () => {
-  vi.stubEnv('KV_REST_API_URL', '')
-  const { requestSafetyStore: fresh } = await import('./requestSafetyStore')
-  await expect(fresh.reserve('key', 'owner')).rejects.toThrow('not configured')
-  expect(mocks.create).not.toHaveBeenCalled()
+  const { requestSafetyStore } = await import('./requestSafetyStore')
+  await expect(requestSafetyStore.recordFailure('family', { owner: 'known', status: 500, provider: 'real' })).rejects.toThrow('could not be saved')
 })

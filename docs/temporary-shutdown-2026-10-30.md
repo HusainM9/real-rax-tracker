@@ -1,5 +1,7 @@
 # Temporary shutdown — October 30, 2026
 
+Historical shutdown record. The owner subsequently authorized resumption and narrowed permanent pauses to confirmed Real HTTP 500. See [the current reconciliation](real-500-only-results-2026-10-31.md); do not restore the blanket shutdown from this older record.
+
 Owner requested an immediate temporary shutdown after being told the shared account was scraping too much and causing errors. This supersedes the performance-test plan. Do not resume imports, provider probes, local servers, deployments, or scheduled scraping without explicit owner approval.
 
 ## Confirmed actions

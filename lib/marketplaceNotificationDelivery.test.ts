@@ -27,15 +27,15 @@ const originalDiscordUserId = process.env.MARKETPLACE_DISCORD_USER_ID
 const originalTelegramToken = process.env.MARKETPLACE_TELEGRAM_BOT_TOKEN
 const originalTelegramChat = process.env.MARKETPLACE_TELEGRAM_CHAT_ID
 
-it('does not resend a notification endpoint after a 5xx on a later scheduled run', async () => {
+it('stops a failed notification once but permits normal delivery on a later run', async () => {
   process.env.MARKETPLACE_DISCORD_WEBHOOK_URL = 'https://discord.example.test/webhook'
   delete process.env.MARKETPLACE_DISCORD_BOT_TOKEN
-  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 503 }))
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 })).mockResolvedValue(new Response(null, { status: 204 }))
   vi.stubGlobal('fetch', fetcher)
-  for (const owner of ['first-run', 'later-run']) {
-    await expect(deliverMarketplaceNotifications({ owner, notifications: [notification] })).rejects.toMatchObject({ upstreamStatus: 503, retryable: false })
-  }
+  await expect(deliverMarketplaceNotifications({ owner: 'first-run', notifications: [notification] })).rejects.toThrow('503')
   expect(fetcher).toHaveBeenCalledTimes(1)
+  await expect(deliverMarketplaceNotifications({ owner: 'later-run', notifications: [notification] })).resolves.toMatchObject({ delivered: 1 })
+  expect(fetcher).toHaveBeenCalledTimes(2)
 })
 
 afterEach(() => {

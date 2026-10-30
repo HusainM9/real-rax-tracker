@@ -60,6 +60,7 @@ export type RealApiErrorKind =
   | 'invalid_response'
 
 export class RealApiError extends Error {
+  readonly provider = 'real'
   readonly kind: RealApiErrorKind
   readonly status?: number
   readonly upstreamStatus?: number
@@ -72,7 +73,7 @@ export class RealApiError extends Error {
     this.kind = kind
     this.status = status
     this.upstreamStatus = status
-    this.retryable = isHttp5xx(status) ? false : retryable
+    this.retryable = status === 500 ? false : retryable
     this.pending = pending
   }
 }
@@ -331,7 +332,7 @@ export async function realGetJson<T>(
       })
     } catch (error) {
       if (isTerminalRequestFailure(error)) {
-        if (timeout.timedOut()) throw new RealApiError('timeout', `Real API request timed out after ${config.timeoutMs}ms. Further calls to this endpoint are blocked.`, failureStatus(error), false)
+        if (timeout.timedOut()) throw new RealApiError('timeout', `Real API request timed out after ${config.timeoutMs}ms.`, failureStatus(error))
         throw new RealApiError('upstream', error instanceof Error ? error.message : 'Request stopped for safety.', failureStatus(error), false, isPendingRequest(error))
       }
       if (timeout.timedOut()) {
@@ -920,6 +921,7 @@ export async function listTeamRecentPlays(
     return Array.isArray(data.plays) ? (data.plays as RealPlayerPlay[]) : []
   } catch (error) {
     if (isTerminalRequestFailure(error)) throw error
+    if (error instanceof RealApiError && isHttp5xx(error.status)) throw error
     if (error instanceof RealApiError && (error.kind === 'not_found' || error.kind === 'upstream')) {
       return []
     }

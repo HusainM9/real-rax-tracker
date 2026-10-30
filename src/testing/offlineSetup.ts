@@ -11,7 +11,6 @@ vi.mock('../../lib/noRetryKv', async () => {
   return { kv, getNoRetryKv: () => kv }
 })
 import { requestSafetyStore } from '../../lib/requestSafetyStore'
-import { resetImportSafetyForTests } from '../lib/safeImportFetch'
 
 // No test may accidentally use environment credentials to contact a live service.
 const denyFetch: typeof fetch = async () => {
@@ -21,5 +20,5 @@ globalThis.fetch = denyFetch
 beforeEach(() => {
   vi.stubGlobal('fetch', denyFetch)
   ;(requestSafetyStore as ReturnType<typeof memoryRequestSafetyStore>).clear?.()
-  resetImportSafetyForTests()
+  if (typeof localStorage !== 'undefined') for (const key of Object.keys(localStorage)) if (key.startsWith('rax:request-safety:')) localStorage.removeItem(key)
 })

@@ -17,7 +17,7 @@ function visit(node) {
   ts.forEachChild(node, visit)
 }
 visit(tree)
-assert(scripts.has('RESERVE_OPERATION') && scripts.has('FINISH'))
+assert(scripts.has('RECORD_FAILURE'))
 const records = new Map()
 const nullValue = {}
 function push(L, value) {
@@ -96,49 +96,33 @@ function evaluate(name, key, args) {
     return value(L, -1)
   } finally { lua.lua_close(L) }
 }
-const reserve = (key, owner, op) => evaluate('RESERVE_OPERATION', key, [owner, '2026-10-31T00:00:00.000Z', op])
-const finish = (key, owner, op = '', status = '', unknown = false) => evaluate('FINISH', key, [owner, status, status || unknown ? 'supabase-catalog' : '', 'GET', '2026-10-31T00:00:00.000Z', unknown ? JSON.stringify({ outcome: 'transport_unknown', incidentId: owner }) : '', op])
+const record = (key, value) => evaluate('RECORD_FAILURE', key, [JSON.stringify(value)])
 const saved = key => JSON.parse(records.get(key))
+const first = { owner: 'first', provider: 'real', status: 500, recordedAt: '2026-10-31T00:00:00.000Z' }
+assert.equal(record('confirmed', first), 1)
+const original = records.get('confirmed')
+assert.equal(record('confirmed', { ...first, owner: 'later', recordedAt: 'later' }), 1)
+assert.equal(records.get('confirmed'), original, 'The first confirmed 500 is never overwritten')
 
-assert.equal(reserve('independent', 'one', 'avatar'), null)
-assert.equal(reserve('independent', 'two', 'earnings'), null)
-assert.equal(JSON.parse(reserve('independent', 'three', 'avatar')).owner, 'one')
-assert.equal(finish('independent', 'wrong-owner', 'avatar'), 0)
-assert.equal(finish('independent', 'one'), 0, 'Unscoped completion cannot delete a scoped family')
-assert.equal(finish('independent', 'one', 'avatar'), 1)
-assert.equal(saved('independent').operations.earnings.owner, 'two')
-assert.equal(finish('independent', 'two', 'earnings', '', true), 1)
-assert.equal(JSON.parse(reserve('independent', 'three', 'earnings')).outcome, 'transport_unknown')
-assert.equal(reserve('independent', 'three', 'other'), null)
-
-for (let status = 500; status <= 599; status++) {
-  const key = `status-${status}`
-  assert.equal(reserve(key, 'failed', 'first'), null)
-  assert.equal(reserve(key, 'late-success', 'second'), null)
-  assert.equal(finish(key, 'failed', 'first', status), 1)
-  assert.equal(finish(key, 'late-success', 'second'), 1)
-  assert.equal(saved(key).status, status, 'Late success cannot erase a confirmed family failure')
-  assert.equal(JSON.parse(reserve(key, 'new', 'third')).status, status)
-  assert.equal(finish(key, 'failed'), 0)
-  assert.equal(saved(key).status, status)
-}
-
-for (const legacy of [{ owner: 'old' }, { owner: 'old', status: 503 }]) {
+for (const legacy of [{ owner: 'old' }, { owner: 'old', status: 503 }, { owner: 'old', outcome: 'transport_unknown' }]) {
   const raw = JSON.stringify(legacy)
-  records.set('legacy', raw)
-  assert.equal(reserve('legacy', 'new', 'avatar'), raw)
-  assert.equal(records.get('legacy'), raw, 'Legacy family records must not be migrated or cleared')
+  records.set('unknown', raw)
+  assert.equal(record('unknown', first), 1)
+  assert.equal(saved('unknown').status, 500)
+  assert.equal(saved('unknown').previousRecord, raw, 'Retain old evidence when recording an actual 500')
 }
-for (const raw of ['invalid-json', 'null', '{"version":2,"operations":false}',
-  ...[false, null, 7, [], {}].map(operation => JSON.stringify({ version: 2, operations: { avatar: operation } }))]) {
-  records.set('malformed', raw)
-  assert.throws(() => reserve('malformed', 'new', 'avatar'))
-  assert.equal(records.get('malformed'), raw)
+const envelope = JSON.stringify({ version: 2, status: 503, operations: { known: { owner: 'known', status: 500 } } })
+records.set('nested', envelope)
+assert.equal(record('nested', first), 1)
+assert.equal(records.get('nested'), envelope, 'Keep legacy nested confirmed-500 history')
+
+for (let status = 501; status <= 599; status++) {
+  assert.throws(() => record('not-500', { ...first, status }))
+  assert.equal(records.has('not-500'), false)
 }
-assert.equal(reserve('success', 'one', 'avatar'), null)
-assert.equal(finish('success', 'one', 'avatar'), 1)
-assert.equal(records.has('success'), false)
-records.set('confirmed-legacy', JSON.stringify({ owner: 'old', status: 502 }))
-assert.equal(finish('confirmed-legacy', 'old'), 0)
-assert.equal(saved('confirmed-legacy').status, 502)
-console.log('Offline Lua VM passed: 100 status families, late success, isolated unknowns, ownership, legacy records, malformed state and clean completion. No Redis/network access.')
+assert.throws(() => record('not-real', { ...first, provider: 'kv' }))
+assert.equal(records.has('not-real'), false)
+records.set('malformed', 'invalid-json')
+assert.equal(record('malformed', first), 1)
+assert.equal(saved('malformed').previousRecord, 'invalid-json')
+console.log('Offline safety Lua passed: only Real 500 accepted; first/nested failures and prior unknown evidence retained. No Redis/network access.')

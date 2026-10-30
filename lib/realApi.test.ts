@@ -16,11 +16,11 @@ import {
 const originalFetch = globalThis.fetch
 
 describe('terminal upstream failures', () => {
-  it('blocks a fresh Real caller and force/query variants after 5xx', async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 504 }))
+  it('blocks a fresh Real caller and force/query variants after actual HTTP 500', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 500 }))
     globalThis.fetch = fetcher
-    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '1' })).rejects.toMatchObject({ status: 504, retryable: false })
-    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '2', force: 1 })).rejects.toMatchObject({ status: 504, retryable: false })
+    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '1' })).rejects.toMatchObject({ status: 500, retryable: false })
+    await expect(realGetJson('/safety-test', { config: testConfig() }, { day: '2', force: 1 })).rejects.toMatchObject({ status: 500, retryable: false })
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
   it('never uses recent-play fallback after a top-play 5xx', async () => {
@@ -31,7 +31,7 @@ describe('terminal upstream failures', () => {
   })
   it('does not hide a team-play 5xx as an empty successful result', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 502 }))
-    await expect(listTeamRecentPlays({ entityId: 123, sport: 'nfl', season: 2026 }, { config: testConfig() })).rejects.toMatchObject({ status: 502, retryable: false })
+    await expect(listTeamRecentPlays({ entityId: 123, sport: 'nfl', season: 2026 }, { config: testConfig() })).rejects.toMatchObject({ status: 502 })
   })
 })
 

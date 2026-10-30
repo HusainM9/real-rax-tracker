@@ -207,26 +207,23 @@ describe('POST /api/import/real-passes', () => {
     const response = await handler(passesRequest())
 
     expect(response.status).toBe(423)
-    await expect(response.json()).resolves.toMatchObject({ code: 'request_blocked', upstreamStatus: 500, retryable: false })
+    await expect(response.json()).resolves.toMatchObject({ code: 'real_http_500', provider: 'real', upstreamStatus: 500, retryable: false })
   })
 
-  it('carries an uncertain incident reference through the import API without repeating the lookup', async () => {
+  it('does not permanently block later manual imports after a lost response with no recorded Real 500', async () => {
     const logger = vi.spyOn(console, 'error').mockImplementation(() => {})
     const fetcher = vi.fn().mockRejectedValue(new TypeError('private connection details', { cause: { code: 'ECONNRESET' } }))
     globalThis.fetch = fetcher
     try {
       const first = await handler(passesRequest('release-fixture'))
       const firstBody = await first.json() as { error: string; retryable: boolean; upstreamStatus?: number }
-      expect(first.status).toBe(423)
-      expect(firstBody.retryable).toBe(false)
+      expect(first.status).toBe(502)
+      expect(firstBody.retryable).not.toBe(false)
       expect(firstBody.upstreamStatus).toBeUndefined()
-      const reference = firstBody.error.match(/Reference: ([a-f0-9-]{36})\./)?.[1]
-      expect(reference).toBeDefined()
+      expect(firstBody.error).not.toContain('private connection details')
       const later = await handler(passesRequest('release-fixture'))
-      expect(later.status).toBe(423)
-      expect((await later.json()).error).toContain(reference)
-      expect(fetcher).toHaveBeenCalledTimes(1)
-      expect(logger).toHaveBeenCalledWith('request-safety incident', expect.objectContaining({ provider: 'real', incidentId: reference, reason: 'connection_reset' }))
+      expect(later.status).toBe(502)
+      expect(fetcher).toHaveBeenCalledTimes(2)
     } finally { logger.mockRestore() }
   })
 })

@@ -80,7 +80,13 @@ export default async function handler(request: Request): Promise<Response> {
   const username = typeof body.username === 'string' ? body.username : ''
   const password = typeof body.password === 'string' ? body.password : ''
 
-  const result = await verifyAccountCredentials(username, password)
+  let result: Awaited<ReturnType<typeof verifyAccountCredentials>>
+  try {
+    result = await verifyAccountCredentials(username, password)
+  } catch (error) {
+    console.error('account-login storage failed', { errorType: error instanceof Error ? error.name : 'UnknownError', recordedAt: new Date().toISOString() })
+    return Response.json({ error: 'Account storage is temporarily unavailable. Please try again later.', code: 'account_storage_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  }
   if (!result.ok) {
     await delayFailedLoginAttempt()
     const failureHeaders = await recordFailedLoginAttempt(request)

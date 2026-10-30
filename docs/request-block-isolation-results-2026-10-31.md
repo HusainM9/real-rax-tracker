@@ -1,5 +1,7 @@
 # Request-block isolation fix — October 31, 2026
 
+Historical checkpoint. The later owner-approved [Real-500-only policy](real-500-only-results-2026-10-31.md) supersedes the broad unknown/5xx blocking described below; confirmed Real 500 records remain protected.
+
 ## Outcome
 
 The reproduced blocking cascade is fixed and passes the offline gates. The owner subsequently authorized commit/deploy: **source commit `e80430e61db49d0170764fa0c6b09827d8692724` is now deployed to production** as `dpl_7Hd2R4FRVcbEk79V8B6isem7fDit`, with cloud gates passed. The unresolved live collection-import records remain preserved. No Real request, live import, production database call, safety-record deletion, scheduler change or development-server restart was performed in this implementation/release pass. Work stayed solo on `codex/performance-phase-two`, retaining and committing the earlier approved changes. Exact release evidence is recorded in `docs/deployment-resume-2026-10-31.md`.

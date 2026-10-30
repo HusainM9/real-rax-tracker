@@ -35,18 +35,19 @@ export default function AccountPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    if (submitting) return
     setSubmitting(true)
     setError('')
 
-    const message =
-      mode === 'login' ? await login(username, password) : await register(username, password)
-    if (message) {
-      setError(message)
+    try {
+      const message =
+        mode === 'login' ? await login(username, password) : await register(username, password)
+      if (message) setError(message)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Sign-in stopped. No request was retried.')
+    } finally {
       setSubmitting(false)
-      return
     }
-
-    setSubmitting(false)
   }
 
   return (
@@ -97,7 +98,7 @@ export default function AccountPage() {
             />
           </label>
           {mode === 'register' ? <p className="auth-hint">{ACCOUNT_PASSWORD_HELP}</p> : null}
-          {error ? <p className="auth-error">{error}</p> : null}
+          {error ? <p className="auth-error" role="alert">{error}</p> : null}
           <button className="button primary auth-submit" type="submit" disabled={submitting}>
             {submitting
               ? mode === 'login'

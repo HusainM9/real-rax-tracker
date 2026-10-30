@@ -29,17 +29,18 @@ export default function LoginPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    if (submitting) return
     setSubmitting(true)
     setError('')
 
-    const message = await login(password)
-    if (message) {
-      setError(message)
+    try {
+      const message = await login(password)
+      if (message) setError(message)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Sign-in stopped. No request was retried.')
+    } finally {
       setSubmitting(false)
-      return
     }
-
-    setSubmitting(false)
   }
 
   return (
@@ -61,7 +62,7 @@ export default function LoginPage() {
               onChange={(event) => setPassword(event.target.value)}
             />
           </label>
-          {error ? <p className="auth-error">{error}</p> : null}
+          {error ? <p className="auth-error" role="alert">{error}</p> : null}
           <button className="button primary auth-submit" type="submit" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>

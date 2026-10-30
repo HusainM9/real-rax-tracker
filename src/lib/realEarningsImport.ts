@@ -109,6 +109,7 @@ type BatchOutcome = {
   batch: EarningsBackfillPass[]
   result?: Awaited<ReturnType<typeof fetchEarningsBatchOnce>>
   error?: Error
+  deferred?: boolean
 }
 
 async function fetchEarningsBatchOnce(
@@ -317,11 +318,18 @@ export async function fetchDailyRaxRows(
 
   // Explicitly report unscheduled work; never interpret it as successful empty earnings.
   if (terminalError) for (let index = 0; index < batches.length; index += 1) {
-    if (!outcomes[index]) outcomes[index] = { batch: batches[index]!, error: terminalError instanceof Error ? terminalError : Object.assign(new Error('Import stopped after an upstream failure.'), terminalError) }
+    if (!outcomes[index]) outcomes[index] = { batch: batches[index]!, deferred: true }
   }
 
   // Aggregate in input order even if the requests completed out of order.
   for (const entry of outcomes) {
+    if (entry.deferred) {
+      for (const pass of entry.batch) failures.push({
+        externalKey: pass.externalKey, name: pass.name, kind: 'deferred', retryable: true,
+        message: 'Not requested: this import stopped earlier. This pass can be attempted later.',
+      })
+      continue
+    }
     if (entry.error) {
       for (const pass of entry.batch) {
         failures.push({

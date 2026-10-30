@@ -1,5 +1,7 @@
 # Collection import and release readiness — October 31, 2026
 
+Historical readiness checkpoint. The subsequent [Real-500-only reconciliation](real-500-only-results-2026-10-31.md) removes obsolete unknown-outcome bans while preserving confirmed Real 500 history. Consult that report for the current state.
+
 ## Verdict
 
 **The repaired source passes the offline release gates. The website cannot yet be called functionally finished: the live collection-import incident remains unresolved and its safety records are preserved. This pass did not deploy or change production aliases.**

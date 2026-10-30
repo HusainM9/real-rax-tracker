@@ -41,17 +41,17 @@ describe('import-only collection tools', () => {
     expect(container.textContent).not.toMatch(/operator review/i)
     expect(mocks.import).toHaveBeenCalledTimes(1)
   })
-  it('pauses the form after a terminal incident without inviting another import', async () => {
+  it('does not permanently disable the form for a legacy uncertain-outcome error', async () => {
     mocks.import.mockRejectedValue(new RequestSafetyError('Request outcome uncertain. Reference: incident-example.', 'request_outcome_unknown'))
     await render()
     const submit = () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await act(async () => { submit() })
     expect(container.textContent).toContain('incident-example')
-    expect(container.textContent).toMatch(/operator review/i)
+    expect(container.textContent).not.toMatch(/operator review/i)
     const importButton = container.querySelector<HTMLButtonElement>('button[type="submit"]')!
-    expect(importButton.disabled).toBe(true)
+    expect(importButton.disabled).toBe(false)
     await act(async () => { submit() })
-    expect(mocks.import).toHaveBeenCalledTimes(1)
+    expect(mocks.import).toHaveBeenCalledTimes(2)
     expect(mocks.retry).not.toHaveBeenCalled()
   })
   it('allows a corrected submission after a non-terminal validation error', async () => {
@@ -64,14 +64,29 @@ describe('import-only collection tools', () => {
     expect(mocks.import).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('Imported 1 RAX rows')
   })
-  it('shows a partial terminal backfill as paused instead of a successful retryable import', async () => {
+  it('does not permanently pause imports for an old non-500 terminal record', async () => {
     mocks.import.mockResolvedValue({ ...result, passFetchErrors: [{ externalKey: 'owned', name: 'Player', sport: 'NBA', season: '2026-27', passKind: 'player', message: 'Stopped after HTTP 503. Reference: partial-incident.', upstreamStatus: 503, retryable: false }] })
     await render()
     await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
-    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true)
-    expect(container.textContent).toMatch(/operator review/i)
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false)
+    expect(container.textContent).not.toMatch(/operator review/i)
     expect(container.textContent).toContain('partial-incident')
-    expect(container.textContent).not.toMatch(/No retryable earnings failures/)
+  })
+  it('reports the Real 500 while allowing a manual attempt of only the unrelated deferred pass', async () => {
+    const deferred = { externalKey: '2|2026|NBA', entityId: 2, passKind: 'player', sportRaw: 'nba', seasonYear: 2026, seasonLabel: '2026-27', name: 'Deferred player' }
+    mocks.import.mockResolvedValue({ ...result, retryableEarningsPasses: [deferred], passFetchErrors: [
+      { externalKey: '1|2026|NBA', name: 'Failed player', sport: 'NBA', season: '2026-27', passKind: 'player', message: 'Real returned HTTP 500. Reference: real-incident.', upstreamStatus: 500, retryable: false },
+      { externalKey: deferred.externalKey, name: deferred.name, sport: 'NBA', season: '2026-27', passKind: 'player', message: 'Not requested: import stopped earlier.', retryable: true },
+    ] })
+    await render()
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(container.textContent).toContain('real-incident')
+    expect(container.textContent).toMatch(/operator review/i)
+    const retry = [...container.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Retry failed earnings'))
+    expect(retry).toBeDefined()
+    await act(async () => retry!.click())
+    expect(mocks.retry).toHaveBeenCalledWith([deferred], expect.any(Object))
+    expect(mocks.import).toHaveBeenCalledTimes(1)
   })
   it('keeps username import and removes manual entry, saved profiles and editable tables', async () => {
     await render()
