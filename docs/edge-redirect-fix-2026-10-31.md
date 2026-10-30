@@ -24,4 +24,8 @@ Six RED regressions reproduced both reported error forms and missing explicit re
 
 ## Release
 
-Pending clean-source commit/deploy and remote gate verification. Private access and legacy unsafe-host denial remain; do not restore obsolete internal-login pauses. Normal owner testing can resume on the corrected build; do not repeat any confirmed Real 500.
+- Source **`ef3c9b2ef777a77b6fce6ab3cf23ce60dc79d700`** committed/pushed to `codex/performance-phase-two`.
+- Production **`dpl_3H8XKumX3B56Ef4xqnGTW1VQduTE`** is READY, exact source commit verified, with canonical/team aliases assigned. Unique host: `real-rax-tracker-42kdgp947-sniperhusain-9147s-projects.vercel.app`.
+- Remote build independently passed **389 tests / 22 files**, the 221-module request audit, native ESM loading and TypeScript/Vite build.
+- Private access and legacy unsafe-host denial remain; the host allowlist advances to the new unique build. Obsolete internal-login/retired-snapshot pauses remain inactive. No scheduler or password changes.
+- No signed-in browser tab was available for end-to-end checks. Normal owner testing can resume on the corrected build; do not repeat any confirmed Real 500. This release verification does not claim a successful live collection or Packs import.
