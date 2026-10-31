@@ -39,3 +39,10 @@ it('does no journal work for an ordinary successful operation', async () => {
   await withErrorLogging('/api/account/data', () => Response.json({ ok: true }))(new Request('https://offline.invalid/api/account/data'))
   expect(mocks.append).not.toHaveBeenCalled()
 })
+it('preserves separate session-cookie headers on a failed response', async () => {
+  const headers = new Headers(); headers.append('Set-Cookie', 'first=fixture; HttpOnly'); headers.append('Set-Cookie', 'second=fixture; SameSite=Strict')
+  const original = Response.json({ error: 'Rejected' }, { status: 401, headers })
+  const response = await withErrorLogging('/api/account/login', () => original)(new Request('https://offline.invalid/api/account/login'))
+  expect(response.headers.getSetCookie()).toEqual(original.headers.getSetCookie())
+  expect(await response.json()).toEqual({ error: 'Rejected' })
+})

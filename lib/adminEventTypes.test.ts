@@ -7,6 +7,11 @@ import {
 } from './adminEventTypes'
 
 describe('adminEventTypes', () => {
+  it('does not accept exception text, URLs or credentials into activity messages', () => {
+    const event = validateAdminEventInput({ type: 'pass_fetch_error', realUsername: 'sample', clientId: 'sample', message: 'password=secret https://private.invalid response-body' })!
+    expect(event.message).toBe('Pass import failed. See Error history for recorded source and status.')
+    expect(event.message).not.toMatch(/secret|private|response-body/)
+  })
   it('validates admin event input', () => {
     expect(
       validateAdminEventInput({

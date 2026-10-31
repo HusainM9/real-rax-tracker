@@ -14,6 +14,7 @@ export async function migrateRetainedImportErrors(): Promise<{ examined: number;
     if (event) events.push(event)
   }
   let stored = 0
+  events.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
   for (let offset = 0; offset < events.length; offset += 100) stored += await appendOperationalErrors(events.slice(offset, offset + 100))
   return { examined: raw.length, eligible: events.length, stored }
 }

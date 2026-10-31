@@ -27,6 +27,11 @@ function emptyResult(overrides: Partial<UsernameImportResult> = {}): UsernameImp
 }
 
 describe('adminEvents', () => {
+  it('retains team-pass failures without copying raw exception messages', () => {
+    const events = buildImportAdminEvents('sample', emptyResult({ passFetchErrors: [{ name: 'Sample team', sport: 'NBA', season: '2026-27', externalKey: '1|2027|NBA|team', passKind: 'team', message: 'token=secret private-body' }] }))
+    expect(events.filter(event => event.type === 'pass_fetch_error')).toHaveLength(1)
+    expect(JSON.stringify(events)).not.toMatch(/secret|private-body/)
+  })
   it('builds player-only no-earnings and fetch-error events', () => {
     const events = buildImportAdminEvents(
       '@TestUser',

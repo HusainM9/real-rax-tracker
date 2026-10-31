@@ -1,3 +1,5 @@
+import AdminErrors from './admin/AdminErrors'
+import './admin/AdminPage.css'
 import { safeFetch } from "../lib/safeImportFetch"
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -65,11 +67,12 @@ import {
 
 export default function AdminPage() {
   const { logout, devBypass } = useAdminAuth()
+  const [activeTab, setActiveTab] = useState<'errors' | 'activity' | 'accounts' | 'catalog'>('errors')
   const [users, setUsers] = useState<AdminUserSummary[]>([])
   const [events, setEvents] = useState<AdminEvent[]>([])
   const [eventsTotal, setEventsTotal] = useState(0)
   const [storageConfigured, setStorageConfigured] = useState(true)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | AdminEvent['type']>('all')
   const [usernameFilter, setUsernameFilter] = useState('')
@@ -202,8 +205,8 @@ export default function AdminPage() {
   }, [typeFilter, usernameFilter])
 
   useEffect(() => {
-    void loadData()
-  }, [loadData])
+    if (activeTab === 'activity') void loadData()
+  }, [loadData, activeTab])
 
   const loadOwnershipSnapshots = useCallback(async () => {
     setOwnershipSnapshotsLoading(true)
@@ -225,8 +228,8 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    void loadOwnershipSnapshots()
-  }, [loadOwnershipSnapshots])
+    if (activeTab === 'accounts') void loadOwnershipSnapshots()
+  }, [loadOwnershipSnapshots, activeTab])
 
   const summary = useMemo(() => {
     const noEarnings = users.reduce((sum, user) => sum + user.passNoEarningsCount, 0)
@@ -1027,29 +1030,17 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="page-stack admin-page">
-      <section className="hero-card">
-        <div>
-          <p className="eyebrow">Operator</p>
-          <h2>Admin</h2>
-          <p>
-            Crawl Real shop earnings into the shared catalog, fix catalog rows, and manage cloud
-            profiles and import logs.
-          </p>
-        </div>
-        <div className="button-row">
-          <button className="button" type="button" onClick={() => void loadData()} disabled={loading}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button className="button" type="button" onClick={() => void logout()}>
-            Admin logout
-          </button>
-          <Link className="button" to="/">
-            Tracker
-          </Link>
-        </div>
-      </section>
-
+    <div className="page-stack refresh-page admin-page admin-workspace">
+      <header className="admin-heading"><div><p className="eyebrow">Operations</p><h1>Admin</h1><p>Error history, account management and catalog tools.</p></div><div className="button-row"><button className="button" type="button" onClick={() => void logout()}>Admin logout</button><Link className="button" to="/">Back to tracker</Link></div></header>
+      <div className="admin-tabs" role="tablist" aria-label="Admin views">
+        {(['errors', 'activity', 'accounts', 'catalog'] as const).map(tab => <button key={tab} id={`admin-tab-${tab}`} type="button" role="tab" aria-selected={activeTab === tab} aria-controls={`admin-view-${tab}`} tabIndex={activeTab === tab ? 0 : -1} onClick={() => setActiveTab(tab)} onKeyDown={event => {
+          const tabs = ['errors', 'activity', 'accounts', 'catalog'] as const
+          const index = tabs.indexOf(tab)
+          const next = event.key === 'ArrowRight' ? tabs[(index + 1) % 4] : event.key === 'ArrowLeft' ? tabs[(index + 3) % 4] : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[3] : null
+          if (next) { event.preventDefault(); setActiveTab(next); document.getElementById(`admin-tab-${next}`)?.focus() }
+        }}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
+      </div>
+      {activeTab === 'errors' ? <div role="tabpanel" id="admin-view-errors" aria-labelledby="admin-tab-errors"><AdminErrors /></div> : null}
       {devBypass ? (
         <section className="panel import-hint">
           <p>
@@ -1059,7 +1050,7 @@ export default function AdminPage() {
         </section>
       ) : null}
 
-      {!storageConfigured ? (
+      {activeTab === 'activity' && !storageConfigured ? (
         <section className="panel import-hint">
           <p>
             <strong>KV storage is not configured.</strong> Link a Redis/KV store in Vercel and set
@@ -1068,16 +1059,17 @@ export default function AdminPage() {
         </section>
       ) : null}
 
-      {error ? (
+      {activeTab === 'activity' && error ? (
         <section className="panel">
           <p className="empty">{error}</p>
         </section>
       ) : null}
 
+      {activeTab === 'catalog' ? <div role="tabpanel" id="admin-view-catalog" aria-labelledby="admin-tab-catalog" className="admin-tools-view">
       <CollapsiblePanel
         title="Catalog / Real shop crawl"
         description="Primary: crawl Real shop earningstotal into Supabase. Optional: override a catalog pass by hand."
-        defaultOpen
+        defaultOpen={false}
       >
         <div className="form-subsection admin-primary-tools">
           <div className="section-heading">
@@ -1607,6 +1599,9 @@ export default function AdminPage() {
         </CollapsiblePanel>
       </CollapsiblePanel>
 
+      </div> : null}
+
+      {activeTab === 'accounts' ? <div role="tabpanel" id="admin-view-accounts" aria-labelledby="admin-tab-accounts" className="admin-tools-view">
       <CollapsiblePanel
         title="Account management"
         description="Reset a forgotten password or delete user accounts / legacy cloud-sync profiles"
@@ -1757,6 +1752,10 @@ export default function AdminPage() {
         ) : null}
       </CollapsiblePanel>
 
+      </div> : null}
+
+      {activeTab === 'activity' ? <div role="tabpanel" id="admin-view-activity" aria-labelledby="admin-tab-activity" className="admin-tools-view">
+<div className="admin-history-toolbar"><p>Saved import activity</p><button className="button compact" type="button" disabled={loading} onClick={() => void loadData()}>{loading ? 'Reading activity…' : 'Refresh activity'}</button></div>
       <CollapsiblePanel
         title="Real usernames seen"
         description={`${summary.userCount} username${summary.userCount === 1 ? '' : 's'} · ${summary.noEarnings} no-earnings event${summary.noEarnings === 1 ? '' : 's'}`}
@@ -1795,7 +1794,7 @@ export default function AdminPage() {
       <CollapsiblePanel
         title="Event log"
         description={`${eventsTotal} matching event${eventsTotal === 1 ? '' : 's'}`}
-        defaultOpen={false}
+        defaultOpen
       >
         <div className="sort-controls">
           <label className="field inline-field rank-search-field">
@@ -1868,6 +1867,8 @@ export default function AdminPage() {
           </div>
         )}
       </CollapsiblePanel>
+      </div> : null}
+
     </div>
   )
 }

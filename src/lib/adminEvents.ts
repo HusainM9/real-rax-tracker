@@ -1,5 +1,6 @@
 import { safeFetch } from "./safeImportFetch"
 import { createId } from './id'
+import { safeAdminEventMessage } from '../../lib/adminEventTypes'
 import type { UsernameImportResult } from './usernameImport'
 
 const CLIENT_ID_KEY = 'rax-client-id'
@@ -76,7 +77,6 @@ export function buildImportAdminEvents(
   }
 
   for (const pass of result.passFetchErrors) {
-    if (pass.passKind !== 'player') continue
     events.push({
       type: 'pass_fetch_error',
       realUsername: normalizedUsername,
@@ -87,7 +87,7 @@ export function buildImportAdminEvents(
       rarityLabel: pass.rarityLabel,
       passKind: pass.passKind,
       externalKey: pass.externalKey,
-      message: pass.message,
+      message: safeAdminEventMessage('pass_fetch_error', pass.message),
     })
   }
 

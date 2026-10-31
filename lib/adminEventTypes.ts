@@ -53,6 +53,13 @@ export function isAdminEventType(value: string): value is AdminEventType {
   return ADMIN_EVENT_TYPES.includes(value as AdminEventType)
 }
 
+export function safeAdminEventMessage(type: AdminEventType, message: unknown): string | undefined {
+  if (typeof message !== 'string') return undefined
+  if (type === 'pass_fetch_error') return 'Pass import failed. See Error history for recorded source and status.'
+  if (type === 'pass_no_earnings') return 'No daily earnings were returned.'
+  return /^Imported \d{1,9} rows from \d{1,9} passes \(\d{1,9} with no earnings, \d{1,9} fetch errors\)\.$/.test(message) ? message : 'Username import completed.'
+}
+
 export function validateAdminEventInput(input: unknown): AdminEventInput | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
@@ -80,7 +87,7 @@ export function validateAdminEventInput(input: unknown): AdminEventInput | null 
     passKind,
     externalKey:
       typeof record.externalKey === 'string' ? record.externalKey.slice(0, 120) : undefined,
-    message: typeof record.message === 'string' ? record.message.slice(0, 500) : undefined,
+    message: safeAdminEventMessage(type, record.message),
   }
 }
 

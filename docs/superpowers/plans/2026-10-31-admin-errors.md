@@ -43,17 +43,19 @@ Files: `lib/operationalErrorReporter.ts`, `lib/withErrorLogging.ts`, active API 
 
 Files: `src/pages/AdminPage.tsx`, `src/pages/admin/AdminErrors.tsx`, scoped admin CSS and page tests.
 
-- [ ] Write failing page tests for default Errors view, history-only reads, source/status/query/date filters, correct continuation/unknown states, priority Real500 records, failed reads, and access to preserved tools through tabs.
-- [ ] Implement the approved layout. Preserve existing tool handlers and controls, make Catalog initially closed, and defer tab-specific reads until needed. Show actual history availability and permanent retention; show unknown data as unknown. Search submitted explicitly rather than refetching on each keystroke.
-- [ ] Verify actual production components with fictional offline data at desktop and phone widths; exercise tab/filter behavior. Expected: readable, no horizontal page overflow, no provider requests.
+- [x] Write failing page tests for default Errors view, history-only reads, source/status/query/date filters, correct continuation/unknown states, priority Real500 records, failed reads, and access to preserved tools through tabs.
+- [x] Implement the approved layout. Preserve existing tool handlers and controls, make Catalog initially closed, and defer tab-specific reads until needed. Show actual history availability and permanent retention; show unknown data as unknown. Search submitted explicitly rather than refetching on each keystroke.
+- [x] Verify actual production components with fictional offline data at desktop and phone widths; exercise tab/filter behavior. Expected: readable, no horizontal page overflow, no provider requests.
 
 ### 4. Release
 
-- [ ] Solo review against spec, with particular attention to response/cookie preservation, partial/streamed errors, history pagination while new events arrive, storage outages and untrusted ingestion.
-- [ ] Run the entire offline suite once, TypeScript, request audit/native ESM and gated build. Expected: all pass. Secret preflight clean.
+- [x] Solo review against spec, with particular attention to response/cookie preservation, partial/streamed errors, history pagination while new events arrive, storage outages and untrusted ingestion.
+- [x] Run the entire offline suite once, TypeScript, request audit/native ESM and gated build. Expected: all pass. Secret preflight clean.
 - [ ] Commit/push and deploy only the guarded current source. Verify remote safety gates, exact source and canonical static asset hashes; retain firewall protections. No live Real import/probe or user-data replacement.
 - [ ] Record evidence and limits in this plan and AGENTS.md.
 
 ## Progress
 
 Approved design and choices recorded. Work solo; no agent/reviewer dispatch or checkout change. No live provider calls.
+
+Offline verification: 956 tests / 136 files passed (713-test remainder and 243-test mandatory gate). TypeScript, native ESM loading, 221-module request audit, production build and secret preflight passed. Actual production components were checked in an isolated interactive sample preview at desktop and 390px phone widths, including tab/source-filter/details behavior. Author-only final review followed the required solo policy; no unresolved findings. Migration ordering and activity-message redaction/team-error retention were verified RED→GREEN. No Real requests or schedule changes. Release and explicit retained-error copy pending.

@@ -74,7 +74,8 @@ export async function listConfirmedRealErrors(): Promise<OperationalError[]> {
   const kv = getNoRetryKv(), byIncident = new Map<string, OperationalError>(), ufcKey = await ufcFamilyKey()
   const put = (event: OperationalError) => {
     const key = event.endpointKey ?? event.incidentId ?? event.id
-    byIncident.set(key, { ...event, at: event.at ?? byIncident.get(key)?.at ?? null })
+    const previous = byIncident.get(key)
+    byIncident.set(key, { ...event, operation: event.operation === 'real_request' ? previous?.operation ?? event.operation : event.operation, at: event.at ?? previous?.at ?? null })
   }
   for (const raw of await kv.lrange(CRITICAL, 0, -1)) { const event = parseOperationalError(raw); if (event?.confirmedReal500) put(event) }
   let cursor = 0

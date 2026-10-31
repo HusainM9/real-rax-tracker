@@ -1,3 +1,13 @@
+import { errorOperation } from '../../lib/operationalErrorTypes'
+import { reportBrowserError } from './browserErrorReporter'
+
+function reportInvalidJson(response: Response): void {
+  if (!response.ok || response.headers.get('x-tracker-error-recorded') === '1') return
+  let operation = 'application'
+  try { operation = errorOperation(new URL(response.url).pathname) } catch { /* Unknown route stays unknown. */ }
+  void reportBrowserError({ kind: 'invalid_response', operation })
+}
+
 export async function readResponseJson<T>(response: Response): Promise<T> {
   const text = await response.text()
   if (!text.trim()) {
@@ -74,13 +84,3 @@ export async function parseFetchJson<T>(response: Response, fallback: string): P
 
   return data
 }
-import { errorOperation } from '../../lib/operationalErrorTypes'
-import { reportBrowserError } from './browserErrorReporter'
-
-function reportInvalidJson(response: Response): void {
-  if (!response.ok || response.headers.get('x-tracker-error-recorded') === '1') return
-  let operation = 'application'
-  try { operation = errorOperation(new URL(response.url).pathname) } catch { /* Unknown route stays unknown. */ }
-  void reportBrowserError({ kind: 'invalid_response', operation })
-}
-
