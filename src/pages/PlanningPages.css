@@ -250,7 +250,6 @@
 .pack-sync-fresh-choice small { font-size: .68rem; color: #92929d; }
 .pack-sync-account-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .5rem; }
 .pack-sync-account-entry { display: flex; align-items: center; gap: .65rem; min-width: 0; border: 1px solid #2c2c31; background: #1b1b1e; border-radius: .5rem; padding: .65rem .75rem; }
-.pack-sync-account-avatar { display: grid; place-items: center; flex-shrink: 0; width: 2rem; height: 2rem; background: #30291d; color: #e9c984; border: 1px solid #51432b; border-radius: 50%; font-size: .75rem; font-weight: 600; }
 .pack-sync-account-info { min-width: 0; flex: 1; display: grid; gap: .2rem; }
 .pack-sync-account-info strong { font-size: .78rem; font-weight: 550; overflow: hidden; text-overflow: ellipsis; }
 .pack-sync-account-info small { color: #92929d; font-size: .65rem; }
@@ -321,14 +320,11 @@
 .pack-opening-help { color: #a1a1aa; font-size: .75rem; line-height: 1.6; margin: 0; }
 .pack-rating-target { display: grid; gap: .35rem; color: #a1a1aa; font-size: .75rem; max-width: 15rem; }
 .pack-rating-target select { background: #111114; color: #f4f4f5; border: 1px solid #343438; border-radius: .4rem; padding: .55rem .7rem; font: inherit; }
-.pack-sync-account-avatar { overflow: hidden; }
-.pack-sync-account-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .pack-player-openings { border-top: 1px solid #29292d; margin: .3rem 0 0; padding: .7rem 0 .1rem; min-width: 0; }
 .pack-player-openings-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .8rem; margin-bottom: .5rem; font-size: .7rem; color: #a1a1aa; }
 .pack-player-openings-heading strong { color: #b9b9c3; font-size: .66rem; letter-spacing: .04em; text-transform: uppercase; }
 .pack-player-opening-accounts { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem .7rem; }
 .pack-player-opening-account { display: flex; align-items: center; gap: .5rem; background: #1b1b1e; border: 1px solid #303034; border-radius: .4rem; padding: .35rem .5rem; max-width: 100%; min-width: 0; }
-.pack-player-opening-account .pack-sync-account-avatar { width: 1.4rem; height: 1.4rem; font-size: .6rem; }
 .pack-opening-account-name { font-size: .73rem; max-width: 10rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pack-opening-more { font-size: .68rem; color: #a1a1aa; }
 .daily-badge { display: inline-flex; align-items: center; white-space: nowrap; font-size: .65rem; padding: .28rem .5rem; border-radius: .3rem; border: 1px solid #42424c; background: #27272e; color: #b7b7c4; }
@@ -340,4 +336,93 @@
   .pack-opening-account-name { max-width: 8rem; }
   .pack-player-openings-heading { justify-content: space-between; }
   .collection-workspace .collection-breakdown-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Compact player board: visible work in rows, secondary editing in disclosures. */
+.plan-packs-page .pack-tracker-list-header { align-items: end; justify-content: space-between; gap: 1rem; }
+.plan-packs-page .pack-tracker-list-header h2 { margin: 0 0 .35rem; }
+.plan-packs-page .pack-tracker-list-header p { margin: 0; }
+.plan-packs-page .pack-tracker-list-actions { display: grid; grid-template-columns: minmax(12rem, 15rem) auto auto; align-items: end; gap: .6rem; }
+.plan-packs-page .pack-tracker-list-actions > .inline-field { width: auto; min-width: 0; }
+.plan-packs-page .pack-tracker-list-actions > .button { width: auto; min-height: 2.7rem; margin: 0; white-space: nowrap; }
+.plan-packs-page .pack-board-import-status { margin: .1rem 0 .5rem; }
+.plan-packs-page .pack-compact-player .collapsible-header { align-items: center; padding-bottom: .85rem; }
+.plan-packs-page .pack-compact-player .collapsible-body { margin: 0; padding-top: 0; }
+.plan-packs-page .pack-compact-player .section-actions { gap: .4rem; }
+.plan-packs-page .pack-compact-player .section-actions .button { width: auto; min-height: 2.2rem; padding: .4rem .65rem; font-size: .72rem; }
+.plan-packs-page .pack-compact-player .pack-tracker-body { gap: 0; }
+.pack-player-overview { display: grid; grid-template-columns: minmax(9rem, 11rem) minmax(0, 1fr) auto; gap: 1.4rem; align-items: center; padding: 1rem 0; border-block: 1px solid #2c2c32; }
+.pack-player-overview .pack-rating-target { min-width: 0; font-size: .65rem; }
+.pack-player-overview .pack-rating-target select { width: 100%; min-width: 0; padding: .55rem .65rem; }
+.pack-player-progress > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; margin-bottom: .65rem; }
+.pack-player-progress strong { font-size: 1.45rem; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.pack-player-progress > div > span { color: #9999a5; font-size: .72rem; }
+.plan-packs-page .pack-player-progress .pack-progress-bar { margin: 0; height: 5px; }
+.pack-player-eta { text-align: right; min-width: 7rem; display: grid; gap: .25rem; }
+.pack-player-eta strong { font-size: 1.4rem; color: #e8c782; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.pack-player-eta small { color: #9999a5; font-size: .68rem; }
+.pack-compact-accounts { padding: 1rem 0 .4rem; }
+.pack-compact-accounts .pack-accounts-header { margin-bottom: .65rem; gap: .75rem; }
+.pack-compact-accounts .pack-accounts-header h4 { margin: 0; font-size: .85rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; }
+.pack-compact-accounts .pack-accounts-header h4 small { color: #9999a5; font-size: .68rem; font-weight: 400; }
+.pack-compact-accounts .pack-accounts-header .button { width: auto; min-height: 2rem; padding: .35rem .6rem; font-size: .7rem; }
+.pack-compact-account { display: grid; grid-template-columns: minmax(9rem, 1fr) 5.2rem minmax(8rem, 10rem) 5.5rem 4.5rem 3rem; gap: .8rem; align-items: center; border-top: 1px solid #2b2b31; padding: .7rem 0; position: relative; }
+.pack-compact-account.is-missing { border-color: #68512e; }
+.pack-compact-account-identity { min-width: 0; display: grid; gap: .22rem; }
+.pack-compact-account-identity > strong { font-size: .82rem; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pack-compact-account-identity > small { color: #92929f; font-size: .63rem; }
+.pack-compact-account-identity .link-button { text-align: left; font-size: .65rem; width: fit-content; padding: 0; }
+.pack-compact-account-rating { display: grid; gap: .25rem; }
+.pack-compact-account-rating > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.pack-compact-account-rating input { width: 100%; min-width: 0; padding: .5rem .6rem; min-height: 2.25rem; font-size: .8rem; }
+.pack-compact-account-status { min-width: 0; }
+.pack-compact-account-status > small { color: #92929f; font-size: .65rem; }
+.pack-compact-account .pack-opens-toggle { font-size: .68rem; gap: .35rem; margin: 0; }
+.plan-packs-page .pack-compact-account > .button { min-height: 2rem; padding: .35rem .55rem; width: auto; font-size: .7rem; }
+.pack-account-edit { position: relative; min-width: 0; }
+.pack-account-edit > summary { cursor: pointer; color: #a3a3b0; font-size: .68rem; white-space: nowrap; }
+.pack-account-edit-fields { position: absolute; top: 1.6rem; right: 0; z-index: 12; display: grid; gap: .7rem; padding: 1rem; width: min(17rem, calc(100vw - 4rem)); background: #202025; border: 1px solid #484852; border-radius: .5rem; box-shadow: 0 10px 30px #0006; }
+.pack-account-edit-fields label { display: grid; gap: .3rem; font-size: .7rem; color: #a3a3b0; }
+.pack-account-edit-fields input { width: 100%; min-width: 0; font-size: .8rem; }
+.pack-account-edit-fields .button { width: auto; font-size: .7rem; }
+.pack-player-settings { margin-top: .5rem; border-top: 1px solid #303036; padding: .9rem 0 0; }
+.pack-player-settings > summary { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1rem; cursor: pointer; font-size: .74rem; }
+.pack-player-settings > summary::before { content: '▸'; color: #e4a024; }
+.pack-player-settings[open] > summary::before { content: '▾'; }
+.pack-player-settings > summary strong { font-weight: 500; }
+.pack-player-settings > summary span { color: #92929f; font-size: .68rem; }
+.pack-player-settings-body { padding-top: 1rem; }
+.pack-estimate-inputs { display: flex; align-items: end; gap: 1rem; margin-bottom: .8rem; }
+.pack-estimate-inputs .pack-stat { padding: 0; border: 0; min-width: 0; }
+.pack-estimate-inputs p { font-size: .72rem; margin: 0 0 .5rem; }
+.plan-packs-page .pack-player-settings .pack-cadence-controls { display: flex; flex-direction: row; flex-wrap: wrap; align-items: start; width: auto; gap: .6rem; }
+.plan-packs-page .pack-player-settings .pack-daily-swaps { width: auto; flex: 0 1 auto; }
+.plan-packs-page .pack-player-settings .pack-cadence-controls > .button, .plan-packs-page .pack-player-settings .pack-daily-swaps > .button { width: auto; min-height: 2.2rem; font-size: .73rem; padding: .4rem .7rem; }
+.plan-packs-page .pack-player-settings .pack-play-average-hint { font-size: .7rem; margin: .8rem 0 0; }
+@media (max-width: 900px) {
+  .plan-packs-page .pack-tracker-list-header { align-items: start; }
+  .plan-packs-page .pack-tracker-list-actions { grid-template-columns: minmax(10rem, 1fr) auto auto; }
+  .pack-compact-account { grid-template-columns: minmax(7rem, 1fr) 4.5rem minmax(7rem, 9rem) 4.2rem 4rem 2.8rem; gap: .55rem; }
+}
+@media (max-width: 700px) {
+  .plan-packs-page .pack-tracker-list-header { flex-direction: column; align-items: stretch; }
+  .plan-packs-page .pack-tracker-list-header .pack-sync-copy { flex: 0 1 auto; }
+  .plan-packs-page .pack-tracker-list-actions { width: 100%; margin: 0; grid-template-columns: 1fr 1fr; }
+  .plan-packs-page .pack-tracker-list-actions > .inline-field { grid-column: 1 / -1; }
+  .plan-packs-page .pack-compact-player .collapsible-header { align-items: start; }
+  .pack-player-overview { grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
+  .pack-player-overview .pack-rating-target { grid-column: 1 / -1; max-width: none; }
+  .pack-player-progress > div:first-child { display: grid; gap: .15rem; }
+  .pack-player-progress strong { font-size: 1.2rem; }
+  .pack-player-eta { min-width: 5rem; }
+  .pack-player-eta strong { font-size: 1.2rem; }
+  .pack-compact-account { grid-template-columns: minmax(0, 1fr) 4.5rem 4rem; gap: .6rem; }
+  .pack-compact-account-identity { grid-column: 1; grid-row: 1; }
+  .pack-compact-account-rating { grid-column: 2; grid-row: 1; }
+  .pack-compact-account > .button { grid-column: 3; grid-row: 1; }
+  .pack-compact-account-status { grid-column: 1; grid-row: 2; }
+  .pack-compact-account > .pack-opens-toggle { grid-column: 2; grid-row: 2; }
+  .pack-account-edit { grid-column: 3; grid-row: 2; }
+  .pack-estimate-inputs { flex-wrap: wrap; }
+  .pack-compact-accounts .pack-accounts-header { align-items: start; }
 }

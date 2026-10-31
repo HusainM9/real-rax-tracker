@@ -26,10 +26,26 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
 describe('pack ratings ownership snapshots', () => {
+  it.each([
+    ['nhl', 2026, '2026-27', 2027, 'NHL'],
+    ['nhl', 2027, '2026-27', 2027, 'NHL'],
+    ['nhl', 2026, undefined, 2027, 'NHL'],
+    ['nhl', 2025, '2024-25', 2025, 'NHL'],
+    ['nba', 2026, '2026-27', 2027, 'NBA'],
+    ['ncaam', 2025, '2025-26', 2026, 'CBB'],
+    ['nfl', 2026, '2026-27', 2026, 'NFL'],
+  ])('matches %s raw year %s / %s to catalog year %s', async (sport, season, seasonDisplay, expectedYear, displaySport) => {
+    rawPasses = [{ entityType: 'player', entityId: 8471675, sport, season, seasonDisplay, label: 'Player', boostInfo: { rarityLabel: 'Legendary 1', progress: 20 } }]
+    const handler = (await import('./pack-ratings')).default
+    const result = await (await handler(request())).json()
+    expect(result.passes).toEqual([expect.objectContaining({ externalKey: `8471675|${expectedYear}|${displaySport}`, seasonYear: expectedYear, rating: 400 })])
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
   it('returns freshness, reuses complete scans and honors forced refresh', async () => {
     const handler = (await import('./pack-ratings')).default
     const first = await (await handler(request())).json()
-    expect(first).toMatchObject({ passCount: 1, source: 'real', avatarUrl: 'https://media.realapp.com/example.webp' })
+    expect(first).toMatchObject({ passCount: 1, source: 'real' })
+    expect(first).not.toHaveProperty('avatarUrl')
     expect(first.fetchedAt).toBeTruthy()
     expect(Date.parse(first.startedAt)).toBeLessThanOrEqual(Date.parse(first.fetchedAt))
     expect(await (await handler(request())).json()).toMatchObject({ passCount: 1, source: 'cache', fetchedAt: first.fetchedAt })

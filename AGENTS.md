@@ -23,7 +23,7 @@ This policy **supersedes the earlier blanket 500–599 / site-wide permanent-blo
 - Local obsolete-code cleanup removes the disconnected Earnings/listings UI, archived reconstruction/history workers and unused legacy import/PIN helpers with their tests. Keep their compatibility retirement responses and no-network guards; never revive archived implementations to satisfy an old test. The optional performance lab is local-file/CPU-only: its live Packs/collection import loops are removed. No saved KV or browser history records were deleted.
 - Keep private access, security headers, account rate limits and denial of unsafe legacy deployment hosts. Retired endpoints stay retired; their old internal-500 firewall pause is not a substitute for a normal retirement response.
 - The separate port-5175 development copy stays stopped. No scheduling changes or restored retired features as part of authentication repair.
-- Packs opening inference uses existing explicit rating imports only. Page load, reload, reset timers and avatars must not trigger extra Real scans/profile lookups or daily jobs. Reset the display at 7am America/New_York; use initials when no supplied safe avatar URL is available.
+- Packs opening inference uses existing explicit rating imports only. Page load, reload and reset timers must not trigger extra Real scans/profile lookups or daily jobs. Reset the display at 7am America/New_York. Account avatars were removed at the owner's request; keep any old saved optional image metadata inert, with no extraction, rendering or refresh.
 - Never put credentials, passwords, cookies, tokens, raw private URLs or response bodies in logs/reports.
 
 ## Historical incident evidence

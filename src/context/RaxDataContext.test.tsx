@@ -47,7 +47,7 @@ describe('account data safety', () => {
     })))
     await act(async () => latest.updatePackTracker('t', { ratingTarget: 380 }))
     expect(latest.data.packTrackers![0]!.ratingTarget).toBe(380)
-    const scan = (fetchedAt: string) => ({ fetchedAt, startedAt: fetchedAt, avatarUrl: 'https://media.realapp.com/example.webp' })
+    const scan = (fetchedAt: string) => ({ fetchedAt, startedAt: fetchedAt })
     await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 100 } }, { scan: scan('2026-10-30T14:00:00Z') }))
     await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 110 } }, { scan: scan('2026-10-30T14:00:00Z') }))
     expect(latest.data.packTrackers![0]!.accounts[0]!.rating).toBe(100)
@@ -55,7 +55,7 @@ describe('account data safety', () => {
     await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 110 } }, { scan: scan('2026-10-30T15:00:00Z') }))
     const account = latest.data.packTrackers![0]!.accounts[0]!
     expect(account.packObservation?.likelyOpenedAt).toBe('2026-10-30T15:00:00Z')
-    expect(account.realProfile).toEqual({ username: 'main', avatarUrl: 'https://media.realapp.com/example.webp' })
+    expect(account.realProfile).toBeUndefined()
     await act(async () => latest.updatePackTrackerAccount('t', 'b', { rating: 120 }))
     expect(latest.data.packTrackers![0]!.accounts[1]!.packObservation).toBeUndefined()
     await act(async () => latest.applyPackRatingsFromImport('wrong', { '1|2026|NBA': { rating: 999 } }, { accountId: 'a', scan: scan('2026-10-30T16:00:00Z') }))

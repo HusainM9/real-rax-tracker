@@ -10,7 +10,7 @@ export type PackObservation = {
   comparisons: number
   likelyOpenedAt?: string
 }
-export type PackScanMetadata = { fetchedAt?: string; startedAt?: string; avatarUrl?: string }
+export type PackScanMetadata = { fetchedAt?: string; startedAt?: string }
 export type AccountProfile = { username: string; avatarUrl?: string }
 
 const easternClock = new Intl.DateTimeFormat('en-US', {

@@ -4,7 +4,7 @@ import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
-import { AccountAvatar } from '../components/AccountAvatar'
+import { PackAccountRows } from '../components/PackAccountRows'
 import { PlayerPackOpenings } from '../components/PlayerPackOpenings'
 import { normalizePackRatingTarget, type PackRatingTarget } from '../lib/dailyPacks'
 import { useRaxData } from '../context/RaxDataContext'
@@ -168,7 +168,7 @@ function PackPassRow({
 
   return (
     <CollapsiblePanel
-      className={`pack-tracker-row${isDone ? ' pack-tracker-row-done' : ''}${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
+      className={`pack-tracker-row pack-compact-player${isDone ? ' pack-tracker-row-done' : ''}${showPassMissingWarn ? ' pack-tracker-row-incomplete' : ''}`}
       title={
         <span className="pack-pass-heading">
           <PassIdentity
@@ -178,21 +178,21 @@ function PackPassRow({
             avatar={pass.avatar}
             meta={`${pass.sport} · ${pass.season}${tracker ? ` · ${cadenceLabel}` : ''}`}
           />
-          {tracker ? (
+          {tracker && !open ? (
             <span className="pack-pass-glance">
               <span><small>Rating</small><strong>{estimate.totalRating.toLocaleString()}</strong></span>
               <span><small>{isDone ? 'Status' : 'Time left'}</small><strong>{isDone ? 'Complete' : timeLeftLabel}</strong></span>
               <span><small>Accounts</small><strong>{accountCount}</strong></span>
               <span className="pack-pass-mini-progress" aria-hidden="true"><i style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} /></span>
             </span>
-          ) : <span className="pack-pass-untracked">Not tracking</span>}
+          ) : !tracker ? <span className="pack-pass-untracked">Not tracking</span> : null}
         </span>
       }
       defaultOpen={false}
       open={open}
       onOpenChange={setOpen}
       badge={isDone ? 'DONE' : undefined}
-      preview={tracker && !weeklyOnly && !isDone ? <PlayerPackOpenings player={pass.name} accounts={tracker.accounts} now={now} expanded={open} /> : null}
+      preview={tracker && !open && !weeklyOnly && !isDone ? <PlayerPackOpenings player={pass.name} accounts={tracker.accounts} now={now} expanded={open} /> : null}
       actions={
         !tracker ? (
           <button className="button compact" type="button" onClick={onEnsureTracker}>
@@ -234,68 +234,23 @@ function PackPassRow({
         </p>
       ) : (
         <div className="pack-tracker-body">
-          <label className="pack-rating-target"><span>Rating target</span><select aria-label={`Rating target for ${pass.name}`} value={normalizePackRatingTarget(tracker.ratingTarget)} onChange={event => onUpdateRatingTarget(normalizePackRatingTarget(Number(event.target.value)))}><option value={380}>380 · Legendary</option><option value={1380}>1,380 · Mystic</option><option value={3380}>3,380 · Iconic</option></select></label>
-          <div className="pack-progress-bar" aria-hidden="true">
-            <span style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} />
+          <div className="pack-player-overview">
+            <label className="pack-rating-target"><span>Target</span><select aria-label={`Rating target for ${pass.name}`} value={normalizePackRatingTarget(tracker.ratingTarget)} onChange={event => onUpdateRatingTarget(normalizePackRatingTarget(Number(event.target.value)))}><option value={380}>380 · Legendary</option><option value={1380}>1,380 · Mystic</option><option value={3380}>3,380 · Iconic</option></select></label>
+            <div className="pack-player-progress">
+              <div><strong>{estimate.totalRating.toLocaleString()}</strong><span> / {normalizePackRatingTarget(tracker.ratingTarget).toLocaleString()} rating · {estimate.remaining.toLocaleString()} remaining</span></div>
+              <div className="pack-progress-bar" aria-hidden="true"><span style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} /></div>
+            </div>
+            <div className="pack-player-eta"><strong>{timeLeftLabel}</strong><small>{estimate.packsNeeded.toLocaleString()} packs remaining</small></div>
           </div>
-
-          <div className="pack-stat-strip">
-            <div className="pack-stat">
-              <span>Remaining</span>
-              <strong>{estimate.remaining.toLocaleString()}</strong>
-            </div>
-            <div className="pack-stat">
-              <span>Packs needed</span>
-              <strong>{estimate.packsNeeded.toLocaleString()}</strong>
-              <small>est. at {estimate.ratingPerPack}/pack</small>
-            </div>
-            <div className="pack-stat">
-              <span>{weeklyOnly ? 'Weeks remaining' : 'Days remaining'}</span>
-              <strong>
-                {weeklyOnly
-                  ? formatWeeks(estimate.weeksRemaining)
-                  : formatDays(estimate.daysRemaining)}
-              </strong>
-              <small>
-                {weeklyOnly ? (
-                  <>
-                    {estimate.openingAccounts} listed
-                    {estimate.weeklyExtraAccounts > 0
-                      ? ` + ${estimate.weeklyExtraAccounts} extra`
-                      : ''}
-                    {' · '}
-                    est. {estimate.weeklyGain}/week
-                    {weeklyFinish
-                      ? ` · ~${weeklyFinish.toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}`
-                      : ''}
-                  </>
-                ) : (
-                  <>
-                    {estimate.openingAccounts} open
-                    {estimate.dailySwaps > 0 ? ` + ${estimate.dailySwaps} swap` : ''}
-                    {' · '}
-                    est. {estimate.dailyGain}/day
-                  </>
-                )}
-              </small>
-            </div>
-            <label className="pack-stat pack-stat-input">
-              <span>Rating / pack</span>
-              <input
-                type="number"
-                min={1}
-                step={0.1}
-                value={tracker.ratingPerPack ?? DEFAULT_PACK_RATING_INCREMENT}
-                onChange={(event) => onUpdateRatingPerPack(Number(event.target.value))}
-                aria-label={`Rating per pack for ${pass.name}`}
-              />
-            </label>
-          </div>
-
+          <PackAccountRows player={pass.name} accounts={tracker.accounts} now={now} weeklyOnly={weeklyOnly} showOpenings={!weeklyOnly && !isDone} busy={importBusy} onAdd={onAddAccount} onUpdate={onUpdateAccount} onImport={onImportAccount} onRemove={onRemoveAccount} onIgnoreMissing={onIgnoreMissing} />
+          {importStatus ? <p className="import-status">{importStatus}</p> : null}
+          <details className="pack-player-settings">
+            <summary><strong>Estimates & settings</strong><span>{estimate.ratingPerPack} rating / pack · {weeklyOnly ? 'Weekly' : 'Daily'} · {weeklyOnly ? `${estimate.weeklyExtraAccounts} extra accounts` : estimate.dailySwaps ? `${estimate.dailySwaps} swaps / day` : 'No swaps'}</span></summary>
+            <div className="pack-player-settings-body">
+              <div className="pack-estimate-inputs">
+                <label className="pack-stat pack-stat-input"><span>Rating / pack</span><input type="number" min={1} step={0.1} value={tracker.ratingPerPack ?? DEFAULT_PACK_RATING_INCREMENT} onChange={event => onUpdateRatingPerPack(Number(event.target.value))} aria-label={`Rating per pack for ${pass.name}`} /></label>
+                <p className="table-sub">{estimate.openingAccounts} opening accounts · Estimated {weeklyOnly ? `${estimate.weeklyGain} / week` : `${estimate.dailyGain} / day`}{weeklyFinish ? ` · Finish ~ ${weeklyFinish.toLocaleDateString()}` : ''}</p>
+              </div>
           <div className="pack-cadence-controls">
             {weeklyOnly ? (
               <div className="pack-weekly-mode">
@@ -507,116 +462,9 @@ function PackPassRow({
             </p>
           )}
 
-          <div className="pack-accounts">
-            <div className="pack-accounts-header">
-              <h4>Accounts</h4>
-              <button className="button compact" type="button" onClick={onAddAccount}>
-                Add account
-              </button>
+
             </div>
-
-            {tracker.accounts.length === 0 ? (
-              <p className="import-hint">No accounts yet. Add one to start tracking.</p>
-            ) : (
-              <div className="pack-account-list">
-                {tracker.accounts.map((account) => {
-                  const showMissing =
-                    account.ownershipStatus === 'missing' && !account.ignoredMissing
-                  return (
-                  <div
-                    className={`pack-account-row${showMissing ? ' pack-account-row-missing' : ''}`}
-                    key={account.id}
-                  >
-                    <label className="pack-account-field pack-account-name">
-                      <span>Name</span>
-                      <input
-                        type="text"
-                        value={account.name}
-                        onChange={(event) =>
-                          onUpdateAccount(account.id, { name: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="pack-account-field pack-account-username">
-                      <span>Real username</span>
-                      <input
-                        type="text"
-                        placeholder="@username"
-                        value={account.username ?? ''}
-                        onChange={(event) =>
-                          onUpdateAccount(account.id, { username: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="pack-account-field pack-account-rating">
-                      <span>Rating</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={account.rating}
-                        onChange={(event) =>
-                          onUpdateAccount(account.id, { rating: Number(event.target.value) })
-                        }
-                      />
-                    </label>
-                    <label className="pack-opens-toggle">
-                      <input
-                        type="checkbox"
-                        checked={account.opensPacks}
-                        onChange={(event) =>
-                          onUpdateAccount(account.id, { opensPacks: event.target.checked })
-                        }
-                      />
-                      <span>{weeklyOnly ? 'Opens weekly pack' : 'Opens packs'}</span>
-                    </label>
-                    <div className="pack-account-actions">
-                      <button
-                        className="button compact"
-                        type="button"
-                        disabled={importBusy || !accountUsername(account)}
-                        onClick={() => onImportAccount(account)}
-                      >
-                        Import this
-                      </button>
-                      <button
-                        className="button danger compact"
-                        type="button"
-                        onClick={() => onRemoveAccount(account.id)}
-                        disabled={tracker.accounts.length <= 1}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    {showMissing ? (
-                      <div className="pack-account-ownership-flag">
-                        <p className="pack-account-ownership-warning">Doesn't own this pass</p>
-                        <button
-                          className="button compact"
-                          type="button"
-                          onClick={() => onIgnoreMissing(account.id)}
-                        >
-                          Ignore
-                        </button>
-                      </div>
-                    ) : null}
-                    {account.rarityLabel || account.lastImportedAt ? (
-                      <p className="pack-account-import-meta">
-                        {account.rarityLabel ? account.rarityLabel : null}
-                        {account.rarityLabel && account.lastImportedAt ? ' · ' : null}
-                        {account.lastImportedAt
-                          ? `Imported ${new Date(account.lastImportedAt).toLocaleString()}`
-                          : null}
-                      </p>
-                    ) : null}
-                  </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {importStatus ? <p className="import-status">{importStatus}</p> : null}
-          </div>
+          </details>
 
           {estimate.atTarget ? (
             <p className="import-hint plan-pass-status owned">DONE — reached {normalizePackRatingTarget(tracker.ratingTarget).toLocaleString()} rating target.</p>
@@ -1434,7 +1282,6 @@ export default function PlanPacksPage() {
         <div className="pack-sync-account-grid">
               {knownUsernames.map((username) => (
                 <div className="pack-sync-account-entry" key={username.toLowerCase()}>
-                  <AccountAvatar username={username} profile={packTrackers.flatMap(tracker => tracker.accounts).find(account => account.realProfile?.username === username.toLowerCase())?.realProfile} />
                   <div className="pack-sync-account-info"><strong>@{username}</strong><small>{scanInfo[username.toLowerCase()]?.fetchedAt?<>{scanInfo[username.toLowerCase()].source==='cache'?'Recent scan':'Fresh scan'} · <time dateTime={scanInfo[username.toLowerCase()].fetchedAt}>{new Date(scanInfo[username.toLowerCase()].fetchedAt!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time></>:'Not synced this visit'}</small></div>
                 <button
                   className="button compact"
@@ -1623,8 +1470,12 @@ export default function PlanPacksPage() {
                 Track all
                 {untrackedPlayerPasses.length > 0 ? ` (${untrackedPlayerPasses.length})` : ''}
               </button>
+              <button className="button primary compact" type="button" aria-label="Import all tracked player ratings" disabled={anyImportBusy || packTrackers.length === 0 || knownUsernames.length === 0} onClick={() => void syncAllKnownUsernames()}>
+                {isSyncAllRunning && syncAllProgress ? `Importing… ${syncAllProgress.index}/${syncAllProgress.total}` : 'Import all'}
+              </button>
             </div>
           </div>
+          {syncStatus ? <p className="import-status pack-board-import-status" role="status">{syncStatus}</p> : null}
           {trackAllStatus ? <p className="import-status">{trackAllStatus}</p> : null}
           {sortedPlayerPasses.map((pass) => {
             const tracker = trackerByPassId.get(pass.id)

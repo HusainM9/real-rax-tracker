@@ -6,7 +6,7 @@ const response = () => Response.json({
   username: 'gordon', passCount: 1,
   passes: [{ externalKey: '1|2026|NBA', entityId: 1, name: 'Player', sport: 'NBA', season: '2026-27', seasonYear: 2026, passKind: 'player', progress: 5, rating: 200 }],
   fetchedAt: '2026-10-30T17:00:00Z', source: 'cache',
-  startedAt: '2026-10-30T16:59:59Z', avatarUrl: 'https://media.realapp.com/example.webp',
+  startedAt: '2026-10-30T16:59:59Z',
 })
 
 describe('pack rating imports', () => {
@@ -22,7 +22,7 @@ describe('pack rating imports', () => {
     controller.abort()
     await expect(first).rejects.toMatchObject({ name: 'AbortError' })
     release(response())
-    expect(await second).toMatchObject({ passCount: 1, source: 'cache', fetchedAt: '2026-10-30T17:00:00Z', startedAt: '2026-10-30T16:59:59Z', avatarUrl: 'https://media.realapp.com/example.webp' })
+    expect(await second).toMatchObject({ passCount: 1, source: 'cache', fetchedAt: '2026-10-30T17:00:00Z', startedAt: '2026-10-30T16:59:59Z' })
   })
 
   it('sends explicit force refresh and keeps legacy success responses compatible', async () => {

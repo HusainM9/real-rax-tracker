@@ -1,6 +1,12 @@
 import type { PackTrackerAccount } from '../types/rax'
 import { openingStatus } from '../lib/dailyPacks'
-import { AccountAvatar } from './AccountAvatar'
+
+export function PackOpeningBadge({ account, now }: { account: PackTrackerAccount; now: Date }) {
+  const username = (account.username || '').replace(/^@/, '').trim().toLowerCase()
+  const status = !account.opensPacks || account.ownershipStatus === 'missing' || !username ? 'excluded' : openingStatus(account.packObservation, username, now)
+  const label = !account.opensPacks ? 'Not opening' : account.ownershipStatus === 'missing' ? 'Missing pass' : !username ? 'No username' : status === 'likely-opened' ? 'Likely opened' : status === 'not-detected' ? 'No opening detected' : 'Unknown'
+  return <span className={`daily-badge ${status}`} data-status={status} title={account.packObservation ? `Last reading: ${new Date(account.packObservation.lastCheckedAt).toLocaleString()}. Rating transfers can also suggest an opening.` : 'Sync account ratings to establish a baseline.'}>{label}</span>
+}
 
 export function PlayerPackOpenings({ player, accounts, now, expanded = false }: {
   player: string; accounts: PackTrackerAccount[]; now: Date; expanded?: boolean
@@ -15,12 +21,9 @@ export function PlayerPackOpenings({ player, accounts, now, expanded = false }: 
     <div className="pack-player-openings-heading"><strong>Today’s openings</strong><span>{opened} / {eligible.length} likely opened</span></div>
     <div className="pack-player-opening-accounts">{visible.map(account => {
       const user = username(account)
-      const status = account.ownershipStatus === 'missing' || !user ? 'excluded' : openingStatus(account.packObservation, user, now)
-      const label = account.ownershipStatus === 'missing' ? 'Missing pass' : !user ? 'No username' : status === 'likely-opened' ? 'Likely opened' : status === 'not-detected' ? 'No opening detected' : 'Unknown'
       return <div className="pack-player-opening-account" key={account.id}>
-        <AccountAvatar username={user} profile={account.realProfile} />
         <span className="pack-opening-account-name" title={`@${user}`}>{account.name || user}</span>
-        <span className={`daily-badge ${status}`} data-status={status} title={account.packObservation ? `Last reading: ${new Date(account.packObservation.lastCheckedAt).toLocaleString()}. Rating transfers can also suggest an opening.` : 'Sync account ratings to establish a baseline.'}>{label}</span>
+        <PackOpeningBadge account={account} now={now} />
       </div>
     })}{rows.length > visible.length ? <span className="pack-opening-more">+{rows.length - visible.length} more accounts · expand player</span> : null}</div>
   </div>

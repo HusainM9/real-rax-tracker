@@ -53,7 +53,7 @@ import {
   renamePackUsernameInAccounts,
 } from '../lib/packTracker'
 import type { RaxDataContextValue } from './raxDataContextTypes'
-import { normalizePackRatingTarget, observePackRating, safeAccountAvatarUrl } from '../lib/dailyPacks'
+import { normalizePackRatingTarget, observePackRating } from '../lib/dailyPacks'
 
 
 const RaxDataContext = createContext<RaxDataContextValue | null>(null)
@@ -822,7 +822,6 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
         const displayUser = username.replace(/^@/, '').trim()
         const scan = options?.scan
         const stamp = scan?.fetchedAt && Number.isFinite(Date.parse(scan.fetchedAt)) ? scan.fetchedAt : nowIso()
-        const profile = { username: normalizedUser, avatarUrl: safeAccountAvatarUrl(scan?.avatarUrl) }
         let updatedAccounts = 0
         let missingPasses = 0
 
@@ -871,7 +870,6 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                   lastImportedAt: stamp,
                   ownershipStatus: 'owned',
                   ignoredMissing: undefined,
-                  realProfile: profile,
                   packObservation: !tracker.weeklyPacksOnly && imported.rating < normalizePackRatingTarget(tracker.ratingTarget)
                     ? observePackRating(undefined, { ...scan, rating: imported.rating, username: normalizedUser }) : undefined,
                 },
@@ -892,7 +890,6 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                     ...account,
                     ownershipStatus: 'missing' as const,
                     lastImportedAt: stamp,
-                    realProfile: profile.avatarUrl ? profile : account.realProfile,
                   }
                 }),
                 updatedAt: stamp,
@@ -913,7 +910,6 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                       ? displayUser || account.name
                       : account.name,
                   rating: imported.rating,
-                  realProfile: profile.avatarUrl ? profile : account.realProfile,
                   packObservation: !tracker.weeklyPacksOnly && account.opensPacks
                     ? observePackRating(account.packObservation, { ...scan, rating: imported.rating, username: normalizedUser }) : account.packObservation,
                   rarityLabel: imported.rarityLabel ?? account.rarityLabel,

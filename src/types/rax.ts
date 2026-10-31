@@ -175,6 +175,7 @@ export type PackTrackerAccount = {
   ignoredMissing?: boolean
   /** Inferred only from timestamped ownership imports, never manual edits. */
   packObservation?: import('../lib/dailyPacks').PackObservation
+  /** Legacy account-image metadata, kept inert for old exports. Avatars are retired. */
   realProfile?: import('../lib/dailyPacks').AccountProfile
 }
 
