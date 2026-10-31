@@ -29,11 +29,20 @@ it('searches older stored segments and returns an honest continuation when a seg
 })
 it('keeps pagination tied to its original snapshot and rejects invalid cursors', async () => {
   const event = createOperationalError({ source: 'tracker', kind: 'http', status: 500 })
-  mocks.eval.mockResolvedValue([102, [JSON.stringify(event)]])
-  const result = await listOperationalErrors({ cursor: '100:50', limit: 1 })
+  mocks.eval.mockResolvedValue([102, [JSON.stringify(event)], 100])
+  const result = await listOperationalErrors({ cursor: '100:50:100', limit: 1 })
   expect(mocks.eval.mock.calls[0]![2].slice(0, 2)).toEqual([100, 50])
-  expect(result.nextCursor).toBe('100:51')
+  expect(result.nextCursor).toBe('100:51:100')
   await expect(listOperationalErrors({ cursor: 'not-a-cursor' })).rejects.toThrow(/cursor/i)
+})
+it('keeps a pagination snapshot anchored to new-event writes when historical records arrive at the tail', async () => {
+  const event = createOperationalError({ source: 'tracker', kind: 'http', status: 503 })
+  mocks.eval.mockResolvedValueOnce([110, [JSON.stringify(event)], 10]).mockResolvedValueOnce([130, [JSON.stringify(event)], 12])
+  const first = await listOperationalErrors({ limit: 1 })
+  expect(first.nextCursor).toBe('110:1:10')
+  await listOperationalErrors({ cursor: first.nextCursor!, limit: 1 })
+  expect(mocks.eval.mock.calls[1]![2]).toEqual([110, 1, 200, 10])
+  expect(mocks.eval.mock.calls[1]![0]).toContain('head - baseHead')
 })
 it('preserves confirmed legacy Real evidence without classifying old unknown/non-500 entries as confirmed', async () => {
   const keys = ['a', 'b', 'c'].map(char => `request-safety:v1:${char.repeat(64)}`)

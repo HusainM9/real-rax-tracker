@@ -4,12 +4,13 @@ import { createOperationalError, matchesOperationalError, parseOperationalError,
 const JOURNAL = 'rax:operational-errors:v1'
 const IDS = `${JOURNAL}:ids`
 const CRITICAL = `${JOURNAL}:real-500`
+const HEAD = `${JOURNAL}:head-count`
 const APPEND = `
 local count = 0
 for _, event in ipairs(cjson.decode(ARGV[1])) do
   local identity = (event.reported and 'browser:' or 'server:') .. event.id
   if redis.call('SADD', KEYS[2], identity) == 1 then
-    redis.call('LPUSH', KEYS[1], cjson.encode(event))
+    if ARGV[2] == 'historical' then redis.call('RPUSH', KEYS[1], cjson.encode(event)) else redis.call('LPUSH', KEYS[1], cjson.encode(event)); redis.call('INCR', KEYS[4]) end
     if event.confirmedReal500 then redis.call('LPUSH', KEYS[3], cjson.encode(event)) end
     count = count + 1
   end
@@ -21,31 +22,35 @@ const READ = `
 local length = redis.call('LLEN', KEYS[1])
 local snapshot = tonumber(ARGV[1])
 if snapshot == 0 then snapshot = length end
-local start = math.max(0, length - snapshot) + tonumber(ARGV[2])
-return { length, redis.call('LRANGE', KEYS[1], start, start + tonumber(ARGV[3]) - 1) }
+local head = tonumber(redis.call('GET', KEYS[2]) or '0')
+local baseHead = tonumber(ARGV[4])
+if baseHead < 0 then baseHead = head end
+local start = math.max(0, head - baseHead) + tonumber(ARGV[2])
+return { length, redis.call('LRANGE', KEYS[1], start, start + tonumber(ARGV[3]) - 1), head }
 `
-export async function appendOperationalErrors(events: OperationalError[]): Promise<number> {
+export async function appendOperationalErrors(events: OperationalError[], options: { historical?: boolean } = {}): Promise<number> {
   const unique = new Map<string, OperationalError>()
   for (const input of events) { const event = parseOperationalError(input); if (event) unique.set(`${event.reported}:${event.id}`, event) }
   if (!unique.size) return 0
-  const stored = Number(await getNoRetryKv().eval(APPEND, [JOURNAL, IDS, CRITICAL], [JSON.stringify([...unique.values()])]))
+  const stored = Number(await getNoRetryKv().eval(APPEND, [JOURNAL, IDS, CRITICAL, HEAD], [JSON.stringify([...unique.values()]), options.historical ? 'historical' : 'current']))
   if (!Number.isSafeInteger(stored) || stored < 0) throw new Error('Error history could not be saved.')
   return stored
 }
 export type ErrorHistoryPage = { events: OperationalError[]; total: number; nextCursor: string | null; partialSearch: boolean }
 export async function listOperationalErrors(options: ErrorFilters & { cursor?: string; limit?: number } = {}): Promise<ErrorHistoryPage> {
-  if (options.cursor && !/^\d+:\d+$/.test(options.cursor)) throw new Error('Invalid history cursor.')
-  let [snapshot, offset] = options.cursor?.split(':').map(Number) ?? [0, 0]
-  if (![snapshot, offset].every(value => Number.isSafeInteger(value) && value >= 0) || offset > snapshot) throw new Error('Invalid history cursor.')
+  if (options.cursor && !/^\d+:\d+:\d+$/.test(options.cursor)) throw new Error('Invalid history cursor.')
+  let [snapshot, offset, baseHead] = options.cursor?.split(':').map(Number) ?? [0, 0, -1]
+  if (![snapshot, offset].every(value => Number.isSafeInteger(value) && value >= 0) || offset > snapshot || options.cursor && (!Number.isSafeInteger(baseHead) || baseHead < 0)) throw new Error('Invalid history cursor.')
   const limit = Number.isFinite(options.limit) ? Math.min(100, Math.max(1, Math.floor(options.limit!))) : 50
   const events: OperationalError[] = []
   let total = 0, scanned = 0
   while (scanned < 1000 && events.length < limit) {
-    const result = await getNoRetryKv().eval(READ, [JOURNAL], [snapshot, offset, 200]) as [number, unknown[]]
+    const result = await getNoRetryKv().eval(READ, [JOURNAL, HEAD], [snapshot, offset, 200, baseHead]) as [number, unknown[], number]
     total = Number(result[0])
     if (!Number.isSafeInteger(total) || total < 0 || !Array.isArray(result[1])) throw new Error('Error history is unavailable.')
     if (snapshot > total) throw new Error('Invalid history cursor.')
     if (!snapshot) snapshot = total
+    if (baseHead < 0) baseHead = Number(result[2] ?? 0)
     const rows = result[1]
     if (!Array.isArray(rows) || !rows.length) { offset = snapshot; break }
     for (const raw of rows) {
@@ -56,7 +61,7 @@ export async function listOperationalErrors(options: ErrorFilters & { cursor?: s
     }
     if (offset >= snapshot) break
   }
-  const nextCursor = offset < snapshot ? `${snapshot}:${offset}` : null
+  const nextCursor = offset < snapshot ? `${snapshot}:${offset}:${baseHead}` : null
   return { events, total, nextCursor, partialSearch: Boolean(nextCursor && events.length < limit) }
 }
 function confirmedRecords(raw: unknown): Record<string, unknown>[] {

@@ -14,7 +14,16 @@ export async function migrateRetainedImportErrors(): Promise<{ examined: number;
     if (event) events.push(event)
   }
   let stored = 0
-  events.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
-  for (let offset = 0; offset < events.length; offset += 100) stored += await appendOperationalErrors(events.slice(offset, offset + 100))
+  events.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
+  for (let offset = 0; offset < events.length; offset += 100) stored += await appendOperationalErrors(events.slice(offset, offset + 100), { historical: true })
   return { examined: raw.length, eligible: events.length, stored }
+}
+
+/** Storage-only bootstrap inside the authenticated Admin backend. Failure does
+ * not mark completion; a later explicit visit can safely continue by event ID. */
+export async function ensureRetainedImportErrors(): Promise<void> {
+  const kv = getNoRetryKv(), key = 'rax:operational-errors:v1:retained-import-copy'
+  if (await kv.get(key)) return
+  const result = await migrateRetainedImportErrors()
+  if (await kv.set(key, { completedAt: new Date().toISOString(), ...result }) !== 'OK') throw new Error('Retained history copy could not be confirmed.')
 }

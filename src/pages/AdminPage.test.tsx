@@ -43,11 +43,11 @@ it('opens on saved errors, pins confirmed Real500 separately, and defers all oth
   expect(mocks.fetch.mock.calls.some(call => call[0].startsWith('/api/admin/events'))).toBe(true)
 })
 it('submits filters across stored history, supports continuation, and keeps unknown data honest on a failed read', async () => {
-  history.partialSearch = true; history.nextCursor = '1002:1000'; history.events = []
+  history.partialSearch = true; history.nextCursor = '1002:1000:1002'; history.events = []
   await render()
   expect(container.textContent).toContain('No matches in this segment')
   await click('Search older records')
-  expect(mocks.fetch.mock.calls.at(-1)![0]).toContain('cursor=1002%3A1000')
+  expect(mocks.fetch.mock.calls.at(-1)![0]).toContain('cursor=1002%3A1000%3A1002')
   const input = container.querySelector<HTMLInputElement>('input[name="query"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Packs'); input.dispatchEvent(new Event('input', { bubbles: true })) })
   await act(async () => container.querySelector<HTMLFormElement>('.admin-error-filters')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))

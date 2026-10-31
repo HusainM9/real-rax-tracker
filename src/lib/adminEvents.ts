@@ -34,12 +34,15 @@ export async function postAdminEvents(events: AdminEventPayload[]): Promise<void
   if (events.length === 0 || import.meta.env.DEV) return
 
   try {
-    await safeFetch('/api/admin/events', {
+    for (let offset = 0; offset < events.length; offset += 50) {
+      const response = await safeFetch('/api/admin/events', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({ events: events.slice(offset, offset + 50) }),
     })
+      if (!response.ok) return
+    }
   } catch {
     // Fire-and-forget — never block import UX.
   }

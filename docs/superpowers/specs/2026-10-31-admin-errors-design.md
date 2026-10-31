@@ -6,7 +6,7 @@ The owner requested a clearer Admin page that retains errors of every type, with
 
 Open Admin on an Errors view. Put a prominent confirmed Real 500 section above the full error history. Show timestamp, source, observed HTTP status (or Unknown), operation, safe summary and incident reference. Provide search and source/status/type/date filters, pagination, and expandable safe details. Show storage/read failures explicitly; never show a failed log read as an empty healthy history. No replay, retry, unblock or delete control belongs on a confirmed Real 500 entry.
 
-Keep existing import activity, account management and catalog tools in separate views within Admin. This makes errors immediately visible without removing existing capabilities. Refresh reads stored history only; it never calls Real or starts work. The existing catalog/manual tools stay explicit actions under their current protections.
+Keep existing import activity, account management and catalog tools in separate views within Admin. This makes errors immediately visible without removing existing capabilities. Admin uses stored data only. Its first authenticated history read copies retained legacy import-error metadata into the permanent journal once, using the backend's own storage configuration. The copy is idempotent, keeps original records, and never calls Real or starts provider work. The existing catalog/manual tools stay explicit actions under their current protections.
 
 ## Approaches
 

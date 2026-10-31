@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildImportAdminEvents,
   getAdminClientId,
+  postAdminEvents,
 } from './adminEvents'
 import type { UsernameImportResult } from './usernameImport'
+const mocks = vi.hoisted(() => ({ fetch: vi.fn() }))
+vi.mock('./safeImportFetch', () => ({ safeFetch: mocks.fetch }))
+afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })
 
 function emptyResult(overrides: Partial<UsernameImportResult> = {}): UsernameImportResult {
   return {
@@ -27,6 +31,19 @@ function emptyResult(overrides: Partial<UsernameImportResult> = {}): UsernameImp
 }
 
 describe('adminEvents', () => {
+  it('preserves large activity reports by sending accepted batches without provider calls', async () => {
+    vi.stubEnv('DEV', false); mocks.fetch.mockResolvedValue(Response.json({}, { status: 202 }))
+    const event = { type: 'pass_fetch_error' as const, realUsername: 'sample', clientId: 'sample' }
+    await postAdminEvents(Array.from({ length: 101 }, () => event))
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(mocks.fetch.mock.calls.map(call => JSON.parse(call[1].body).events.length)).toEqual([50, 50, 1])
+    expect(mocks.fetch.mock.calls.every(call => call[0] === '/api/admin/events')).toBe(true)
+  })
+  it('stops the reporting operation after a failed batch without retrying it', async () => {
+    vi.stubEnv('DEV', false); mocks.fetch.mockResolvedValue(Response.json({}, { status: 503 }))
+    await postAdminEvents(Array.from({ length: 101 }, () => ({ type: 'pass_fetch_error' as const, realUsername: 'sample', clientId: 'sample' })))
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  })
   it('retains team-pass failures without copying raw exception messages', () => {
     const events = buildImportAdminEvents('sample', emptyResult({ passFetchErrors: [{ name: 'Sample team', sport: 'NBA', season: '2026-27', externalKey: '1|2027|NBA|team', passKind: 'team', message: 'token=secret private-body' }] }))
     expect(events.filter(event => event.type === 'pass_fetch_error')).toHaveLength(1)
