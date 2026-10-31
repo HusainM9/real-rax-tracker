@@ -133,7 +133,7 @@ export function planProgressFromPackDaysRemaining(
 }
 
 export function planProgressFromPackTracker(
-  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number },
+  tracker: Pick<PackTracker, 'accounts'> & { ratingPerPack?: number; ratingTarget?: number },
 ): PlannedPassProgress | null {
   return planProgressFromPackDaysRemaining(estimatePackProgress(tracker).daysRemaining)
 }

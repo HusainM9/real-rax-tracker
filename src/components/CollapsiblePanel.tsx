@@ -9,6 +9,7 @@ type CollapsiblePanelProps = {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   actions?: ReactNode
+  preview?: ReactNode
   className?: string
   children: ReactNode
 }
@@ -22,6 +23,7 @@ export default function CollapsiblePanel({
   open: controlledOpen,
   onOpenChange,
   actions,
+  preview,
   className = '',
   children,
 }: CollapsiblePanelProps) {
@@ -59,6 +61,7 @@ export default function CollapsiblePanel({
         {actions ? <div className="section-actions">{actions}</div> : null}
         {badge ? <span className="badge">{badge}</span> : null}
       </div>
+      {preview}
       {open ? <div className="collapsible-body">{children}</div> : null}
     </section>
   )

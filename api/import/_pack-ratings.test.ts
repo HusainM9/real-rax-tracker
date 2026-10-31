@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 let rawPasses: unknown
 let malformed = false
 const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-  if (String(input).includes('/user/')) return Response.json({ user: { id: 'real-user', userName: 'gordon' } })
+  if (String(input).includes('/user/')) return Response.json({ user: { id: 'real-user', userName: 'gordon', avatarUrl: 'https://media.realapp.com/example.webp' } })
   if (String(input).includes('/passes')) return Response.json(malformed ? {} : { passes: rawPasses })
   throw new Error('Unexpected upstream request')
 })
@@ -29,12 +29,14 @@ describe('pack ratings ownership snapshots', () => {
   it('returns freshness, reuses complete scans and honors forced refresh', async () => {
     const handler = (await import('./pack-ratings')).default
     const first = await (await handler(request())).json()
-    expect(first).toMatchObject({ passCount: 1, source: 'real' })
+    expect(first).toMatchObject({ passCount: 1, source: 'real', avatarUrl: 'https://media.realapp.com/example.webp' })
     expect(first.fetchedAt).toBeTruthy()
+    expect(Date.parse(first.startedAt)).toBeLessThanOrEqual(Date.parse(first.fetchedAt))
     expect(await (await handler(request())).json()).toMatchObject({ passCount: 1, source: 'cache', fetchedAt: first.fetchedAt })
     rawPasses = []
     expect(await (await handler(request(true))).json()).toMatchObject({ passCount: 0, source: 'real' })
     expect(fetcher.mock.calls.filter((call) => String(call[0]).includes('/passes'))).toHaveLength(2)
+    expect(fetcher).toHaveBeenCalledTimes(4)
   })
 
   it('keeps app authentication and configuration checks ahead of cache access', async () => {

@@ -7,7 +7,7 @@ import { getUserByUsername, listPasses, RealApiError, type RealApiContext, type 
 const TTL_MS = 30_000
 const MAX_MEMORY_ENTRIES = 16
 const MAX_ENCODED_SIZE = 512_000
-type Snapshot = { user: RealUser; passes: RealPass[]; fetchedAt: string }
+type Snapshot = { user: RealUser; passes: RealPass[]; fetchedAt: string; startedAt?: string }
 type StoredSnapshot = { version: 1; scope: string; expiresAt: number; payload: string }
 export type RealOwnershipSnapshot = Snapshot & { source: 'real' | 'cache' }
 const memory = new Map<string, StoredSnapshot>()
@@ -70,10 +70,11 @@ async function loadSnapshot(username: string, context: RealApiContext, forceRefr
   if (flights.size >= 16) throw new RealApiError('rate_limited', 'Ownership sync is busy. Try again shortly.', 429)
 
   const work = (async (): Promise<RealOwnershipSnapshot> => {
+    const startedAt = new Date().toISOString()
     const sharedContext = { ...context, signal: AbortSignal.timeout(60_000) }
     const user = await getUserByUsername(username, sharedContext)
     const passes = await listPasses({ userId: user.id }, sharedContext)
-    const snapshot = { user, passes, fetchedAt: new Date().toISOString() }
+    const snapshot = { user, passes, startedAt, fetchedAt: new Date().toISOString() }
     if (!validSnapshot(snapshot)) throw new RealApiError('invalid_response', 'Real returned a malformed ownership response.')
     const expiresAt = Date.now() + TTL_MS
     try {

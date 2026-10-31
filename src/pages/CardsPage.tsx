@@ -259,13 +259,15 @@ export default function CardsPage() {
                       <CardRaritySelect card={cardRollup.card} onConfirmChange={setCardRarity} />
                     </td>
                     <td className="collection-breakdown" data-label="Breakdown">
+                      <div className="collection-breakdown-metrics">
                       <span>Guaranteed <strong>{formatRax(displayRaxValue(cardRollup.guaranteedRax))}</strong> <small>({cardRollup.guaranteedClaims})</small></span>
                       <span>Pro bonus <strong>{formatRax(displayRaxValue(cardRollup.proBonusRax))}</strong> <small>({cardRollup.proBonusClaims})</small></span>
                       <span>Overlap <strong>{formatRax(displayRaxValue(cardRollup.overlapRax))}</strong> <small>({cardRollup.overlapCount})</small></span>
                       <small>{cardRollup.performanceCount} entries · {formatRax(displayRaxValue(cardRollup.totalBaseRax))} base</small>
+                      </div>
                     </td>
                     <td data-label="Total claimable">
-                      <strong>{formatRax(displayRaxValue(cardRollup.totalClaimableRax))} RAX</strong>
+                      <strong className="collection-claimable-value">{formatRax(displayRaxValue(cardRollup.totalClaimableRax))}<small>RAX</small></strong>
                     </td>
                     <td data-label="Actions">
                       <span className="button-row compact-actions">

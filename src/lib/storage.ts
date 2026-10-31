@@ -19,6 +19,7 @@ import { looksLikeTeamPassName } from './passKind'
 import { rarityLabelFromNotes } from './effectiveRax'
 import { hydrateWeeklyPackOpens, normalizeRatingPerPack } from './packTracker'
 import { hydrateSellExcludedPassKeys } from './sellExcludedPasses'
+import { hydratePackObservation, normalizePackRatingTarget, safeAccountAvatarUrl } from './dailyPacks'
 
 const STORAGE_KEY = 'real-rax-tracker:v1'
 export const EXPORT_VERSION = 1
@@ -328,6 +329,10 @@ function hydratePackTrackerAccount(value: unknown): PackTrackerAccount | null {
       typeof value.lastImportedAt === 'string' ? value.lastImportedAt : undefined,
     ownershipStatus,
     ignoredMissing: value.ignoredMissing === true ? true : undefined,
+    packObservation: hydratePackObservation(value.packObservation),
+    realProfile: isRecord(value.realProfile) && typeof value.realProfile.username === 'string'
+      ? { username: value.realProfile.username.toLowerCase(), avatarUrl: safeAccountAvatarUrl(value.realProfile.avatarUrl) }
+      : undefined,
   }
 }
 
@@ -352,6 +357,7 @@ function hydratePackTracker(value: unknown): PackTracker | null {
   return {
     id: value.id,
     plannedPassId: value.plannedPassId,
+    ratingTarget: normalizePackRatingTarget(value.ratingTarget),
     accounts: Array.isArray(value.accounts)
       ? value.accounts
           .map(hydratePackTrackerAccount)

@@ -1,5 +1,6 @@
 import { waitWithAbort } from '../../lib/abortablePromise'
 import { safeImportFetch } from './safeImportFetch'
+import { safeAccountAvatarUrl } from './dailyPacks'
 
 export type PackRatingPass = {
   externalKey: string
@@ -15,6 +16,8 @@ export type PackRatingPass = {
 }
 
 export type PackRatingsResult = {
+  startedAt?: string
+  avatarUrl?: string
   username: string
   passCount: number
   passes: PackRatingPass[]
@@ -25,6 +28,8 @@ export type PackRatingsResult = {
 export const PACK_RATINGS_ENDPOINT = '/api/import/pack-ratings'
 
 type PackRatingsResponse = {
+  startedAt?: string
+  avatarUrl?: string
   ok?: boolean
   error?: string
   code?: string
@@ -77,6 +82,8 @@ async function requestPackRatings(trimmed: string, forceRefresh: boolean): Promi
     passCount: body.passCount ?? passes.length,
     passes,
     fetchedAt: body.fetchedAt,
+    startedAt: body.startedAt,
+    avatarUrl: safeAccountAvatarUrl(body.avatarUrl),
     source: body.source === 'cache' || body.source === 'real' ? body.source : undefined,
   }
 }

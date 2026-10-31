@@ -173,6 +173,9 @@ export type PackTrackerAccount = {
   ownershipStatus?: PackOwnershipStatus
   /** When true, hide the missing-ownership warning for this account+pass. */
   ignoredMissing?: boolean
+  /** Inferred only from timestamped ownership imports, never manual edits. */
+  packObservation?: import('../lib/dailyPacks').PackObservation
+  realProfile?: import('../lib/dailyPacks').AccountProfile
 }
 
 /** Reusable account definition applied across pack trackers. */
@@ -201,6 +204,7 @@ export type PackTracker = {
   id: string
   plannedPassId: string
   accounts: PackTrackerAccount[]
+  ratingTarget?: import('../lib/dailyPacks').PackRatingTarget
   /** Estimate divisor for packs needed / days remaining (default 10). */
   ratingPerPack?: number
   /**

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,6 +36,38 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers() })
 
 describe('account data safety', () => {
+  it('persists pack targets and records only fresh imported evidence for the matching account', async () => {
+    await render()
+    await act(async () => latest.importJson(JSON.stringify({ ...createEmptyData(),
+      plannedPasses: [{ id: 'p', externalKey: '1|2026|NBA', name: 'Player', sport: 'NBA', season: '2026-27', passKind: 'player', simulatedRarityLabel: 'Iconic 1', totalBaseRax: 1, rowCount: 1, source: 'catalog', progress: 'not-started', addedAt: '2026-10-30' }],
+      packTrackers: [{ id: 't', plannedPassId: 'p', accounts: [
+        { id: 'a', username: 'main', name: 'Main', rating: 100, opensPacks: true },
+        { id: 'b', username: 'alt', name: 'Alt', rating: 10, opensPacks: true },
+      ] }],
+    })))
+    await act(async () => latest.updatePackTracker('t', { ratingTarget: 380 }))
+    expect(latest.data.packTrackers![0]!.ratingTarget).toBe(380)
+    const scan = (fetchedAt: string) => ({ fetchedAt, startedAt: fetchedAt, avatarUrl: 'https://media.realapp.com/example.webp' })
+    await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 100 } }, { scan: scan('2026-10-30T14:00:00Z') }))
+    await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 110 } }, { scan: scan('2026-10-30T14:00:00Z') }))
+    expect(latest.data.packTrackers![0]!.accounts[0]!.rating).toBe(100)
+    expect(latest.data.packTrackers![0]!.accounts[0]!.packObservation?.comparisons).toBe(0)
+    await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 110 } }, { scan: scan('2026-10-30T15:00:00Z') }))
+    const account = latest.data.packTrackers![0]!.accounts[0]!
+    expect(account.packObservation?.likelyOpenedAt).toBe('2026-10-30T15:00:00Z')
+    expect(account.realProfile).toEqual({ username: 'main', avatarUrl: 'https://media.realapp.com/example.webp' })
+    await act(async () => latest.updatePackTrackerAccount('t', 'b', { rating: 120 }))
+    expect(latest.data.packTrackers![0]!.accounts[1]!.packObservation).toBeUndefined()
+    await act(async () => latest.applyPackRatingsFromImport('wrong', { '1|2026|NBA': { rating: 999 } }, { accountId: 'a', scan: scan('2026-10-30T16:00:00Z') }))
+    expect(latest.data.packTrackers![0]!.accounts[0]!.rating).toBe(110)
+    await act(async () => latest.applyPackRatingsFromImport('main', {}, { scan: scan('2026-10-30T13:00:00Z') }))
+    expect(latest.data.packTrackers![0]!.accounts[0]!.ownershipStatus).toBe('owned')
+    await act(async () => latest.applyPackRatingsFromImport('main', {}, { scan: scan('2026-10-30T17:00:00Z') }))
+    await act(async () => latest.applyPackRatingsFromImport('main', { '1|2026|NBA': { rating: 120 } }, { scan: scan('2026-10-30T16:00:00Z') }))
+    expect(latest.data.packTrackers![0]!.accounts[0]!.ownershipStatus).toBe('missing')
+    expect(latest.data.packTrackers![0]!.accounts[0]!.packObservation).toEqual(account.packObservation)
+    expect(latest.data.plannedPasses).toHaveLength(1)
+  })
   it('uses only the current account cache after bootstrap failure and pauses cloud writes', async () => {
     mocks.load.mockRejectedValue(new Error('Offline'))
     await render()

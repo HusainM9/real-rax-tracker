@@ -165,7 +165,7 @@ export default async function handler(request: Request): Promise<Response> {
   const context: RealApiContext = { config: realConfig, signal: request.signal }
 
   try {
-    const { user, passes: rawPasses, fetchedAt, source } = await getRealOwnershipSnapshot(username, context, {
+    const { user, passes: rawPasses, fetchedAt, startedAt, source } = await getRealOwnershipSnapshot(username, context, {
       forceRefresh: body.forceRefresh === true,
     })
     const passes = collapsePasses(
@@ -181,6 +181,8 @@ export default async function handler(request: Request): Promise<Response> {
       passCount: passes.length,
       passes,
       fetchedAt,
+      startedAt,
+      avatarUrl: user.avatarUrl,
       source,
     })
   } catch (error) {

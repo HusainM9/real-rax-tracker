@@ -5,6 +5,7 @@ import type {
   PlannedPass,
   WeeklyPackOpen,
 } from '../types/rax'
+import { normalizePackRatingTarget } from './dailyPacks'
 
 /** Rating needed to reach Iconic. */
 export const ICONIC_RATING_TARGET = 3380
@@ -172,8 +173,9 @@ export function estimatePackProgress(
     dailySwaps?: number
     weeklyPacksOnly?: boolean
     weeklyExtraAccounts?: number
+    ratingTarget?: number
   },
-  target: number = ICONIC_RATING_TARGET,
+  target: number = normalizePackRatingTarget(tracker.ratingTarget),
 ): PackProgressEstimate {
   const totalRating = sumAccountRatings(tracker.accounts)
   const remaining = Math.max(0, target - totalRating)

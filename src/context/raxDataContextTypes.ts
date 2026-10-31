@@ -83,6 +83,7 @@ export type RaxDataContextValue = {
         PackTracker,
         | 'accounts'
         | 'ratingPerPack'
+        | 'ratingTarget'
         | 'dailySwaps'
         | 'weeklyPacksOnly'
         | 'weeklyExtraAccounts'
@@ -114,7 +115,7 @@ export type RaxDataContextValue = {
   applyPackRatingsFromImport: (
     username: string,
     ratingsByExternalKey: Record<string, { rating: number; rarityLabel?: string }>,
-    options?: { plannedPassId?: string; accountId?: string; ensureAccounts?: boolean },
+    options?: { plannedPassId?: string; accountId?: string; ensureAccounts?: boolean; scan?: import('../lib/dailyPacks').PackScanMetadata },
   ) => { updatedAccounts: number; missingPasses: number }
   removePackTrackerAccount: (trackerId: string, accountId: string) => void
   addPackAccountTemplate: (input?: Partial<PackAccountTemplate>) => string

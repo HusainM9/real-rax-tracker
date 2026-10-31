@@ -1,4 +1,5 @@
 import Hashids from 'hashids'
+import { safeAccountAvatarUrl } from './accountAvatar.js'
 import { getRealAppToolsRows } from './realAppToolsPaste.js'
 import { guardedUpstreamFetch } from './guardedUpstreamFetch.js'
 import { isHttp5xx, isTerminalRequestFailure, failureStatus, isPendingRequest } from './httpFailurePolicy.js'
@@ -409,6 +410,7 @@ export async function realGetJson<T>(
 export type RealUser = {
   id: string
   userName: string
+  avatarUrl?: string
 }
 
 export type RealBoostInfo = {
@@ -490,7 +492,7 @@ export async function getUserByUsername(username: string, context: RealApiContex
     throw new RealApiError('not_found', 'Enter a Real username.')
   }
 
-  const data = await realGetJson<{ user?: { id?: unknown; userName?: unknown } }>(
+  const data = await realGetJson<{ user?: { id?: unknown; userName?: unknown; avatarUrl?: unknown; avatar?: unknown } }>(
     `/user/${encodeURIComponent(trimmed)}`,
     context,
   )
@@ -501,6 +503,7 @@ export async function getUserByUsername(username: string, context: RealApiContex
   return {
     id,
     userName: typeof data.user?.userName === 'string' ? data.user.userName : trimmed,
+    avatarUrl: safeAccountAvatarUrl(data.user?.avatarUrl) ?? safeAccountAvatarUrl(data.user?.avatar),
   }
 }
 

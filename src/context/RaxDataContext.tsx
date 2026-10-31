@@ -53,6 +53,7 @@ import {
   renamePackUsernameInAccounts,
 } from '../lib/packTracker'
 import type { RaxDataContextValue } from './raxDataContextTypes'
+import { normalizePackRatingTarget, observePackRating, safeAccountAvatarUrl } from '../lib/dailyPacks'
 
 
 const RaxDataContext = createContext<RaxDataContextValue | null>(null)
@@ -677,6 +678,7 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                   : undefined
               return {
                 ...tracker,
+                ratingTarget: patch.ratingTarget !== undefined ? normalizePackRatingTarget(patch.ratingTarget) : tracker.ratingTarget,
                 ratingPerPack:
                   patch.ratingPerPack !== undefined
                     ? normalizeRatingPerPack(patch.ratingPerPack)
@@ -818,7 +820,9 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
       applyPackRatingsFromImport: (username, ratingsByExternalKey, options) => {
         const normalizedUser = username.replace(/^@/, '').trim().toLowerCase()
         const displayUser = username.replace(/^@/, '').trim()
-        const stamp = nowIso()
+        const scan = options?.scan
+        const stamp = scan?.fetchedAt && Number.isFinite(Date.parse(scan.fetchedAt)) ? scan.fetchedAt : nowIso()
+        const profile = { username: normalizedUser, avatarUrl: safeAccountAvatarUrl(scan?.avatarUrl) }
         let updatedAccounts = 0
         let missingPasses = 0
 
@@ -841,16 +845,18 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
             let accounts = [...tracker.accounts]
 
             const matchingAccounts = accounts.filter((account) => {
-              if (options?.accountId) return account.id === options.accountId
+              if (options?.accountId && account.id !== options.accountId) return false
               const accountUser = (account.username || account.name)
                 .replace(/^@/, '')
                 .trim()
                 .toLowerCase()
               return accountUser === normalizedUser
+                && !(scan?.fetchedAt && account.lastImportedAt && Date.parse(scan.fetchedAt) <= Date.parse(account.lastImportedAt))
             })
 
             if (matchingAccounts.length === 0) {
-              if (!options?.ensureAccounts || !imported || options?.accountId) {
+              if (!options?.ensureAccounts || !imported || options?.accountId
+                || accounts.some(account => packUsernameKey(account.username || account.name) === normalizedUser)) {
                 return tracker
               }
               accounts = [
@@ -865,6 +871,9 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                   lastImportedAt: stamp,
                   ownershipStatus: 'owned',
                   ignoredMissing: undefined,
+                  realProfile: profile,
+                  packObservation: !tracker.weeklyPacksOnly && imported.rating < normalizePackRatingTarget(tracker.ratingTarget)
+                    ? observePackRating(undefined, { ...scan, rating: imported.rating, username: normalizedUser }) : undefined,
                 },
               ]
               updatedAccounts += 1
@@ -882,6 +891,8 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                   return {
                     ...account,
                     ownershipStatus: 'missing' as const,
+                    lastImportedAt: stamp,
+                    realProfile: profile.avatarUrl ? profile : account.realProfile,
                   }
                 }),
                 updatedAt: stamp,
@@ -902,6 +913,9 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                       ? displayUser || account.name
                       : account.name,
                   rating: imported.rating,
+                  realProfile: profile.avatarUrl ? profile : account.realProfile,
+                  packObservation: !tracker.weeklyPacksOnly && account.opensPacks
+                    ? observePackRating(account.packObservation, { ...scan, rating: imported.rating, username: normalizedUser }) : account.packObservation,
                   rarityLabel: imported.rarityLabel ?? account.rarityLabel,
                   lastImportedAt: stamp,
                   ownershipStatus: 'owned' as const,

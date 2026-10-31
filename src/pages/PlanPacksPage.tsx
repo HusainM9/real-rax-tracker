@@ -4,6 +4,9 @@ import { CatalogSearchPanel } from '../components/CatalogSearchPanel'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
+import { AccountAvatar } from '../components/AccountAvatar'
+import { PlayerPackOpenings } from '../components/PlayerPackOpenings'
+import { normalizePackRatingTarget, type PackRatingTarget } from '../lib/dailyPacks'
 import { useRaxData } from '../context/RaxDataContext'
 import { createId } from '../lib/id'
 import { runWithConcurrency } from '../lib/meowbotApi'
@@ -15,7 +18,6 @@ import {
   formatMarkPackFinishedConfirmMessage,
   formatProjectedFinishDate,
   hydrateWeeklyPackOpens,
-  ICONIC_RATING_TARGET,
   latestWeeklyPackOpenDate,
   nextWeeklyPackDate,
   normalizeDailySwaps,
@@ -84,6 +86,8 @@ function PackPassRow({
   importStatus,
   onEnsureTracker,
   onUpdateRatingPerPack,
+  onUpdateRatingTarget,
+  now,
   onUpdateDailySwaps,
   onSetWeeklyPacksOnly,
   onUpdateWeeklyExtraAccounts,
@@ -105,6 +109,8 @@ function PackPassRow({
   importStatus: string
   onEnsureTracker: () => void
   onUpdateRatingPerPack: (value: number) => void
+  onUpdateRatingTarget: (value: PackRatingTarget) => void
+  now: Date
   onUpdateDailySwaps: (value: number | undefined) => void
   onSetWeeklyPacksOnly: (enabled: boolean) => void
   onUpdateWeeklyExtraAccounts: (value: number | undefined) => void
@@ -186,6 +192,7 @@ function PackPassRow({
       open={open}
       onOpenChange={setOpen}
       badge={isDone ? 'DONE' : undefined}
+      preview={tracker && !weeklyOnly && !isDone ? <PlayerPackOpenings player={pass.name} accounts={tracker.accounts} now={now} expanded={open} /> : null}
       actions={
         !tracker ? (
           <button className="button compact" type="button" onClick={onEnsureTracker}>
@@ -223,10 +230,11 @@ function PackPassRow({
     >
       {!tracker ? (
         <p className="import-hint">
-          Import Real ratings for your accounts to track progress to Iconic ({ICONIC_RATING_TARGET}).
+          Import Real ratings for your accounts and choose a target to track pack progress.
         </p>
       ) : (
         <div className="pack-tracker-body">
+          <label className="pack-rating-target"><span>Rating target</span><select aria-label={`Rating target for ${pass.name}`} value={normalizePackRatingTarget(tracker.ratingTarget)} onChange={event => onUpdateRatingTarget(normalizePackRatingTarget(Number(event.target.value)))}><option value={380}>380 · Legendary</option><option value={1380}>1,380 · Mystic</option><option value={3380}>3,380 · Iconic</option></select></label>
           <div className="pack-progress-bar" aria-hidden="true">
             <span style={{ width: `${Math.round(estimate.progressRatio * 100)}%` }} />
           </div>
@@ -611,7 +619,7 @@ function PackPassRow({
           </div>
 
           {estimate.atTarget ? (
-            <p className="import-hint plan-pass-status owned">DONE — reached Iconic rating target.</p>
+            <p className="import-hint plan-pass-status owned">DONE — reached {normalizePackRatingTarget(tracker.ratingTarget).toLocaleString()} rating target.</p>
           ) : estimate.daysRemaining === null ? (
             <p className="import-hint plan-pass-status warning">
               {weeklyOnly
@@ -649,6 +657,14 @@ export default function PlanPacksPage() {
     total: number
   } | null>(null)
   const [syncStatus, setSyncStatus] = useState('')
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const update = () => setNow(new Date())
+    const timer = setInterval(update, 30_000)
+    document.addEventListener('visibilitychange', update)
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update) }
+  }, [])
+  const [scanInfo, setScanInfo] = useState<Record<string, { fetchedAt?: string; source?: string }>>({})
   const [forceRefreshRatings, setForceRefreshRatings] = useState(false)
   const [lastRatingsCheck, setLastRatingsCheck] = useState<{
     username: string; fetchedAt: string; source?: 'real' | 'cache'
@@ -747,6 +763,7 @@ export default function PlanPacksPage() {
           : null
         return {
           pass,
+          tracker,
           estimate,
           finishLabel: weeklyFinish
             ? weeklyFinish.toLocaleDateString(undefined, {
@@ -760,7 +777,7 @@ export default function PlanPacksPage() {
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
       .sort((a, b) => {
-        // DONE (at Iconic) first, then soonest estimated finish.
+        // DONE (at target) first, then soonest estimated finish.
         if (a.estimate.atTarget !== b.estimate.atTarget) {
           return a.estimate.atTarget ? -1 : 1
         }
@@ -803,7 +820,7 @@ export default function PlanPacksPage() {
     [playerPasses, trackerByPassId],
   )
 
-  /** Sort planned players; DONE (at Iconic) stays first for finish-based sorts. */
+  /** Sort planned players; DONE (at target) stays first for finish-based sorts. */
   const sortedPlayerPasses = useMemo(() => {
     const indexed = playerPasses.map((pass, index) => ({ pass, index }))
     return indexed
@@ -902,7 +919,10 @@ export default function PlanPacksPage() {
 
   const loadPackRatings = async (username: string) => {
     const result = await fetchPackRatings(username, undefined, { forceRefresh: forceRefreshRatings })
+    if (result.username.toLowerCase() !== normalizePackUsername(username).toLowerCase()) throw new Error('Account response did not match the requested username.')
     if (result.fetchedAt && Number.isFinite(Date.parse(result.fetchedAt))) {
+      setNow(new Date())
+      setScanInfo(previous => ({ ...previous, [result.username.toLowerCase()]: { fetchedAt: result.fetchedAt, source: result.source } }))
       setLastRatingsCheck({ username: result.username, fetchedAt: result.fetchedAt, source: result.source })
     }
     return result
@@ -922,6 +942,7 @@ export default function PlanPacksPage() {
       const result = await loadPackRatings(username)
       const ratingsByExternalKey = ratingsMapFromResult(result.passes)
       const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+        scan: result,
         ensureAccounts: true,
       })
       return {
@@ -1082,6 +1103,8 @@ export default function PlanPacksPage() {
       const match = ratingsByExternalKey[pass.externalKey]
       if (!match) {
         applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+
+          scan: result,
           plannedPassId: pass.id,
           accountId: account.id,
         })
@@ -1092,6 +1115,8 @@ export default function PlanPacksPage() {
         return
       }
       applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+
+        scan: result,
         plannedPassId: pass.id,
         accountId: account.id,
       })
@@ -1146,12 +1171,15 @@ export default function PlanPacksPage() {
           if (!ratingsByExternalKey[pass.externalKey]) {
             missing += group.length
             applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+
+              scan: result,
               plannedPassId: pass.id,
             })
             return
           }
           for (const account of group) {
             const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+        scan: result,
               plannedPassId: pass.id,
               accountId: account.id,
             })
@@ -1333,7 +1361,7 @@ export default function PlanPacksPage() {
           <div>
             <p className="eyebrow">Player pack tracking</p>
             <h1>Packs</h1>
-            <p>Track progress to Iconic across your players and accounts.</p>
+            <p>Track progress toward your chosen rating targets across players and accounts.</p>
           </div>
           <div className="packs-command-actions">
             <button className="button primary compact" type="button" aria-expanded={showQuickAdd} onClick={() => setShowQuickAdd((current) => !current)}>
@@ -1365,24 +1393,19 @@ export default function PlanPacksPage() {
         </div>
       </section>
 
+      <p className="pack-opening-help">Opening indicators update when you sync/import ratings. Resets at 7am New York time. A first reading stays Unknown; rating transfers can also suggest an opening.</p>
       <details className="planning-tools packs-settings">
         <summary><span><strong>Sync and account settings</strong><small>Update ratings, manage shared accounts, and view finish order</small></span></summary>
       <section className="panel pack-sync-panel pack-sync-dock">
+        <div className="pack-sync-panel-heading">
         <div className="pack-sync-copy">
           <span className="pack-sync-kicker">Live ratings</span>
-          <h2>Sync your pack board</h2>
+          <h2>Sync account ratings</h2>
           <p className="table-sub">
-            Sync one Real account, or Sync all to update accounts two at a time — pulls live ratings
-            across every tracked player. Avg from plays pulls each player’s Real play ratings
-            (packs = {PLAYS_PER_PACK} plays) to set rating/pack.
+            Update every tracked player from one account, or sync all your accounts together.
           </p>
         </div>
-        <div className="button-row pack-sync-accounts">
-          <label className="pack-opens-toggle">
-            <input type="checkbox" aria-label="Always refresh ratings from Real" checked={forceRefreshRatings}
-              disabled={anyImportBusy} onChange={(event) => setForceRefreshRatings(event.target.checked)} />
-            <span>Always refresh from Real</span>
-          </label>
+        <div className="pack-sync-bulk-actions">
           <button
             className="button"
             type="button"
@@ -1394,7 +1417,7 @@ export default function PlanPacksPage() {
           {knownUsernames.length === 0 ? null : (
             <>
               <button
-                className="button"
+                className="button primary"
                 type="button"
                 disabled={anyImportBusy}
                 onClick={() => void syncAllKnownUsernames()}
@@ -1403,27 +1426,32 @@ export default function PlanPacksPage() {
                   ? `Syncing… ${syncAllProgress.index}/${syncAllProgress.total}`
                   : 'Sync all'}
               </button>
+            </>
+          )}
+        </div>
+        </div>
+        <label className="pack-sync-fresh-choice"><input type="checkbox" aria-label="Always refresh ratings from Real" checked={forceRefreshRatings} disabled={anyImportBusy} onChange={event=>setForceRefreshRatings(event.target.checked)}/><span><strong>Always refresh from Real</strong><small>Fetch a new reading instead of reusing a recent scan.</small></span></label>
+        <div className="pack-sync-account-grid">
               {knownUsernames.map((username) => (
+                <div className="pack-sync-account-entry" key={username.toLowerCase()}>
+                  <AccountAvatar username={username} profile={packTrackers.flatMap(tracker => tracker.accounts).find(account => account.realProfile?.username === username.toLowerCase())?.realProfile} />
+                  <div className="pack-sync-account-info"><strong>@{username}</strong><small>{scanInfo[username.toLowerCase()]?.fetchedAt?<>{scanInfo[username.toLowerCase()].source==='cache'?'Recent scan':'Fresh scan'} · <time dateTime={scanInfo[username.toLowerCase()].fetchedAt}>{new Date(scanInfo[username.toLowerCase()].fetchedAt!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time></>:'Not synced this visit'}</small></div>
                 <button
-                  key={username.toLowerCase()}
-                  className="button"
+                  className="button compact"
                   type="button"
+                  aria-label={`Sync @${username}`}
                   disabled={anyImportBusy}
                   onClick={() => void syncAllTracked(username)}
                 >
                   {syncBusyUsername.toLowerCase() === username.toLowerCase()
-                    ? `Syncing @${username}…`
-                    : `Sync @${username}`}
+                    ? 'Syncing…'
+                    : 'Sync'}
                 </button>
+                </div>
               ))}
-            </>
-          )}
         </div>
-        <p className="table-sub">Successful ownership scans can be reused for up to 30 seconds across players. Enable refresh to fetch current ratings from Real.</p>
-        {lastRatingsCheck ? <p className="import-hint">
-          {lastRatingsCheck.source === 'cache' ? 'Recent scan' : 'Real scan'} · @{lastRatingsCheck.username} ·{' '}
-          <time dateTime={lastRatingsCheck.fetchedAt}>{new Date(lastRatingsCheck.fetchedAt).toLocaleTimeString()}</time>
-        </p> : null}
+        {lastRatingsCheck ? <p className="pack-sync-footnote">Last reading · @{lastRatingsCheck.username} · <time dateTime={lastRatingsCheck.fetchedAt}>{new Date(lastRatingsCheck.fetchedAt).toLocaleTimeString()}</time></p> : null}
+        <p className="pack-sync-footnote">Avg from plays updates rating-per-pack estimates using {PLAYS_PER_PACK} plays per pack.</p>
         {knownUsernames.length === 0 ? (
           <p className="import-hint">
             Add a Real username on a shared account or pass row below to sync live ownership ratings.
@@ -1435,7 +1463,7 @@ export default function PlanPacksPage() {
       <CollapsiblePanel
         className="pack-shared-accounts-panel"
         title="Shared accounts"
-        description="Define your Real accounts once (with usernames). Editing a username renames it on every tracked pass. Apply makes these usernames the source of truth on tracked passes — missing ones are added, stale usernames are removed."
+        description="Reusable accounts for your tracked players."
         defaultOpen={false}
         badge={`${packAccountTemplates.length}`}
         actions={
@@ -1443,17 +1471,10 @@ export default function PlanPacksPage() {
             <button className="button compact" type="button" onClick={() => addPackAccountTemplate()}>
               Add shared account
             </button>
-            <button
-              className="button compact"
-              type="button"
-              disabled={packAccountTemplates.length === 0 || packTrackers.length === 0}
-              onClick={applySharedAccounts}
-            >
-              Apply shared accounts to all tracked passes
-            </button>
           </>
         }
       >
+        <div className="pack-shared-apply"><p className="table-sub">Editing a username renames it on every tracked pass. Apply adds missing shared accounts and removes usernames no longer in this list.</p><button className="button compact" type="button" disabled={packAccountTemplates.length===0||packTrackers.length===0} onClick={applySharedAccounts}>Apply to tracked players</button></div>
         {packAccountTemplates.length === 0 ? (
           <p className="import-hint">
             No shared accounts yet. Add the accounts you open packs on, then apply to tracked
@@ -1516,7 +1537,7 @@ export default function PlanPacksPage() {
         <CollapsiblePanel
           className="pack-finish-summary"
           title="Finish order"
-          description="Tracked passes sorted by soonest estimated Iconic date (using each pass’s rating/pack and opening accounts)."
+          description="Players ordered by estimated target date."
           defaultOpen={false}
           badge={`${finishOrder.length}`}
         >
@@ -1544,7 +1565,7 @@ export default function PlanPacksPage() {
                     </td>
                     <td>
                       {row.estimate.totalRating.toLocaleString()} /{' '}
-                      {ICONIC_RATING_TARGET.toLocaleString()}
+                      {normalizePackRatingTarget(row.tracker.ratingTarget).toLocaleString()}
                     </td>
                     <td>{formatDays(row.estimate.daysRemaining)}</td>
                     <td>
@@ -1618,6 +1639,8 @@ export default function PlanPacksPage() {
                 importBusyLabel={busyAll ? 'Importing…' : busyAvg ? 'Averaging…' : ''}
                 importStatus={importStatusByPass[pass.id] ?? ''}
                 onEnsureTracker={() => upsertPackTracker(pass.id)}
+                now={now}
+                onUpdateRatingTarget={value => { if (tracker) updatePackTracker(tracker.id, { ratingTarget: value }) }}
                 onUpdateRatingPerPack={(value) => {
                   if (!tracker) return
                   updatePackTracker(tracker.id, { ratingPerPack: value })
