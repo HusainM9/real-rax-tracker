@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import CollapsiblePanel from '../components/CollapsiblePanel'
 import CardRaritySelect from '../components/CardRaritySelect'
+import CollectionImportExclusions from '../components/CollectionImportExclusions'
 import { ThemedSelect } from '../components/ThemedSelect'
 import { PassIdentity } from '../components/PassIdentity'
 import { computeClaimDayResults, computeYearRollup } from '../lib/claimOptimizer'
@@ -18,10 +19,7 @@ import {
 } from '../lib/cardSort'
 import { displayRaxValue } from '../lib/displayRax'
 import { formatRemoveCardConfirmMessage } from '../lib/cardProfile'
-import {
-  formatIgnorePassConfirmMessage,
-  listIgnoredPasses,
-} from '../lib/ignoredPasses'
+import { listIgnoredPasses } from '../lib/ignoredPasses'
 import { formatRax } from '../lib/format'
 import { RARITY_TIERS } from '../lib/rarityFilter'
 import { isPlayerPassForSell } from '../lib/passKind'
@@ -116,16 +114,6 @@ export default function CardsPage() {
     )
   }
 
-  const handleIgnoreOnImport = (card: (typeof rollup.cards)[number]['card']) => {
-    if (!card.externalKey) return
-    if (!window.confirm(formatIgnorePassConfirmMessage(card))) return
-    const ignored = ignorePassOnImport(card.id)
-    if (!ignored) return
-    setRemoveStatus(
-      `Ignored ${card.name || 'pass'} on import — removed from collection. Manage under Ignored passes.`,
-    )
-  }
-
   return (
     <div className="page-stack refresh-page cards-refresh collection-workspace">
       <section className="collection-heading"><div><p className="eyebrow">Your collection</p><h1>Cards</h1><p>Review your passes and their claimable RAX.</p></div><div className="collection-heading-actions"><Link className="button" to="/entry">Add cards</Link><Link className="button primary" to="/sell">Explore if sold</Link></div></section>
@@ -213,7 +201,7 @@ export default function CardsPage() {
           </p>
         ) : null}
 
-        <div className="table-wrap">
+        <div className="table-wrap collection-table-wrap">
           <table className="collection-table">
             <thead>
               <tr>
@@ -221,7 +209,7 @@ export default function CardsPage() {
                 <th>Rarity</th>
                 <th>Breakdown</th>
                 <th>Total claimable</th>
-                <th>Actions</th>
+                <th><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -260,9 +248,9 @@ export default function CardsPage() {
                     </td>
                     <td className="collection-breakdown" data-label="Breakdown">
                       <div className="collection-breakdown-metrics">
-                      <span>Guaranteed <strong>{formatRax(displayRaxValue(cardRollup.guaranteedRax))}</strong> <small>({cardRollup.guaranteedClaims})</small></span>
-                      <span>Pro bonus <strong>{formatRax(displayRaxValue(cardRollup.proBonusRax))}</strong> <small>({cardRollup.proBonusClaims})</small></span>
-                      <span>Overlap <strong>{formatRax(displayRaxValue(cardRollup.overlapRax))}</strong> <small>({cardRollup.overlapCount})</small></span>
+                      <div><span>Guaranteed</span><strong>{formatRax(displayRaxValue(cardRollup.guaranteedRax))} <small>({cardRollup.guaranteedClaims})</small></strong></div>
+                      <div><span>Pro bonus</span><strong>{formatRax(displayRaxValue(cardRollup.proBonusRax))} <small>({cardRollup.proBonusClaims})</small></strong></div>
+                      <div><span>Overlap</span><strong>{formatRax(displayRaxValue(cardRollup.overlapRax))} <small>({cardRollup.overlapCount})</small></strong></div>
                       <small>{cardRollup.performanceCount} entries · {formatRax(displayRaxValue(cardRollup.totalBaseRax))} base</small>
                       </div>
                     </td>
@@ -271,15 +259,6 @@ export default function CardsPage() {
                     </td>
                     <td data-label="Actions">
                       <span className="button-row compact-actions">
-                        {cardRollup.card.externalKey ? (
-                          <button
-                            className="button compact"
-                            type="button"
-                            onClick={() => handleIgnoreOnImport(cardRollup.card)}
-                          >
-                            Ignore on import
-                          </button>
-                        ) : null}
                         <button
                           className="button danger compact"
                           type="button"
@@ -319,59 +298,6 @@ export default function CardsPage() {
             </button>
           </div>
         ) : null}
-      </CollapsiblePanel>
-
-      <CollapsiblePanel
-        title="Ignored passes"
-        description="Skipped on every username import for this tracker profile. Un-ignore to allow import again."
-        badge={`${ignoredPasses.length}`}
-        defaultOpen={ignoredPasses.length > 0}
-      >
-        {ignoredPasses.length === 0 ? (
-          <p className="empty">No ignored passes. Use Ignore on import on a collection card.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Pass</th>
-                  <th>Sport</th>
-                  <th>Season</th>
-                  <th>Key</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {ignoredPasses.map((pass) => (
-                  <tr key={pass.externalKey}>
-                    <td>
-                      <strong>{pass.name}</strong>
-                    </td>
-                    <td>{pass.sport || '—'}</td>
-                    <td>{pass.season || '—'}</td>
-                    <td>
-                      <small className="table-sub">{pass.externalKey}</small>
-                    </td>
-                    <td>
-                      <button
-                        className="button compact"
-                        type="button"
-                        onClick={() => {
-                          unignorePassKey(pass.externalKey)
-                          setRemoveStatus(
-                            `Removed ${pass.name} from ignore list. Re-run username import to add it back.`,
-                          )
-                        }}
-                      >
-                        Un-ignore
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </CollapsiblePanel>
 
       <CollapsiblePanel
@@ -426,6 +352,7 @@ export default function CardsPage() {
           </table>
         </div>
       </CollapsiblePanel>
+      <CollectionImportExclusions cards={rollup.cards} ignoredPasses={ignoredPasses} onIgnore={ignorePassOnImport} onAllow={unignorePassKey} />
     </div>
   )
 }
