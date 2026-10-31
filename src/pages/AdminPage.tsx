@@ -1068,23 +1068,23 @@ export default function AdminPage() {
       {activeTab === 'catalog' ? <div role="tabpanel" id="admin-view-catalog" aria-labelledby="admin-tab-catalog" className="admin-tools-view">
       <CollapsiblePanel
         title="Catalog / Real shop crawl"
-        description="Primary: crawl Real shop earningstotal into Supabase. Optional: override a catalog pass by hand."
+        description="Update the shared catalog or edit an existing pass."
         defaultOpen={false}
       >
         <div className="form-subsection admin-primary-tools">
           <div className="section-heading">
             <div>
-              <h3>Shop earningstotal crawl</h3>
+              <h3>Shop crawl</h3>
               <p className="subsection-note">
-                Crawl Real shop leaderboard → daily earnings into the catalog. Stop saves a cursor;
-                Continue resumes without redoing finished pages. Use{' '}
-                <strong>Backfill faces · top {AVATAR_BACKFILL_TOP_N}</strong> for a fast avatars-only
-                pass (college players, teams, UFC) — enter seasons first. For 2026–27, NFL, CFB,
-                and FC use season year 2026; NBA and NHL use season year 2027.
+                Update the catalog from Real shop leaderboards and daily earnings.
+                Stopping saves your progress so you can continue later.
               </p>
             </div>
           </div>
-          <div className="form-grid">
+          <div className="shop-crawl-layout">
+          <section className="shop-crawl-scope" aria-labelledby="shop-crawl-scope-title">
+          <h4 id="shop-crawl-scope-title">Crawl setup</h4>
+          <div className="form-grid shop-crawl-season-field">
             <label className="field">
               <span>Seasons (required)</span>
               <input
@@ -1097,7 +1097,7 @@ export default function AdminPage() {
               />
             </label>
           </div>
-          <div className="button-row admin-sport-toggles">
+          <div className="button-row shop-crawl-presets" aria-label="Season presets">
             <button
               className="button"
               type="button"
@@ -1128,6 +1128,11 @@ export default function AdminPage() {
             >
               2026–27 · NBA + NHL
             </button>
+          </div>
+          <p className="shop-crawl-hint">2026–27: NFL, CFB and FC use 2026; NBA and NHL use 2027.</p>
+          <fieldset className="shop-crawl-sports">
+            <legend>Sports</legend>
+            <div className="shop-crawl-sport-options">
             {LIVE_SHOP_CRAWL_SPORTS.map((sport) => {
               const checked = shopCrawl.sports.includes(sport.value)
               return (
@@ -1149,6 +1154,18 @@ export default function AdminPage() {
                 </label>
               )
             })}
+            <label className="inline-toggle">
+              <input
+                type="checkbox"
+                checked={shopCrawl.includeUfc}
+                disabled={shopCrawlBusy}
+                onChange={(event) =>
+                  setShopCrawl((current) => ({ ...current, includeUfc: event.target.checked }))
+                }
+              />
+              UFC
+            </label>
+            </div>
             <button
               className="button"
               type="button"
@@ -1162,19 +1179,10 @@ export default function AdminPage() {
             >
               All live sports
             </button>
-          </div>
-          <div className="button-row">
-            <label className="inline-toggle">
-              <input
-                type="checkbox"
-                checked={shopCrawl.includeUfc}
-                disabled={shopCrawlBusy}
-                onChange={(event) =>
-                  setShopCrawl((current) => ({ ...current, includeUfc: event.target.checked }))
-                }
-              />
-              UFC
-            </label>
+          </fieldset>
+          <fieldset className="shop-crawl-content">
+            <legend>Include</legend>
+            <div className="shop-crawl-content-options">
             <label className="inline-toggle">
               <input
                 type="checkbox"
@@ -1217,6 +1225,13 @@ export default function AdminPage() {
               />
               Avatars only
             </label>
+            </div>
+          </fieldset>
+          </section>
+          <section className="shop-crawl-run" aria-labelledby="shop-crawl-run-title">
+            <h4 id="shop-crawl-run-title">Run crawl</h4>
+            <p className="shop-crawl-hint">Choose seasons and sports, then start or resume a saved crawl.</p>
+          <div className="shop-crawl-actions">
             <button
               className="button primary"
               type="button"
@@ -1232,22 +1247,6 @@ export default function AdminPage() {
               onClick={() => void runShopEarningsCrawl('fresh')}
             >
               Start over
-            </button>
-            <button
-              className="button primary"
-              type="button"
-              disabled={shopCrawlBusy || parseShopCrawlSeasons().length === 0}
-              title={`Avatars-only shop crawl: all live sports + UFC, players + teams, top ${AVATAR_BACKFILL_TOP_N} per sport/season. Enter seasons above first.`}
-              onClick={() =>
-                void runShopEarningsCrawl('fresh', {
-                  avatarsOnly: true,
-                  backfillAllSports: true,
-                  maxBefore: avatarBackfillMaxBefore(AVATAR_BACKFILL_TOP_N),
-                  maxPages: AVATAR_BACKFILL_UI_MAX_PAGES,
-                })
-              }
-            >
-              {shopCrawlBusy ? 'Crawling…' : `Backfill faces · top ${AVATAR_BACKFILL_TOP_N}`}
             </button>
             <button
               className="button"
@@ -1274,9 +1273,35 @@ export default function AdminPage() {
                       : ''}
                 </>
               ) : (
-                <>No saved cursor yet. Stop mid-crawl or finish a chunk to persist one.</>
+                <>No saved progress yet. Stop a crawl or complete a chunk to save your place.</>
               )}
             </p>
+          </div>
+          <div className="shop-crawl-backfill">
+            <h5>Faces-only backfill</h5>
+            <p className="shop-crawl-hint">Update player faces and team badges across all sports. Earnings are skipped.</p>
+            <button
+              className="button"
+              type="button"
+              disabled={shopCrawlBusy || parseShopCrawlSeasons().length === 0}
+              title={`Avatars-only shop crawl: all live sports + UFC, players + teams, top ${AVATAR_BACKFILL_TOP_N} per sport/season. Enter seasons above first.`}
+              onClick={() =>
+                void runShopEarningsCrawl('fresh', {
+                  avatarsOnly: true,
+                  backfillAllSports: true,
+                  maxBefore: avatarBackfillMaxBefore(AVATAR_BACKFILL_TOP_N),
+                  maxPages: AVATAR_BACKFILL_UI_MAX_PAGES,
+                })
+              }
+            >
+              {shopCrawlBusy ? 'Crawling…' : `Backfill faces · top ${AVATAR_BACKFILL_TOP_N}`}
+            </button>
+          </div>
+          </section>
+          </div>
+          <details className="admin-advanced shop-crawl-recovery">
+            <summary>Resume and cursor tools</summary>
+            <p className="shop-crawl-hint">Adjust saved progress manually, skip ahead, or clear the saved cursor.</p>
             <div className="form-grid shop-crawl-cursor-grid">
               <label className="field">
                 <span>jobIndex</span>
@@ -1357,7 +1382,7 @@ export default function AdminPage() {
                 Clear saved
               </button>
             </div>
-          </div>
+          </details>
           {ufcOnlySelected ? (
             <p className="subsection-note">
               UFC shop data is All-time under season <code>2023</code> only (other years return empty).
