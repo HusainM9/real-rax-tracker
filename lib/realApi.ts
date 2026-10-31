@@ -1,6 +1,7 @@
 import Hashids from 'hashids'
 import { getRealAppToolsRows } from './realAppToolsPaste.js'
 import { guardedUpstreamFetch } from './guardedUpstreamFetch.js'
+import { inheritErrorObserver, observeProviderError } from './operationalErrorReporter.js'
 import { isHttp5xx, isTerminalRequestFailure, failureStatus, isPendingRequest } from './httpFailurePolicy.js'
 
 const DEFAULT_BASE_URL = 'https://web.realapp.com'
@@ -210,10 +211,11 @@ function abortableSignal(
   signal?: AbortSignal,
 ): { signal: AbortSignal; timedOut: () => boolean; dispose: () => void } {
   const controller = new AbortController()
+  inheritErrorObserver(signal, controller.signal)
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
-    controller.abort()
+    controller.abort(new DOMException('Request timed out.', 'TimeoutError'))
   }, timeoutMs)
   const onAbort = () => controller.abort()
   if (signal?.aborted) {
@@ -396,6 +398,7 @@ export async function realGetJson<T>(
       if (cacheKey) writeSharedPublicCache(cacheKey, parsed)
       return parsed
     } catch {
+      observeProviderError('real', { kind: 'invalid_response' }, context.signal)
       throw new RealApiError('invalid_response', 'Real API returned a non-JSON response.')
     }
   }

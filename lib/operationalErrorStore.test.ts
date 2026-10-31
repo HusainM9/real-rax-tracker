@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createOperationalError } from './operationalErrorTypes'
+vi.unmock('./operationalErrorStore')
 const mocks = vi.hoisted(() => ({ eval: vi.fn(), lrange: vi.fn(), scan: vi.fn(), get: vi.fn() }))
 vi.mock('./noRetryKv', () => ({ getNoRetryKv: () => mocks }))
 import { appendOperationalErrors, listOperationalErrors, listConfirmedRealErrors } from './operationalErrorStore'

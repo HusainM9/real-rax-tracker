@@ -10,6 +10,7 @@ export async function readResponseJson<T>(response: Response): Promise<T> {
   try {
     return JSON.parse(text) as T
   } catch {
+    reportInvalidJson(response)
     const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
     throw new Error(
       response.ok
@@ -31,6 +32,7 @@ export async function readResponseError(response: Response, fallback: string): P
       return data.error.trim()
     }
   } catch {
+    reportInvalidJson(response)
     const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
     return `${fallback} (${response.status}): ${snippet}`
   }
@@ -52,6 +54,7 @@ export async function parseFetchJson<T>(response: Response, fallback: string): P
   try {
     data = JSON.parse(text) as T
   } catch {
+    reportInvalidJson(response)
     const snippet = text.trim().replace(/\s+/g, ' ').slice(0, 160)
     throw new Error(
       response.ok
@@ -71,3 +74,13 @@ export async function parseFetchJson<T>(response: Response, fallback: string): P
 
   return data
 }
+import { errorOperation } from '../../lib/operationalErrorTypes'
+import { reportBrowserError } from './browserErrorReporter'
+
+function reportInvalidJson(response: Response): void {
+  if (!response.ok || response.headers.get('x-tracker-error-recorded') === '1') return
+  let operation = 'application'
+  try { operation = errorOperation(new URL(response.url).pathname) } catch { /* Unknown route stays unknown. */ }
+  void reportBrowserError({ kind: 'invalid_response', operation })
+}
+

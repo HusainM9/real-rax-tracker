@@ -10,6 +10,13 @@ vi.mock('../../lib/noRetryKv', async () => {
   const { kv } = await import('@vercel/kv')
   return { kv, getNoRetryKv: () => kv }
 })
+// Passive error writes are a separate external storage boundary, never a provider
+// fetch in request-count tests. Journal tests explicitly load the real store.
+vi.mock('../../lib/operationalErrorStore', () => ({
+  appendOperationalErrors: async () => 1,
+  listOperationalErrors: async () => ({ events: [], total: 0, nextCursor: null, partialSearch: false }),
+  listConfirmedRealErrors: async () => [],
+}))
 import { requestSafetyStore } from '../../lib/requestSafetyStore'
 
 // No test may accidentally use environment credentials to contact a live service.

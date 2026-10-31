@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
@@ -13,7 +14,7 @@ export const config = {
   runtime: 'edge',
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET') {
     return methodNotAllowed()
   }
@@ -56,3 +57,5 @@ export default async function handler(request: Request): Promise<Response> {
 
   return Response.json({ ok: true, username: result.username, ...envStatus })
 }
+
+export default withErrorLogging('/api/account/session', handler)

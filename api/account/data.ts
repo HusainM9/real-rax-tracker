@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import { readRequestJson } from '../../lib/cloudSyncCompression.js'
@@ -17,7 +18,7 @@ type PutBody = {
   ifUnmodifiedSince?: unknown
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   const session = await requireAccountSession(request)
   if (session instanceof Response) return session
 
@@ -101,3 +102,5 @@ export default async function handler(request: Request): Promise<Response> {
 
   return methodNotAllowed()
 }
+
+export default withErrorLogging('/api/account/data', handler)

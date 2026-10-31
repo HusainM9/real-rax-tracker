@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
@@ -32,7 +33,7 @@ function numberValue(input: unknown): number | null {
   return Number.isFinite(value) ? value : null
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return methodNotAllowed()
   }
@@ -106,3 +107,5 @@ export default async function handler(request: Request): Promise<Response> {
     )
   }
 }
+
+export default withErrorLogging('/api/admin/catalog-import', handler)

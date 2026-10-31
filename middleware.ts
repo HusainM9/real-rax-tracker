@@ -44,13 +44,14 @@ function isAdminLoginPath(pathname: string): boolean {
 function isAdminProtectedPath(pathname: string): boolean {
   return (
     pathname === '/admin' ||
+    pathname === '/api/admin/errors' ||
     pathname === '/api/admin/events' ||
     pathname === '/api/admin/users'
   )
 }
 
 function isAdminEventPost(pathname: string, method: string): boolean {
-  return pathname === '/api/admin/events' && method === 'POST'
+  return (pathname === '/api/admin/events' || pathname === '/api/admin/error-report') && method === 'POST'
 }
 
 async function hasValidSession(request: Request): Promise<boolean> {

@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import { clearSessionCookieHeader } from '../../lib/authCookie.js'
@@ -6,7 +7,7 @@ export const config = {
   runtime: 'edge',
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return methodNotAllowed()
   }
@@ -20,3 +21,5 @@ export default async function handler(request: Request): Promise<Response> {
     },
   )
 }
+
+export default withErrorLogging('/api/auth/logout', handler)

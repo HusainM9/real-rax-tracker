@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
@@ -36,7 +37,7 @@ function mergeSetCookieHeaders(...headerGroups: Record<string, string>[]): Heade
   return headers
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return methodNotAllowed()
   }
@@ -110,3 +111,5 @@ export default async function handler(request: Request): Promise<Response> {
     )
   }
 }
+
+export default withErrorLogging('/api/account/register', handler)

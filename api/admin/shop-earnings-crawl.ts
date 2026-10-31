@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
@@ -265,11 +266,13 @@ async function handleShopEarningsCrawl(request: Request): Promise<Response> {
   })
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   try {
     return await handleShopEarningsCrawl(request)
   } catch (error) {
-    console.error('shop-earnings-crawl failed', error)
+    console.error('shop-earnings-crawl failed', { recordedAt: new Date().toISOString() })
     return errorResponse(error)
   }
 }
+
+export default withErrorLogging('/api/admin/shop-earnings-crawl', handler)

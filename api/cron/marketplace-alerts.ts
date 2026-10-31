@@ -1,3 +1,5 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
+import { reportOperationalError } from '../../lib/operationalErrorReporter.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { MARKETPLACE_ALERTS_ENABLED, MARKETPLACE_SCAN_INTERVAL_MINUTES, marketplaceDisabledResponse } from '../../lib/marketplaceAvailability.js'
 import { failureStatus, isTerminalRequestFailure } from '../../lib/httpFailurePolicy.js'
@@ -144,6 +146,7 @@ async function runMarketplaceScan(
         channel: delivery.channel,
       })
     } catch (error) {
+      if (!isTerminalRequestFailure(error)) reportOperationalError({ source: 'tracker', kind: 'unexpected', operation: '/api/cron/marketplace-alerts' }, request.signal)
       const message = errorMessage(error)
       errors.push({ owner, error: message, ...(isTerminalRequestFailure(error) ? { upstreamStatus: failureStatus(error), retryable: false } : {}) })
       await saveMarketplaceScanStatus(owner, {
@@ -185,10 +188,10 @@ function streamedJson(work: () => Promise<MarketplaceScanResult>): Response {
       controller.enqueue(encoder.encode(' '))
       void work()
         .then((result) => controller.enqueue(encoder.encode(JSON.stringify(result))))
-        .catch((error) => controller.enqueue(encoder.encode(JSON.stringify({
-          ok: false,
-          error: errorMessage(error),
-        }))))
+        .catch((error) => {
+          if (!isTerminalRequestFailure(error)) reportOperationalError({ source: 'tracker', kind: 'unexpected', operation: '/api/cron/marketplace-alerts' })
+          controller.enqueue(encoder.encode(JSON.stringify({ ok: false, error: errorMessage(error) })))
+        })
         .finally(() => controller.close())
     },
   })
@@ -198,7 +201,7 @@ function streamedJson(work: () => Promise<MarketplaceScanResult>): Response {
   })
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'POST') {
     return methodNotAllowed()
   }
@@ -233,3 +236,5 @@ export default async function handler(request: Request): Promise<Response> {
     }
   })
 }
+
+export default withErrorLogging('/api/cron/marketplace-alerts', handler)

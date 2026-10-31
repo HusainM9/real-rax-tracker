@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import {
@@ -22,7 +23,7 @@ type ResetPasswordBody = {
   newPin?: unknown
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   const denied = await requireAdminSession(request)
   if (denied) return denied
 
@@ -143,3 +144,5 @@ export default async function handler(request: Request): Promise<Response> {
 
   return methodNotAllowed()
 }
+
+export default withErrorLogging('/api/admin/tracker-profile', handler)

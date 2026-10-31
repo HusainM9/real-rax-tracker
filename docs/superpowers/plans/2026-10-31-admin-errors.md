@@ -24,9 +24,9 @@
 
 Files: `lib/operationalErrorTypes.ts`, `lib/operationalErrorStore.ts`, `api/admin/errors.ts`, `api/admin/error-report.ts`, focused tests.
 
-- [ ] Write failing tests for controlled schema/redaction, untrusted browser reports, non-500 classification, append deduplication, indefinite retention, snapshot pagination and full-history filtering, legacy Real-500 readback, access control and storage-unavailable responses.
-- [ ] Implement append-only list + idempotency set via one SDK Lua command; no TTL/trimming. Read immutable history in atomic snapshot segments, filter server-side and expose a continuation cursor rather than claiming an incomplete search is exhaustive. Read and merge confirmed safety records without changing them; preserve unknown historical timestamps.
-- [ ] Run targeted tests and TypeScript. Expected: green.
+- [x] Write failing tests for controlled schema/redaction, untrusted browser reports, non-500 classification, append deduplication, indefinite retention, snapshot pagination and full-history filtering, legacy Real-500 readback, access control and storage-unavailable responses.
+- [x] Implement append-only list + idempotency set via one SDK Lua command; no TTL/trimming. Read immutable history in atomic snapshot segments, filter server-side and expose a continuation cursor rather than claiming an incomplete search is exhaustive. Read and merge confirmed safety records without changing them; preserve unknown historical timestamps.
+- [x] Run targeted tests and TypeScript. Expected: green.
 
 Interfaces: `OperationalError`, `createOperationalError`, `parseBrowserErrorReport`, `appendOperationalErrors`, `listOperationalErrors`, `listConfirmedRealErrors`. UI consumes history, summary, continuation cursor and availability. Reporters send controlled inputs only.
 
@@ -34,10 +34,10 @@ Interfaces: `OperationalError`, `createOperationalError`, `parseBrowserErrorRepo
 
 Files: `lib/operationalErrorReporter.ts`, `lib/withErrorLogging.ts`, active API exports, `lib/guardedUpstreamFetch.ts`, browser request transport and runtime listeners, relevant tests.
 
-- [ ] Write failing tests proving HTTP 400/401/429/500/503, transport/timeout and unexpected failures are recorded, logging failure cannot alter operations or retry, browser reports cannot create confirmed incidents, and server/browser duplicate reports are suppressed.
-- [ ] Use provider observation and active API wrappers without changing fetch counts, manual redirect refusal, bounded 429 backoff or existing response behavior. Log confirmed Real 500 immediately through the existing guard first. Schedule best-effort journal persistence with the installed Vercel lifetime helper; safe console fallback on journal failure. Keep logging/read routes out of recursive reporting.
-- [ ] Add authenticated browser error reporting through safeFetch, plus runtime listeners. Never send exception text, stack or response content. Retired no-network stubs and scheduling are untouched. Explicitly cover failures swallowed inside successful Marketplace streaming/partial responses.
-- [ ] Run focused boundary, policy and ingestion tests. Expected: green with unchanged provider dispatch/admission assertions.
+- [x] Write failing tests proving HTTP 400/401/429/500/503, transport/timeout and unexpected failures are recorded, logging failure cannot alter operations or retry, browser reports cannot create confirmed incidents, and server/browser duplicate reports are suppressed.
+- [x] Use provider observation and active API wrappers without changing fetch counts, manual redirect refusal, bounded 429 backoff or existing response behavior. Log confirmed Real 500 immediately through the existing guard first. Schedule best-effort journal persistence with the installed Vercel lifetime helper; safe console fallback on journal failure. Keep logging/read routes out of recursive reporting.
+- [x] Add authenticated browser error reporting through safeFetch, plus runtime listeners. Never send exception text, stack or response content. Retired no-network stubs and scheduling are untouched. Explicitly cover failures swallowed inside successful Marketplace streaming/partial responses.
+- [x] Run focused boundary, policy and ingestion tests. Expected: green with unchanged provider dispatch/admission assertions.
 
 ### 3. Admin views and error dashboard
 

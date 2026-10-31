@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { MARKETPLACE_ALERTS_ENABLED, MARKETPLACE_SCAN_INTERVAL_MINUTES, marketplaceDisabledResponse } from '../../lib/marketplaceAvailability.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
@@ -22,7 +23,7 @@ import { requireAccountSession } from '../admin/_helpers.js'
 
 export const config = { runtime: 'edge' }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed()
   if (!MARKETPLACE_ALERTS_ENABLED) return marketplaceDisabledResponse()
   const accessError = await requireEarningsSession(request, 'Marketplace')
@@ -119,3 +120,5 @@ export default async function handler(request: Request): Promise<Response> {
     await releaseMarketplaceScanLease(lease)
   }
 }
+
+export default withErrorLogging('/api/account/marketplace-scan', handler)

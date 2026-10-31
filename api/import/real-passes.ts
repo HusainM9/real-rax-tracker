@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
@@ -50,7 +51,7 @@ function errorResponse(error: unknown): Response {
   )
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return methodNotAllowed()
   }
@@ -122,3 +123,5 @@ export default async function handler(request: Request): Promise<Response> {
     return errorResponse(error)
   }
 }
+
+export default withErrorLogging('/api/import/real-passes', handler)

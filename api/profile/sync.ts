@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import { readRequestJson } from '../../lib/cloudSyncCompression.js'
@@ -32,7 +33,7 @@ function queryParams(request: Request): SyncGetQuery {
   }
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   const response = await handleSync(request)
   response.headers.set('Cache-Control', 'no-store')
   if (request.method === 'GET') response.headers.set('Deprecation', '@1793318400')
@@ -148,3 +149,5 @@ async function handleSync(request: Request): Promise<Response> {
 
   return methodNotAllowed()
 }
+
+export default withErrorLogging('/api/profile/sync', handler)

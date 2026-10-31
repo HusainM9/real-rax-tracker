@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 
 import { adminStorageConfigured } from '../../lib/adminEventStore.js'
@@ -13,7 +14,7 @@ export const config = {
   runtime: 'edge',
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   if (request.method === 'POST') {
     const appDenied = await requireAppSession(request)
     if (appDenied) return appDenied
@@ -63,3 +64,5 @@ export default async function handler(request: Request): Promise<Response> {
 
   return methodNotAllowed()
 }
+
+export default withErrorLogging('/api/admin/ownership', handler)

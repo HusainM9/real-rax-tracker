@@ -1,5 +1,6 @@
 import { RequestSafetyError } from './httpFailurePolicy.js'
 import { requestSafetyStore, type RequestSafetyStore } from './requestSafetyStore.js'
+import { observeProviderError, reportOperationalError } from './operationalErrorReporter.js'
 
 const tails = new Map<string, Promise<void>>()
 const failedToPersist = new Map<string, RequestSafetyError>()
@@ -46,29 +47,44 @@ function refuseRedirect(response: Response): Response {
 export async function guardedUpstreamFetch(provider: string, url: string, init: RequestInit = {}, store: RequestSafetyStore = requestSafetyStore): Promise<Response> {
   // Vercel Edge rejects redirect:"error" before dispatch. Manual mode prevents a
   // follow-up request (or credential forwarding); inspect and reject 3xx ourselves.
-  if (provider !== 'real') return refuseRedirect(await fetch(url, { ...init, redirect: 'manual' }))
-  if (/\/home\/ufc\/day\/?$/i.test(new URL(url).pathname)) throw paused()
+  if (provider !== 'real') {
+    let response: Response
+    try { response = await fetch(url, { ...init, redirect: 'manual' }) } catch (error) {
+      observeProviderError(provider, { kind: init.signal?.reason?.name === 'TimeoutError' ? 'timeout' : init.signal?.aborted ? 'cancelled' : 'network', method: init.method ?? 'GET' }, init.signal ?? undefined)
+      throw error
+    }
+    if (!response.ok) observeProviderError(provider, { kind: 'http', status: response.status, method: init.method ?? 'GET' }, init.signal ?? undefined)
+    return refuseRedirect(response)
+  }
+  if (/\/home\/ufc\/day\/?$/i.test(new URL(url).pathname)) {
+    observeProviderError('real', { kind: 'blocked', status: 500, operation: 'real_ufc_day' }, init.signal ?? undefined)
+    throw paused()
+  }
   const method = (init.method ?? 'GET').toUpperCase()
   const key = await familyKey(url, method)
   return serialized(key, async () => {
     const local = failedToPersist.get(key)
-    if (local) throw local
+    if (local) { observeProviderError('real', { kind: 'blocked', status: 500, endpointKey: key }, init.signal ?? undefined); throw local }
     if (init.signal?.aborted) throw init.signal.reason ?? new DOMException('Aborted', 'AbortError')
     let existing
     try { existing = await store.getFailure(key) } catch {
+      reportOperationalError({ source: 'storage', kind: 'unexpected', operation: 'real_request' }, init.signal ?? undefined)
       throw new Error('Unable to check recorded Real HTTP 500 failures. This operation was not started; try again later.')
     }
-    if (existing) throw paused(existing.incidentId)
+    if (existing) { observeProviderError('real', { kind: 'blocked', status: 500, endpointKey: key, incidentId: existing.incidentId }, init.signal ?? undefined); throw paused(existing.incidentId) }
     if (init.signal?.aborted) throw init.signal.reason ?? new DOMException('Aborted', 'AbortError')
 
     // One dispatch only. Unknown responses and other statuses never become permanent bans.
     let response: Response
     try { response = await fetch(url, { ...init, redirect: 'manual' }) } catch (error) {
+      observeProviderError('real', { kind: init.signal?.reason?.name === 'TimeoutError' ? 'timeout' : init.signal?.aborted ? 'cancelled' : 'network', method }, init.signal ?? undefined)
       if (init.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw new DOMException('Request cancelled.', 'AbortError')
       throw new Error('The Real response was not received. This operation stopped without retrying.')
     }
-    refuseRedirect(response)
-    if (response.status !== 500) return response
+    if (response.status !== 500) {
+      if (!response.ok) observeProviderError('real', { kind: 'http', status: response.status, method, endpointKey: key }, init.signal ?? undefined)
+      return refuseRedirect(response)
+    }
     const owner = crypto.randomUUID()
     const record = { owner, provider: 'real', method, status: 500, outcome: 'http_500' as const, incidentId: owner, recordedAt: new Date().toISOString() }
     const error = paused(owner)
@@ -80,6 +96,7 @@ export async function guardedUpstreamFetch(provider: string, url: string, init: 
     } catch {
       console.error('request-safety persistence failed', { provider: 'real', status: 500, incidentId: owner, recordedAt: record.recordedAt, action: 'warm_instance_block_preserved' })
     }
+    observeProviderError('real', { kind: 'http', status: 500, method, endpointKey: key, incidentId: owner, id: owner }, init.signal ?? undefined)
     throw error
   })
 }

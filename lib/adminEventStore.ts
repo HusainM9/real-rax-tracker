@@ -1,4 +1,5 @@
 import { kv } from './noRetryKv.js'
+import { reportOperationalError } from './operationalErrorReporter.js'
 import {
   createAdminEvent,
   filterAdminEvents,
@@ -39,6 +40,7 @@ export async function appendAdminEvents(inputs: AdminEventInput[]): Promise<numb
 
   const events = inputs.map((input) => createAdminEvent(input))
   for (const event of events) {
+    if (event.type === 'pass_fetch_error') reportOperationalError({ id: event.id, source: 'browser', reported: true, kind: 'unexpected', operation: '/api/import/real-earnings' })
     await kv.lpush(EVENTS_KEY, JSON.stringify(event))
     await kv.sadd(USERNAMES_KEY, event.realUsername)
     const statsKey = userStatsKey(event.realUsername)

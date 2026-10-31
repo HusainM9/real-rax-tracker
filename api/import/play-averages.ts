@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
@@ -104,7 +105,7 @@ function normalizePassInput(raw: PlayAveragePassInput): {
   }
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
       return methodNotAllowed()
@@ -227,7 +228,7 @@ export default async function handler(request: Request): Promise<Response> {
     }
   } catch (error) {
     if (isTerminalRequestFailure(error)) return requestFailureResponse(error)
-    console.error('play-averages: unhandled', error)
+    console.error('play-averages: unhandled', { recordedAt: new Date().toISOString() })
     return Response.json(
       {
         error: error instanceof Error ? error.message : 'Play average import failed.',
@@ -237,3 +238,5 @@ export default async function handler(request: Request): Promise<Response> {
     )
   }
 }
+
+export default withErrorLogging('/api/import/play-averages', handler)

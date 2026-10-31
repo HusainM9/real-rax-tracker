@@ -1,3 +1,4 @@
+import { withErrorLogging } from '../../lib/withErrorLogging.js'
 import { methodNotAllowed } from '../../lib/httpResponses.js'
 import { isTerminalRequestFailure, requestFailureResponse } from '../../lib/httpFailurePolicy.js'
 
@@ -23,7 +24,7 @@ function parseSeasonYears(value: string | null): number[] {
     .map((year) => Math.floor(year))
 }
 
-export default async function handler(request: Request): Promise<Response> {
+async function handler(request: Request): Promise<Response> {
   try {
     if (request.method !== 'GET') {
       return methodNotAllowed()
@@ -78,3 +79,5 @@ export default async function handler(request: Request): Promise<Response> {
     )
   }
 }
+
+export default withErrorLogging('/api/catalog/otd-browse', handler)
