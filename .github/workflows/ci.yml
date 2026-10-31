@@ -17,6 +17,7 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+      - name: Tests outside the deployment gate
+        run: npm run test:ci:remaining
+      - name: Deployment gate, type-check and production build
+        run: npm run build

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Outlet } from 'react-router-dom'
@@ -11,7 +12,6 @@ vi.mock('./components/RequireAccount', () => ({ default: () => <Outlet /> }))
 vi.mock('./components/RequireEarnings', () => ({ default: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./components/Layout', () => ({ default: () => <Outlet /> }))
 vi.mock('./pages/DashboardPage', () => ({ default: () => <h1>Dashboard</h1> }))
-vi.mock('./pages/EarningsPage', () => ({ default: () => <h1>Retired earnings</h1> }))
 import App from './App'
 
 it.each(['/earnings', '/earnings/access'])('redirects the retired %s bookmark to Dashboard', async (pathname) => {

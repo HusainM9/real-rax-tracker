@@ -1,6 +1,4 @@
 // Standalone daily Earnings was removed by the owner. Collection/OTD earnings are unrelated.
-export const DAILY_EARNINGS_FEATURE_ENABLED = false
-
 export function retiredEarningsResponse(scheduled = false): Response {
   // ACK stale scheduler deliveries without running reconstruction or inviting retries.
   return Response.json({

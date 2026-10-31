@@ -42,13 +42,17 @@ Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Nev
 | `npm run dev` | Start the Vite development server |
 | `npm run lint` | Run strict TypeScript checks |
 | `npm test` | Run the Vitest suite once |
+| `npm test -- src/lib/claimOptimizer.test.ts` | Run relevant tests while iterating |
+| `npm run test:ci:remaining` | CI complement of the mandatory build gate; not a replacement for full validation |
 | `npm run build` | Type-check and create the production bundle in `dist/` |
 | `npm run preview` | Preview the production bundle locally |
 | `npm run seed:catalog` | Run the shared-catalog seed script |
 | `npm run bench:collection` | Offline recorded-fixture benchmark; live import bursts are not authorized |
 | `node scripts/audit-runtime-modules.mjs` | Report conservative dependency-cleanup candidates |
 
-GitHub Actions runs lint, tests, and the production build for pushes and pull requests.
+GitHub Actions runs the CI remainder, then `npm run build`, whose prebuild runs the mandatory safety/runtime tests. Together these cover the full suite once; build also type-checks, so CI does not repeat standalone lint. `npm test` remains the simple full-suite command for local final validation.
+
+Tests default to native Node. Browser-dependent files opt into jsdom using `// @vitest-environment jsdom`; offline network denial applies to both environments. Keep Real-500, Edge redirect, authentication, data-preservation and calculation/ranking regressions. During development run the relevant files; at completion run the full suite and before release the gated build. No live Real scraping is part of these checks.
 
 See [the codebase review](docs/codebase-review.md) for measured import/calculation results, remaining correctness and data-safety findings, and benchmark privacy/limitations. Private benchmark fixtures stay in ignored `.benchmarks/` and must not be published.
 
@@ -108,7 +112,7 @@ The full variable list and safe defaults live in [`.env.example`](.env.example).
 
 `REAL_AUTH_INFO`, `REAL_SESSION_TOKEN`, and `REAL_DEVICE_UUID` are live credentials. Keep them in local or Vercel environment settings only.
 
-The standalone Earnings page was removed on October 31. Its manual/tracking APIs return HTTP 410 and snapshot endpoints acknowledge stale scheduled requests without provider or storage work, including forced requests. Earnings Vercel schedules are removed and the GitHub fallback job is disabled in source. Saved history is preserved; collection-import earnings backfill and all OTD/optimization calculations remain supported. The private earnings-named access helpers are retained because Marketplace shares them. These local edits do not change old deployments or remote schedules until a separately approved rollout.
+The standalone Earnings page was removed on October 31. Its manual/tracking APIs return HTTP 410 and snapshot endpoints acknowledge stale scheduled requests without provider or storage work, including forced requests. Their obsolete reconstruction/history workers, disconnected UI and archival tests have been removed; compatibility handlers and retirement guards remain. Earnings Vercel schedules are removed and the GitHub fallback job is disabled in source. Saved history is preserved; collection-import earnings backfill and all OTD/optimization calculations remain supported. The private earnings-named access helpers are retained because Marketplace shares them. Local cleanup does not change deployed code or remote schedules until a separately approved rollout.
 
 Marketplace alerts use Real's authenticated listing feed and the shared catalog for sport-aware player selection. Rules, Discord recipients, deduplicated matches, pending deliveries, and the last scan result are stored in KV per tracker account. The page can scan on demand and refreshes its saved feed once per minute without making another Real request. Discord DM delivery opens a private channel with that account's saved Discord user and sends from the installed bot; the bot token remains server-side and never enters the browser bundle. Once any account saves a Discord recipient, accounts without one keep their matches pending rather than falling back to another user's DMs.
 

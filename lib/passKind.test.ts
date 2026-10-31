@@ -18,6 +18,7 @@ describe('looksLikeTeamPassName', () => {
 
   it('does not treat player names as team passes', () => {
     expect(looksLikeTeamPassName('Julian Strawther')).toBe(false)
+    expect(looksLikeTeamPassName('Bruce Brown')).toBe(false)
     expect(looksLikeTeamPassName('Christian Braun')).toBe(false)
     // Initials + surname must not match city-code + mascot.
     expect(looksLikeTeamPassName('DJ Giddens')).toBe(false)

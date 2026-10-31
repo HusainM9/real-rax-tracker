@@ -22,6 +22,22 @@ it('retires manual earnings/tracking without provider or storage requests', asyn
   expect(fetcher).not.toHaveBeenCalled()
 })
 
+it('acknowledges stale snapshot delivery through the deployed Node handler without network work', async () => {
+  const fetcher = vi.fn(() => { throw new Error('Retired feature must not call upstream') })
+  vi.stubGlobal('fetch', fetcher)
+  let payload = ''
+  const response = {
+    statusCode: 0,
+    setHeader: vi.fn(),
+    end: (body?: string | Uint8Array) => { payload = typeof body === 'string' ? body : new TextDecoder().decode(body) },
+  }
+  await snapshot({ method: 'POST', url: '/api/cron/snapshot-earnings?test=1&force=1', headers: { host: 'offline.invalid' } }, response)
+  expect(response.statusCode).toBe(202)
+  expect(JSON.parse(payload)).toMatchObject({ retired: true, disabled: true })
+  expect(response.setHeader).toHaveBeenCalledWith('cache-control', 'no-store')
+  expect(fetcher).not.toHaveBeenCalled()
+})
+
 it.each([snapshot, summer, winter, fallback, finalCheck, golfSummer, golfWinter, afterSummer, afterWinter])('acknowledges a retired snapshot route, even when forced, without network work', async (handler) => {
   const fetcher = vi.fn(() => { throw new Error('Retired feature must not call upstream') })
   vi.stubGlobal('fetch', fetcher)

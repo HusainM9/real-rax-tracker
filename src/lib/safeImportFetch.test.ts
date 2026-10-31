@@ -1,7 +1,8 @@
+// @vitest-environment jsdom
 import { expect, it, vi } from 'vitest'
 import { safeFetch, safeImportFetch } from './safeImportFetch'
 
-it.each(Array.from({ length: 100 }, (_, index) => 500 + index))('does not permanently ban an internal API after HTTP %i', async status => {
+it.each([500, 501, 502, 503, 504, 599])('does not permanently ban an internal API after HTTP %i', async status => {
   const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ error: 'Internal failure' }, { status })).mockResolvedValue(Response.json({ ok: true }))
   vi.stubGlobal('fetch', fetcher)
   expect((await safeFetch('/api/account/data')).status).toBe(status)

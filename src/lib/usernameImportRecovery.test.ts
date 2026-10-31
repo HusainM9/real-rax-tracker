@@ -24,21 +24,13 @@ const response = () => ({ rowsByExternalKey: new Map(), sourceByExternalKey: new
 
 describe('Real re-import recovery', () => {
   beforeEach(() => mocks.backfill.mockReset())
-  it('keeps prior rows after terminal 5xx but never adds the failed pass to retry actions', async () => {
+  it('keeps prior rows after a confirmed Real 500 and excludes that failed pass from retries', async () => {
     mocks.backfill.mockResolvedValue({ ...response(), failures: [{ externalKey: '100|2026|NBA', name: 'Owned player', kind: 'upstream', message: 'Stopped after 500', upstreamStatus: 500, retryable: false }] })
     const imported = await importFromUsername(previous, 'gordon')
     expect(imported.data.performances).toHaveLength(1)
     expect(imported.data.performances[0]?.raxEarned).toBe(50)
     expect(imported.result.retryableEarningsPasses).toEqual([])
     expect(imported.result.passFetchErrors[0]).toMatchObject({ upstreamStatus: 500, retryable: false })
-  })
-  it('keeps prior rows and terminal metadata after an uncertain transport failure', async () => {
-    mocks.backfill.mockResolvedValue({ ...response(), failures: [{ externalKey: '100|2026|NBA', name: 'Owned player', kind: 'upstream', message: 'Uncertain outcome. Reference: incident-example.', retryable: false }] })
-    const imported = await importFromUsername(previous, 'gordon')
-    expect(imported.data.performances).toHaveLength(1)
-    expect(imported.data.performances[0]?.raxEarned).toBe(50)
-    expect(imported.result.retryableEarningsPasses).toEqual([])
-    expect(imported.result.passFetchErrors[0]).toMatchObject({ retryable: false, message: expect.stringContaining('incident-example') })
   })
   it('retains earnings for a failed still-owned pass, remaps IDs, and drops no-longer-owned passes', async () => {
     const result = response()

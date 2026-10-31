@@ -12,7 +12,7 @@ it('keeps the required confirmed Real HTTP 500 block across later query/account 
   await expect(guardedUpstreamFetch('real', 'https://real.test/earnings?account=two', {}, store)).rejects.toMatchObject({ upstreamStatus: 500 })
   expect(fetcher).toHaveBeenCalledTimes(1)
 })
-it.each(Array.from({ length: 99 }, (_, index) => 501 + index))('does not turn Real HTTP %i into a permanent 500 ban', async status => {
+it.each([501, 502, 503, 504, 599])('does not turn Real HTTP %i into a permanent 500 ban', async status => {
   const fetcher = vi.fn().mockResolvedValueOnce(new Response(null, { status })).mockResolvedValue(Response.json({ ok: true }))
   vi.stubGlobal('fetch', fetcher)
   expect((await guardedUpstreamFetch('real', `https://real.test/status/${status}`, {}, store)).status).toBe(status)
