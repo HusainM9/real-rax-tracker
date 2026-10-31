@@ -50,7 +50,7 @@ Files: `lib/realApi.ts`, `lib/realOwnershipSnapshot.ts`, `api/import/pack-rating
 - [x] Perform a separate solo diff review against the constraints, including cross-account/stale response paths and generated source package.
 - [x] Run full offline tests, TypeScript, request-boundary audit and mandatory gated production build/native ESM checks; inspect each result.
 - [x] Produce an offline/static visual proof using fictional fixtures without connecting to Real or changing account data. Keep port 5175 stopped.
-- [ ] Commit only reviewed approved source; deploy through the existing release process if its controls are available and verify the exact guarded build. No live import verification.
+- [x] Commit only reviewed approved source; deploy through the existing release process if its controls are available and verify the exact guarded build. No live import verification.
 
 ## Execution ledger
 
@@ -65,3 +65,6 @@ Files: `lib/realApi.ts`, `lib/realOwnershipSnapshot.ts`, `api/import/pack-rating
 - Static production-component preview uses fictional records, no scripts/remote assets, CSP default-src none and disabled controls at port 5180. Desktop and phone-width DOM checks found no horizontal overflow. Port 5175 stays stopped. Proof: packs-reconciled.png and cards-reconciled.png in the chat visualizations directory.
 - The other chat finished its separately owner-approved test-efficiency and dead-code cleanup; its changes were preserved and passed the same combined full suite/build. Release includes those approved changes in a separate commit.
 - Ruling: no independent reviewer or branch-integration menu; owner requires solo/current checkout and has already authorized commit/deploy. Reviewed the diff separately after implementation. No deferred product defect identified; opportunistic avatars may remain initials for opaque keys by design.
+- Release completed: Packs commit `5f243a5`, approved test/retired-source cleanup `0183fb0ce7e44f4f978892ad14846ca346efa3ae`, both pushed on the existing branch. Production `dpl_7QwjuYTS3ebzxT6WQkpWd52Aqws4` READY, exact source commit checked, canonical/team aliases assigned. Remote mandatory 201/21 gate, native ESM, 211-module request audit and build passed.
+- Hosting read-back: the three-host admission rule advances only to the verified guarded deployment; legacy unsafe hosts remain denied. Existing private access is retained, no passwords/environment/scheduler settings changed.
+- Canonical verification: `/login` returned 200, and the referenced new Packs UI chunk matched the local asset by name and SHA-256. This required three static website reads and zero application API/Real calls. Successful live import and account-avatar availability are not claimed. Port 5175 has no listener; only the inert fictional preview is served on 5180.
