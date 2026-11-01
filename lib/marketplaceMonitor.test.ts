@@ -53,6 +53,38 @@ beforeEach(() => {
 })
 
 describe('marketplace monitor', () => {
+  it('sends NHL 2027 and the five selected player IDs at the HTTP boundary even with an old FC name', async () => {
+    const { realGetJson } = await vi.importActual<typeof import('./realApi')>('./realApi')
+    const requested: { path: string; query: Record<string, string>; method: string; redirect?: string }[] = []
+    vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+      const url = new URL(input)
+      requested.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init?.method ?? 'GET', redirect: init?.redirect })
+      return Response.json({ listings: [] })
+    })
+    mocks.realGetJson.mockImplementation(realGetJson)
+    const result = await scanMarketplaceAlerts({
+      owner: 'fixture-user',
+      rules: [{
+        ...baseRule, name: 'FC owned players', sport: 'nhl', season: 2027,
+        entityScope: 'ownedPlayers', itemType: 'bulk',
+        players: [701, 702, 703, 704, 705].map(entityId => ({ entityId, name: `Hockey ${entityId}` })),
+      }],
+      context: { config: {
+        baseUrl: 'https://offline.invalid', authInfo: 'fixture!only!not-real', sessionToken: 'fixture-session',
+        deviceUuid: 'fixture-device', deviceName: 'test', deviceType: 'desktop_web', version: '35',
+        timeoutMs: 5000, concurrency: 2, maxRetries: 0, retryBaseMs: 0, retryMaxMs: 0,
+      } },
+    })
+    expect(result.requests).toBe(5)
+    expect(requested).toHaveLength(5)
+    expect(requested.every(request => request.path === '/cardmarketplacelistings' &&
+      request.query.sport === 'nhl' && request.query.season === '2027' &&
+      request.query.filterEntityType === 'player' && request.query.listingType === 'userpassfull' &&
+      request.method === 'GET' && request.redirect === 'manual')).toBe(true)
+    expect(requested.map(request => request.query.filterEntityId).sort()).toEqual(['701', '702', '703', '704', '705'])
+    expect(requested.some(request => /^(?:fc|soccer)$/.test(request.query.sport))).toBe(false)
+  })
+
   it('groups rules into one all-rarity bulk feed even when legacy item types differ', async () => {
     const result = await scanMarketplaceAlerts({
       owner: 'husain',

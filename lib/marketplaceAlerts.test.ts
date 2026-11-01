@@ -58,6 +58,24 @@ const listing: MarketplaceListing = {
 }
 
 describe('marketplace rule parsing', () => {
+  it('repairs an old generated sport name without changing NHL routing or selected players', () => {
+    expect(parseMarketplaceAlertRule({
+      ...rule, name: 'FC owned players', sport: 'nhl', season: 2027,
+      entityScope: 'ownedPlayers', players: [{ entityId: 701, name: 'Hockey player' }],
+    })).toMatchObject({
+      name: 'NHL owned players', sport: 'nhl', season: 2027,
+      players: [{ entityId: 701, name: 'Hockey player' }],
+    })
+  })
+
+  it('preserves a custom alert name and names outside the owned-player scope', () => {
+    expect(parseMarketplaceAlertRule({
+      ...rule, name: 'FC bargains for my NHL collection', sport: 'nhl', entityScope: 'ownedPlayers',
+    })?.name).toBe('FC bargains for my NHL collection')
+    expect(parseMarketplaceAlertRule({ ...rule, name: 'FC owned players', sport: 'nhl' })?.name)
+      .toBe('FC owned players')
+  })
+
   it('rejects malformed values and missing required identity fields', () => {
     expect(parseMarketplaceAlertRule(null)).toBeNull()
     expect(parseMarketplaceAlertRule('rule')).toBeNull()

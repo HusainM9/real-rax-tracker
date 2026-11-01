@@ -29,6 +29,14 @@ export function marketplaceApiSport(value: string): string {
   return sport
 }
 
+/** Generated names follow the selected sport; custom alert names stay unchanged. */
+export function marketplaceOwnedPlayersRuleName(name: string, sport: string): string {
+  const trimmed = name.trim()
+  return !trimmed || /^(?:NBA|WNBA|NFL|CFB|MLB|NHL|CBB|Golf|FC|UFC|Other) owned players$/i.test(trimmed)
+    ? `${sport.trim().toUpperCase()} owned players`
+    : trimmed
+}
+
 export type MarketplaceAlertPlayer = {
   entityId: number
   name: string
@@ -273,7 +281,9 @@ export function parseMarketplaceAlertRule(value: unknown): MarketplaceAlertRule 
   const now = new Date().toISOString()
   return {
     id,
-    name: stringValue(input.name, 100) || 'Marketplace alert',
+    name: entityScope === 'ownedPlayers'
+      ? marketplaceOwnedPlayersRuleName(stringValue(input.name, 100), sport)
+      : stringValue(input.name, 100) || 'Marketplace alert',
     enabled: input.enabled !== false,
     sport,
     season: Math.floor(season),

@@ -3,6 +3,7 @@ import './MarketplaceAlertsPage.css'
 import {
   MARKETPLACE_RARITIES,
   marketplaceListingUrl,
+  marketplaceOwnedPlayersRuleName,
   type MarketplaceAlertNotification,
   type MarketplaceAlertPlayer,
   type MarketplaceAlertRule,
@@ -330,7 +331,7 @@ function MarketplaceAlertsContent() {
       ...draft,
       entityName: `${draft.players.length} owned players`,
       id: existingRule?.id ?? createId(),
-      name: draft.name.trim() || `${draft.sport.toUpperCase()} owned players`,
+      name: marketplaceOwnedPlayersRuleName(draft.name, draft.sport),
       enabled: existingRule?.enabled ?? true,
       createdAt: existingRule?.createdAt ?? now,
       updatedAt: now,
@@ -601,7 +602,7 @@ function MarketplaceAlertsContent() {
           </div>
 
           <div className="marketplace-form-grid marketplace-essentials">
-            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, season: currentRealSeasonYear(sport), players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
+            <ThemedSelect label="Sport" value={draft.sport} options={sportOptions} onChange={(sport) => { setDraft({ ...draft, sport, name: draft.name ? marketplaceOwnedPlayersRuleName(draft.name, sport) : '', season: currentRealSeasonYear(sport), players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} />
             <label className="field"><span>Season</span><input type="number" min="2000" max="2200" value={draft.season} onChange={(event) => { setDraft({ ...draft, season: Number(event.target.value) || currentRealSeasonYear(draft.sport), players: [] }); setAvailablePlayers([]); setPlayerPickerOpen(false); setPlayersLoadedAt(null); setPlayerPage(1); setEditingPlayerId(null) }} /></label>
 
             <section className="marketplace-owned-picker marketplace-span-2">
