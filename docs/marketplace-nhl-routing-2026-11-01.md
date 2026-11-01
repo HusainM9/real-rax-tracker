@@ -16,4 +16,4 @@ Two regressions first failed with expected `NHL owned players` / actual `FC owne
 
 Focused verification: 65 tests / 3 files passed. Full offline verification: 966 tests / 136 files passed (718/104 remainder, 248/32 mandatory safety gate). TypeScript, native ESM, the 221-module request-boundary audit and production build passed. No live Real call, scan, import, notification, saved-data replacement or scheduling change was performed. This verifies request construction, not a captured production scan.
 
-Release pending.
+Released application source `d80f1164e5d398bbcd6615f33cbc169ba13d0f7f` as production `dpl_BWVTSLHZZqj1Ei2EthntnLXWNpS5`, READY with canonical/team aliases assigned. Remote mandatory gate 248/32, native ESM, 221-module audit and production build passed. Three static GETs verified canonical `MarketplaceAlertsPage-DUZkJxou.js` matched local SHA-256 `1aabae6c060b844030801e2127d95405869f0dcf7228d732f19396803d6c30b9`. Legacy-host denial was advanced to the verified release; all other firewall rules were unchanged. No application API call or live scan was triggered during release verification.
