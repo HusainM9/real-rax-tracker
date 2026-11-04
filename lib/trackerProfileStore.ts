@@ -27,6 +27,19 @@ const TRACKER_PROFILE_USERNAMES_KEY = 'rax:tracker-profile:usernames'
 const MAX_COMPRESSED_PROFILE_BYTES = 4_000_000
 const MAX_UNCOMPRESSED_PROFILE_BYTES = 15_000_000
 
+// Revision comparison and write must be one storage operation; a second tab
+// can otherwise save between a GET comparison and the following SET.
+const SAVE_ACCOUNT_REVISION = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return {0} end
+local current = cjson.decode(raw)
+if current.updatedAt ~= ARGV[1] then
+  return {2, current.updatedAt or '', current.cardCount or 0, current.performanceCount or 0}
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return {1}
+`
+
 function emptyAccountDataForUsername(username: string) {
   return {
     version: 1,
@@ -356,7 +369,8 @@ export async function saveAccountProfileForSession(input: {
   }
 
   const auth = await getProfileAuth(normalizedUsername, existing)
-  const updatedAt = new Date().toISOString()
+  const previousTime = Date.parse(existing.updatedAt)
+  const updatedAt = new Date(Math.max(Date.now(), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString()
   const stored: StoredTrackerProfile = {
     username: normalizedUsername,
     passphraseHash: auth?.passphraseHash ?? existing.passphraseHash,
@@ -367,7 +381,14 @@ export async function saveAccountProfileForSession(input: {
     ...encoded.counts,
   }
 
-  await kv.set(key, stored)
+  const written = await kv.eval<[string, string], [number, string?, number?, number?]>(SAVE_ACCOUNT_REVISION,
+    [key], [input.ifUnmodifiedSince || existing.updatedAt, JSON.stringify(stored)])
+  if (written[0] === 0) return { ok: false, storageConfigured: true, notFound: true, conflict: false }
+  if (written[0] === 2) return {
+    ok: false, storageConfigured: true, notFound: false, conflict: true,
+    existingMeta: { updatedAt: written[1] ?? '', cardCount: Number(written[2]) || 0, performanceCount: Number(written[3]) || 0 },
+  }
+  if (written[0] !== 1) throw new Error('Account storage did not confirm the save.')
   await kv.sadd(TRACKER_PROFILE_USERNAMES_KEY, normalizedUsername)
 
   return {

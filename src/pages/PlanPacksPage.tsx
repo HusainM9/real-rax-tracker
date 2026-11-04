@@ -1008,6 +1008,8 @@ export default function PlanPacksPage() {
 
     let updated = 0
     let missing = 0
+    let unchanged = 0
+    let checked = 0
     const errors: string[] = []
 
     try {
@@ -1016,23 +1018,14 @@ export default function PlanPacksPage() {
         try {
           const result = await loadPackRatings(username)
           const ratingsByExternalKey = ratingsMapFromResult(result.passes)
-          if (!ratingsByExternalKey[pass.externalKey]) {
-            missing += group.length
-            applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
-
-              scan: result,
-              plannedPassId: pass.id,
-            })
-            return
-          }
-          for (const account of group) {
-            const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
-        scan: result,
-              plannedPassId: pass.id,
-              accountId: account.id,
-            })
-            updated += applied.updatedAccounts
-          }
+          const applied = applyPackRatingsFromImport(result.username, ratingsByExternalKey, {
+            scan: result,
+            plannedPassId: pass.id,
+          })
+          checked += group.length
+          updated += applied.updatedAccounts
+          missing += applied.missingPasses
+          unchanged += applied.unchangedAccounts ?? 0
         } catch (error) {
           errors.push(
             `@${username}: ${error instanceof Error ? error.message : 'import failed'}`,
@@ -1041,11 +1034,13 @@ export default function PlanPacksPage() {
       })
 
       const parts = [
-        updated > 0
-          ? `Imported ${updated} account${updated === 1 ? '' : 's'} for ${pass.name}.`
-          : `No ratings imported for ${pass.name}.`,
+        `Checked ${checked}/${tracker.accounts.length} accounts for ${pass.name}.`,
+        `${updated} updated.`,
       ]
+      if (unchanged > 0) parts.push(`${unchanged} already current from the same or a newer scan.`)
       if (missing > 0) parts.push(`${missing} account${missing === 1 ? '' : 's'} do not own this pass.`)
+      const skipped = tracker.accounts.length - accounts.length
+      if (skipped > 0) parts.push(`${skipped} account${skipped === 1 ? ' has' : 's have'} no Real username.`)
       if (errors.length > 0) parts.push(errors.join(' '))
       setImportStatusByPass((current) => ({
         ...current,

@@ -89,6 +89,7 @@ export async function decodeAccountDataPayload(
 export async function loadAccountData(): Promise<AccountDataLoadResult> {
   const response = await safeFetch('/api/account/data', {
     credentials: 'include',
+    cache: 'no-store',
   })
 
   if (response.status === 503) {

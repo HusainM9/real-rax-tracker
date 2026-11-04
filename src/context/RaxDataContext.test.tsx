@@ -36,6 +36,107 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers() })
 
 describe('account data safety', () => {
+  it('returns all five applied account counts even when React batches the imports', async () => {
+    await render()
+    const users = ['main', 'alt1', 'alt2', 'alt3', 'alt4']
+    await act(async () => latest.importJson(JSON.stringify({ ...createEmptyData(),
+      plannedPasses: [{ id: 'p', externalKey: '1|2027|NHL', name: 'Player', sport: 'NHL', season: '2026-27', passKind: 'player', simulatedRarityLabel: 'Iconic 1', totalBaseRax: 1, rowCount: 1, source: 'catalog', progress: 'not-started', addedAt: '2026-11-05' }],
+      packTrackers: [{ id: 't', plannedPassId: 'p', accounts: users.map((username, i) => ({ id: `a${i}`, username, name: username, rating: 10, opensPacks: true })) }],
+    })))
+    const counts: number[] = []
+    await act(async () => {
+      users.forEach((username, i) => counts.push(latest.applyPackRatingsFromImport(username,
+        { '1|2027|NHL': { rating: 100 + i } },
+        { plannedPassId: 'p', accountId: `a${i}`, scan: { fetchedAt: '2026-11-05T12:00:00Z' } },
+      ).updatedAccounts))
+    })
+    expect(counts).toEqual([1, 1, 1, 1, 1])
+    expect(latest.data.packTrackers![0]!.accounts.map(account => account.rating)).toEqual([100, 101, 102, 103, 104])
+    const beforeRepeat = latest.data
+    let repeat: ReturnType<RaxDataContextValue['applyPackRatingsFromImport']> | undefined
+    await act(async () => { repeat = latest.applyPackRatingsFromImport('main', { '1|2027|NHL': { rating: 999 } },
+      { scan: { fetchedAt: '2026-11-05T12:00:00Z' } }) })
+    expect(repeat).toMatchObject({ updatedAccounts: 0, unchangedAccounts: 1 })
+    expect(latest.data.packTrackers![0]!.accounts[0]!.rating).toBe(100)
+    expect(latest.data).toBe(beforeRepeat)
+  })
+
+  it('reconciles disjoint cloud changes once while keeping imports made during the conflict read', async () => {
+    await render()
+    let finishRead!: (value: ReturnType<typeof loaded>) => void
+    mocks.save.mockRejectedValueOnce(new AccountDataConflictError('remote-revision'))
+    mocks.load.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+    await act(async () => latest.setSettings({ savedUsername: 'local import' }))
+    await tick()
+    expect(mocks.load).toHaveBeenCalledTimes(2)
+    await act(async () => latest.setSettings({ proBonusEnabled: false }))
+    const remote = loaded('alice', 'remote-revision')
+    remote.data.cards.push({ ...remote.data.cards[0]!, id: 'remote-card', name: 'Cloud addition' })
+    await act(async () => finishRead(remote))
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+    expect(mocks.save.mock.calls[1]?.[1]).toEqual({ ifUnmodifiedSince: 'remote-revision' })
+    expect(mocks.save.mock.calls[1]?.[0]).toMatchObject({ settings: { savedUsername: 'local import', proBonusEnabled: false } })
+    expect(latest.data.cards.map(card => card.id)).toEqual(['alice', 'remote-card'])
+    expect(latest.data.settings.savedUsername).toBe('local import')
+    expect(latest.storageWarning).toBeNull()
+    await tick()
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps both copies protected when a freshly loaded cloud change overlaps the local edit', async () => {
+    await render()
+    const remote = loaded('alice', 'remote-revision')
+    remote.data.settings.savedUsername = 'different cloud edit'
+    mocks.load.mockResolvedValueOnce(remote)
+    mocks.save.mockRejectedValueOnce(new AccountDataConflictError('remote-revision'))
+    await act(async () => latest.setSettings({ savedUsername: 'local edit' }))
+    await tick()
+    expect(mocks.load).toHaveBeenCalledTimes(2)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(latest.data.settings.savedUsername).toBe('local edit')
+    expect(latest.storageWarning).toMatch(/paused|another device/i)
+  })
+
+  it('stops after one reconciliation if the conditional save conflicts again', async () => {
+    await render()
+    const remote = loaded('alice', 'remote-revision')
+    remote.data.cards.push({ ...remote.data.cards[0]!, id: 'remote-card' })
+    mocks.load.mockResolvedValueOnce(remote)
+    mocks.save.mockRejectedValue(new AccountDataConflictError('racing-revision'))
+    await act(async () => latest.setSettings({ savedUsername: 'local edit' }))
+    await tick()
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+    expect(mocks.load).toHaveBeenCalledTimes(2)
+    expect(latest.storageWarning).toMatch(/paused/i)
+    expect(latest.data.settings.savedUsername).toBe('local edit')
+    await tick()
+    expect(mocks.save).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not start reconciliation on network errors', async () => {
+    await render()
+    mocks.save.mockRejectedValueOnce(new Error('Connection lost'))
+    await act(async () => latest.setSettings({ savedUsername: 'local edit' }))
+    await tick()
+    expect(mocks.load).toHaveBeenCalledTimes(1)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(latest.storageWarning).toMatch(/paused/i)
+  })
+
+  it('ignores an old-account conflict read completed after switching accounts', async () => {
+    await render()
+    let finishRead!: (value: ReturnType<typeof loaded>) => void
+    mocks.load.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+    mocks.save.mockRejectedValueOnce(new AccountDataConflictError('remote-revision'))
+    await act(async () => latest.setSettings({ savedUsername: 'alice edit' }))
+    await tick()
+    mocks.username = 'bob'; mocks.load.mockResolvedValueOnce(loaded('bob', 'bob-revision'))
+    await render()
+    await act(async () => finishRead(loaded('alice', 'remote-revision')))
+    expect(latest.data.cards[0]?.name).toBe('bob')
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+  })
+
   it('persists pack targets and records only fresh imported evidence for the matching account', async () => {
     await render()
     await act(async () => latest.importJson(JSON.stringify({ ...createEmptyData(),

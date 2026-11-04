@@ -1,11 +1,13 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type SetStateAction,
 } from 'react'
 import {
   buildSavedCardProfile,
@@ -27,6 +29,7 @@ import {
   storageWarningMessage,
 } from '../lib/trackerPersistence'
 import { loadAccountData, saveAccountData, AccountDataConflictError, AccountAuthRequiredError } from '../lib/accountData'
+import { mergeAccountData } from '../lib/accountDataMerge'
 import { useAccountAuth } from './AccountAuthContext'
 import type { UsernameImportResult } from '../lib/usernameImport'
 import { createId } from '../lib/id'
@@ -72,7 +75,15 @@ export function RaxDataProvider({ children }: { children: ReactNode }) {
 function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
   const { username: accountUsername, devBypass: accountDevBypass, refresh: refreshAccount } =
     useAccountAuth()
-  const [data, setData] = useState<RaxTrackerData>(createEmptyData)
+  const [data, commitData] = useState<RaxTrackerData>(createEmptyData)
+  const dataRef = useRef(data)
+  // Apply mutations once, synchronously, so batched imports return accurate counts
+  // and asynchronous saves always see the newest local snapshot.
+  const setData = useCallback((next: SetStateAction<RaxTrackerData>) => {
+    const updated = typeof next === 'function' ? next(dataRef.current) : next
+    dataRef.current = updated
+    commitData(updated)
+  }, [])
   const [storageReady, setStorageReady] = useState(false)
   const [storageWarning, setStorageWarning] = useState<string | null>(null)
   const [cloudIssue, setCloudIssue] = useState<string | null>(null)
@@ -80,6 +91,7 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
     accountUsername: accountUsername?.trim().toLowerCase() ?? '',
   }, [accountUsername, accountDevBypass])
   const accountUpdatedAtRef = useRef<string | undefined>(undefined)
+  const accountBaseRef = useRef<RaxTrackerData | null>(null)
   const skipNextAccountSaveRef = useRef(true)
   const cloudSaveBlockedRef = useRef(true)
   const saveQueueRef = useRef(Promise.resolve())
@@ -101,6 +113,7 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
           const loaded = await loadAccountData()
           if (cancelled) return
           accountUpdatedAtRef.current = loaded.meta.updatedAt
+          accountBaseRef.current = loaded.data
           cloudSaveBlockedRef.current = false
           setCloudIssue(null)
           skipNextAccountSaveRef.current = true
@@ -159,9 +172,28 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
       const save = async () => {
         if (!liveRef.current || cloudSaveBlockedRef.current) return
         try {
-          const result = await saveAccountData(data, { ifUnmodifiedSince: accountUpdatedAtRef.current })
+          let snapshot = dataRef.current
+          if (snapshot === accountBaseRef.current) return
+          let result
+          try {
+            result = await saveAccountData(snapshot, { ifUnmodifiedSince: accountUpdatedAtRef.current })
+          } catch (error) {
+            if (!(error instanceof AccountDataConflictError) || !accountBaseRef.current || !liveRef.current) throw error
+            // One storage-only reconciliation, not a retry loop or another Real scan.
+            const remote = await loadAccountData()
+            if (!liveRef.current) return
+            if (!remote.meta.updatedAt || remote.meta.updatedAt === accountUpdatedAtRef.current) throw error
+            const merged = mergeAccountData(accountBaseRef.current, dataRef.current, remote.data)
+            if (!merged.ok) throw error
+            snapshot = syncPlanProgressFromPackTrackers(merged.data)
+            accountUpdatedAtRef.current = remote.meta.updatedAt
+            accountBaseRef.current = remote.data
+            setData(snapshot)
+            result = await saveAccountData(snapshot, { ifUnmodifiedSince: remote.meta.updatedAt })
+          }
           if (!liveRef.current) return
           accountUpdatedAtRef.current = result.meta.updatedAt
+          accountBaseRef.current = snapshot
           setCloudIssue(null)
         } catch (error) {
           if (!liveRef.current) return
@@ -172,7 +204,7 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
             return
           }
           setCloudIssue(error instanceof AccountDataConflictError
-            ? 'Another device changed your collection. Cloud saving is paused to protect both copies. Export your local backup before reloading from your account.'
+            ? 'Conflicting changes were saved from another tab or device. Cloud saving is paused to protect both copies. Export your local backup before reloading from your account.'
             : 'Could not confirm the account save. Cloud saving is paused; export a backup before reloading from your account.')
           console.warn('Could not save account data:', error)
         }
@@ -824,10 +856,12 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
         const stamp = scan?.fetchedAt && Number.isFinite(Date.parse(scan.fetchedAt)) ? scan.fetchedAt : nowIso()
         let updatedAccounts = 0
         let missingPasses = 0
+        let unchangedAccounts = 0
 
         setData((current) => {
           updatedAccounts = 0
           missingPasses = 0
+          unchangedAccounts = 0
           const plannedById = new Map(
             (current.plannedPasses ?? []).map((pass) => [pass.id, pass]),
           )
@@ -849,8 +883,12 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
                 .replace(/^@/, '')
                 .trim()
                 .toLowerCase()
-              return accountUser === normalizedUser
-                && !(scan?.fetchedAt && account.lastImportedAt && Date.parse(scan.fetchedAt) <= Date.parse(account.lastImportedAt))
+              if (accountUser !== normalizedUser) return false
+              if (scan?.fetchedAt && account.lastImportedAt && Date.parse(scan.fetchedAt) <= Date.parse(account.lastImportedAt)) {
+                unchangedAccounts += 1
+                return false
+              }
+              return true
             })
 
             if (matchingAccounts.length === 0) {
@@ -922,10 +960,11 @@ function ScopedRaxDataProvider({ children }: { children: ReactNode }) {
             }
           })
 
+          if (nextTrackers.every((tracker, index) => tracker === current.packTrackers?.[index])) return current
           return syncPlanProgressFromPackTrackers({ ...current, packTrackers: nextTrackers })
         })
 
-        return { updatedAccounts, missingPasses }
+        return { updatedAccounts, missingPasses, unchangedAccounts }
       },
       removePackTrackerAccount: (trackerId, accountId) => {
         setData((current) =>

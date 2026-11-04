@@ -46,7 +46,7 @@ async function handler(request: Request): Promise<Response> {
       dataEncoding: transfer.dataEncoding,
       dataBlob: transfer.dataBlob,
       data: transfer.dataEncoding === 'gzip-base64' ? undefined : transfer.data,
-    })
+    }, { headers: { 'Cache-Control': 'private, no-store' } })
   }
 
   if (request.method === 'PUT') {

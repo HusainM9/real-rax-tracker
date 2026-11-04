@@ -82,3 +82,23 @@ it('retains weekly date logging and extra account estimates behind the settings 
   expect(settings.textContent).toContain('Add open date')
   expect(settings.textContent).toContain('Use daily packs')
 })
+
+it('checks all five linked accounts and reports an already-current scan separately from updates', async () => {
+  data.packTrackers![0]!.accounts = ['main', 'alt1', 'alt2', 'alt3', 'alt4'].map((username, i) =>
+    ({ id: `a${i}`, username, name: username, rating: 10, opensPacks: true }))
+  mocks.fetch.mockImplementation(async (username: string) => ({ username, passCount: 1,
+    passes: [{ externalKey: '1|2027|NBA', rating: 100 }], fetchedAt: '2026-11-05T12:00:00Z', source: 'cache' }))
+  mocks.apply.mockImplementation((username?: string) => username === 'alt4'
+    ? { updatedAccounts: 0, missingPasses: 0, unchangedAccounts: 1 }
+    : { updatedAccounts: 1, missingPasses: 0, unchangedAccounts: 0 })
+  await render(); await expandPlayer()
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('.pack-tracker-row button')).find(item => item.textContent?.trim() === 'Import all')!
+  expect(button).toBeDefined()
+  await act(async () => button.click())
+  expect(mocks.fetch).toHaveBeenCalledTimes(5)
+  expect(mocks.fetch.mock.calls.map(call => call[0]).sort()).toEqual(['alt1', 'alt2', 'alt3', 'alt4', 'main'])
+  expect(mocks.apply).toHaveBeenCalledTimes(5)
+  expect(container.querySelector('.pack-tracker-row .import-status')?.textContent).toContain('Checked 5/5 accounts')
+  expect(container.querySelector('.pack-tracker-row .import-status')?.textContent).toContain('4 updated')
+  expect(container.querySelector('.pack-tracker-row .import-status')?.textContent).toContain('1 already current')
+})
