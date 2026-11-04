@@ -57,6 +57,13 @@ export function observePackRating(previous: PackObservation | undefined, reading
 }
 export function openingStatus(observation: PackObservation | undefined, username: string, now = new Date()): 'unknown' | 'not-detected' | 'likely-opened' {
   if (!observation || observation.username !== username.trim().replace(/^@/, '').toLowerCase()
-    || observation.day !== packDay(now) || Date.parse(observation.lastCheckedAt) > +now) return 'unknown'
-  return observation.likelyOpenedAt ? 'likely-opened' : observation.comparisons > 0 ? 'not-detected' : 'unknown'
+    || observation.day !== packDay(now)) return 'unknown'
+  if (observation.likelyOpenedAt) {
+    const opened = Date.parse(observation.likelyOpenedAt)
+    // Later imports must not hide evidence already established in this reset
+    // window merely because their newest timestamp is ahead of the client clock.
+    return Number.isFinite(opened) && opened <= +now && packDay(new Date(opened)) === observation.day
+      ? 'likely-opened' : 'unknown'
+  }
+  return Date.parse(observation.lastCheckedAt) <= +now && observation.comparisons > 0 ? 'not-detected' : 'unknown'
 }

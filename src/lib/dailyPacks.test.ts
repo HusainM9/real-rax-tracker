@@ -8,6 +8,27 @@ const reading = (rating: number, fetchedAt = '2026-10-30T15:00:00Z', username = 
 })
 
 describe('pack opening evidence without extra requests', () => {
+  it.each([
+    ['2026-11-05T13:00:00Z', '2026-11-05T14:00:00Z', '2026-11-05T15:00:00Z', '2026-11-06T11:59:59Z', '2026-11-06T12:00:00Z'],
+    ['2027-03-14T12:00:00Z', '2027-03-14T13:00:00Z', '2027-03-14T14:00:00Z', '2027-03-15T10:59:59Z', '2027-03-15T11:00:00Z'],
+  ])('keeps confirmed evidence through later imports and reloads until the next 7am reset (%s)', (baselineAt, openedAt, checkedAt, beforeReset, resetAt) => {
+    const first = observePackRating(undefined, reading(100, baselineAt))!
+    const opened = observePackRating(first, reading(110, openedAt))!
+    const later = observePackRating(opened, reading(90, checkedAt))!
+    // A later server reading must not hide an already-established opening when
+    // it is just ahead of the browser's clock.
+    expect(openingStatus(later, 'main', new Date(Date.parse(checkedAt) - 500))).toBe('likely-opened')
+    const account = { id: 'a', username: 'main', name: 'Main', rating: 90, opensPacks: true, packObservation: later }
+    const restored = normalizeData(JSON.parse(JSON.stringify({ ...createEmptyData(), packTrackers: [
+      { id: 't', plannedPassId: 'p', accounts: [account] },
+    ] }))).packTrackers![0]!.accounts[0]!.packObservation!
+    expect(restored.baselineAt).toBe(baselineAt)
+    expect(restored.likelyOpenedAt).toBe(openedAt)
+    expect(openingStatus(restored, 'main', new Date(beforeReset))).toBe('likely-opened')
+    expect(openingStatus(restored, 'main', new Date(resetAt))).toBe('unknown')
+    expect(openingStatus(restored, 'other', new Date(beforeReset))).toBe('unknown')
+  })
+
   it('uses 7am New York time across daylight saving transitions', () => {
     expect(packDay(new Date('2026-10-30T10:59:59Z'))).toBe('2026-10-29')
     expect(packDay(new Date('2026-10-30T11:00:00Z'))).toBe('2026-10-30')
