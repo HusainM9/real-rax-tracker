@@ -1,5 +1,6 @@
 import { compactTrackerProfileForCloudSync } from '../../lib/cloudSyncPayload'
 import type { RaxTrackerData } from '../types/rax'
+import { hydratePackObservation } from './dailyPacks'
 
 const missing = Symbol('missing')
 const conflict = Symbol('conflict')
@@ -27,9 +28,21 @@ function merge(base: unknown, local: unknown, remote: unknown, key = ''): unknow
   if (equal(local, base)) return remote
   if (equal(remote, base) || equal(local, remote)) return local
   // Entity timestamps describe the edits merged below; they are not user content.
-  if (key === 'updatedAt' && typeof local === 'string' && typeof remote === 'string' &&
+  if ((key === 'updatedAt' || key === 'lastImportedAt') && typeof local === 'string' && typeof remote === 'string' &&
     Number.isFinite(Date.parse(local)) && Number.isFinite(Date.parse(remote))) {
     return Date.parse(local) >= Date.parse(remote) ? local : remote
+  }
+  if (key === 'packObservation') {
+    const ours = hydratePackObservation(local), theirs = hydratePackObservation(remote)
+    if (!ours || !theirs || ours.username !== theirs.username || ours.day !== theirs.day) return conflict
+    const latest = Date.parse(ours.lastCheckedAt) >= Date.parse(theirs.lastCheckedAt) ? ours : theirs
+    const baseline = Date.parse(ours.baselineAt) <= Date.parse(theirs.baselineAt) ? ours : theirs
+    const openings = [ours.likelyOpenedAt, theirs.likelyOpenedAt].filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(left) - Date.parse(right))
+    // Combine recorded evidence, without inventing a new comparison or moving it
+    // between accounts/reset days. Content such as different ratings still conflicts.
+    return { ...latest, baselineAt: baseline.baselineAt, baselineRating: baseline.baselineRating,
+      comparisons: Math.max(ours.comparisons, theirs.comparisons), likelyOpenedAt: openings[0] }
   }
   if (record(base) && record(local) && record(remote)) {
     const entries: [string, unknown][] = []

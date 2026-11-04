@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mergeAccountData } from './accountDataMerge'
 import { createEmptyData } from './storage'
+import { observePackRating } from './dailyPacks'
 
 const base = () => ({ ...createEmptyData(), cards: [
   { id: 'one', name: 'One', sport: 'NHL' as const, season: '2026-27', notes: '', createdAt: '2026-11-05' },
@@ -8,6 +9,27 @@ const base = () => ({ ...createEmptyData(), cards: [
 ] })
 
 describe('conservative account reconciliation', () => {
+  it('combines import metadata for identical ratings and retains the earliest established opening in the same reset day', () => {
+    const first = observePackRating(undefined, { username: 'main', rating: 100, fetchedAt: '2026-11-05T13:00:00Z', startedAt: '2026-11-05T13:00:00Z' })!
+    const original = { ...base(), packTrackers: [{ id: 't', plannedPassId: 'p', accounts: [
+      { id: 'a', name: 'Main', username: 'main', rating: 100, opensPacks: true, lastImportedAt: first.lastCheckedAt, packObservation: first },
+    ], ratingPerPack: 10, createdAt: '2026-11-05', updatedAt: first.lastCheckedAt }] }
+    const local = structuredClone(original), remote = structuredClone(original)
+    for (const [data, stamp] of [[local, '2026-11-05T15:00:00Z'], [remote, '2026-11-05T14:00:00Z']] as const) {
+      const account = data.packTrackers[0]!.accounts[0]!
+      account.rating = 110; account.lastImportedAt = stamp
+      account.packObservation = observePackRating(first, { username: 'main', rating: 110, fetchedAt: stamp, startedAt: stamp })!
+      data.packTrackers[0]!.updatedAt = stamp
+    }
+    const result = mergeAccountData(original, local, remote)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw Error('Same rating with independent scan metadata should reconcile')
+    expect(result.data.packTrackers![0]!.accounts[0]).toMatchObject({ rating: 110, lastImportedAt: '2026-11-05T15:00:00Z',
+      packObservation: { day: '2026-11-05', baselineAt: '2026-11-05T13:00:00Z', lastCheckedAt: '2026-11-05T15:00:00Z', likelyOpenedAt: '2026-11-05T14:00:00Z' } })
+    remote.packTrackers[0]!.accounts[0]!.rating = 120
+    expect(mergeAccountData(original, local, remote).ok).toBe(false)
+  })
+
   it('combines independent fields and entries, preserving the local-only caches', () => {
     const original = base(), local = structuredClone(original), remote = structuredClone(original)
     local.settings.savedUsername = 'local'
