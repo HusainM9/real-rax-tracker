@@ -22,6 +22,10 @@ vi.mock('@vercel/kv', () => ({
       calls.get.push(key)
       return values.get(key) ?? null
     },
+    pttl: async (key: string) => {
+      expire(key)
+      return values.has(key) ? (expires.get(key) ?? Infinity) - Date.now() : -2
+    },
     mget: async (...keys: string[]) => {
       calls.mget.push(keys)
       return keys.map((key) => values.get(key) ?? null)
@@ -125,6 +129,61 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('marketplace alert storage', () => {
+  it('waits for a slightly early scheduled tick instead of losing the next four-minute scan', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-09T02:00:01.600Z'))
+    const first = await acquireMarketplaceScanLease()
+    await vi.advanceTimersByTimeAsync(6_000)
+    await releaseMarketplaceScanLease(first!)
+    await vi.advanceTimersByTimeAsync(233_000)
+    let settled = false
+    const next = acquireMarketplaceScanLease({ waitForCooldown: true }).then(value => {
+      settled = true
+      return value
+    })
+    await vi.advanceTimersByTimeAsync(999)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await next).toEqual(expect.any(String))
+  })
+
+  it('does not wait for a two-minute legacy scheduler delivery', async () => {
+    vi.useFakeTimers()
+    const first = await acquireMarketplaceScanLease()
+    await releaseMarketplaceScanLease(first!)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(await acquireMarketplaceScanLease({ waitForCooldown: true })).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cancels a pending scheduled admission without claiming another scan', async () => {
+    vi.useFakeTimers()
+    const first = await acquireMarketplaceScanLease()
+    await releaseMarketplaceScanLease(first!)
+    await vi.advanceTimersByTimeAsync(239_000)
+    const abort = new AbortController()
+    const pending = acquireMarketplaceScanLease({ waitForCooldown: true, signal: abort.signal })
+    const outcome = pending.then(() => null, error => error)
+    await vi.advanceTimersByTimeAsync(0)
+    abort.abort()
+    expect(await outcome).toMatchObject({ name: 'AbortError' })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(calls.set).toHaveLength(2)
+  })
+
+  it('admits one of two scheduled arrivals waiting for the same cooldown', async () => {
+    vi.useFakeTimers()
+    const first = await acquireMarketplaceScanLease()
+    await releaseMarketplaceScanLease(first!)
+    await vi.advanceTimersByTimeAsync(239_000)
+    const arrivals = Promise.all([
+      acquireMarketplaceScanLease({ waitForCooldown: true }),
+      acquireMarketplaceScanLease({ waitForCooldown: true }),
+    ])
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect((await arrivals).filter(Boolean)).toHaveLength(1)
+  })
+
   it('admits only one scan per four minutes from its start, even when a two-minute trigger persists', async () => {
     vi.useFakeTimers()
     const first = await acquireMarketplaceScanLease()

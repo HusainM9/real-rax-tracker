@@ -87,6 +87,7 @@ async function handler(request: Request): Promise<Response> {
       deliveryChannel: delivery.channel,
       error: null,
       warning: [scan.warning, deliveryWarning].filter(Boolean).join(' ') || null,
+      feedCoverage: scan.feedCoverage,
     }
     await saveMarketplaceScanStatus(session.username, scanStatus, source)
     return Response.json({

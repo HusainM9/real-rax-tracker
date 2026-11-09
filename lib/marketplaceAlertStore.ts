@@ -5,6 +5,7 @@ import {
   parseMarketplaceAlertRule,
   type MarketplaceAlertNotification,
   type MarketplaceAlertRule,
+  type MarketplaceFeedCoverage,
 } from './marketplaceAlerts.js'
 
 const OWNERS_KEY = 'rax:marketplace-alerts:owners'
@@ -37,6 +38,7 @@ export type MarketplaceScanStatus = {
   deliveryChannel: string | null
   error: string | null
   warning?: string | null
+  feedCoverage?: MarketplaceFeedCoverage[]
 }
 
 export type MarketplaceScanLogEntry = MarketplaceScanStatus & {
@@ -120,9 +122,38 @@ export function marketplaceAlertStorageConfigured(): boolean {
  * QStash retries failed deliveries, so one slow scan can otherwise create a
  * thundering herd of scans. The start gate also covers legacy two-minute triggers.
  */
-export async function acquireMarketplaceScanLease(): Promise<string | null> {
+export async function acquireMarketplaceScanLease(options: {
+  waitForCooldown?: boolean
+  signal?: AbortSignal
+} = {}): Promise<string | null> {
+  options.signal?.throwIfAborted()
   if (!marketplaceAlertStorageConfigured()) return null
-  if (await kv.get(SCAN_COOLDOWN_KEY)) return null
+  if (await kv.get(SCAN_COOLDOWN_KEY)) {
+    if (!options.waitForCooldown) return null
+    const remainingMs = await kv.pttl(SCAN_COOLDOWN_KEY)
+    // Scheduler/storage jitter can put the next four-minute tick just before
+    // expiry. Wait once rather than skip a whole tick; never shorten admission
+    // or wait for genuinely early deliveries. No provider call/retry occurs here.
+    if (remainingMs > 5_000 || remainingMs === -1) return null
+    if (remainingMs > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const signal = options.signal
+        const abort = () => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', abort)
+          reject(new DOMException('Aborted', 'AbortError'))
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', abort)
+          resolve()
+        }, remainingMs)
+        signal?.addEventListener('abort', abort, { once: true })
+        if (signal?.aborted) abort()
+      })
+    }
+    if (await kv.get(SCAN_COOLDOWN_KEY)) return null
+  }
+  options.signal?.throwIfAborted()
   const token = crypto.randomUUID()
   const claimed = await kv.set(SCAN_LEASE_KEY, token, {
     ex: SCAN_LEASE_TTL_SECONDS,

@@ -7,6 +7,7 @@ import {
   type MarketplaceAlertNotification,
   type MarketplaceAlertPlayer,
   type MarketplaceAlertRule,
+  type MarketplaceFeedCoverage,
   type MarketplaceRarity,
 } from '../../lib/marketplaceAlerts'
 import type { MarketplaceScanLogEntry, MarketplaceScanStatus } from '../../lib/marketplaceAlertStore'
@@ -79,6 +80,21 @@ function numberOrNull(value: string): number | null {
 
 function createId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `market-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function ScanCoverage({ feeds }: { feeds?: MarketplaceFeedCoverage[] }) {
+  const sports = new Map<string, { listings: number; requests: number; matches: number }>()
+  for (const feed of feeds ?? []) {
+    const key = `${feed.sport.toUpperCase()} ${feed.season}`
+    const totals = sports.get(key) ?? { listings: 0, requests: 0, matches: 0 }
+    totals.listings += feed.checkedListings
+    totals.requests += feed.requests
+    totals.matches += feed.matches
+    sports.set(key, totals)
+  }
+  return <>{[...sports].map(([label, totals]) => <span className="marketplace-scan-coverage" key={label}>
+    {label} · {totals.listings} listings · {totals.requests} requests · {totals.matches} matches
+  </span>)}</>
 }
 
 function hasCustomPlayerFilters(player: MarketplaceAlertPlayer): boolean {
@@ -729,7 +745,7 @@ function MarketplaceAlertsContent() {
                 {scanLog.slice(0, 8).map((entry) => (
                   <li key={entry.id} className={entry.error ? 'failed' : ''}>
                     <span className="marketplace-scan-log-dot" aria-hidden="true" />
-                    <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}${entry.warning ? ` · ${entry.warning}` : ''}`}</span></div>
+                    <div><strong>{entry.error ? 'Scan failed' : `${entry.checkedListings} listings checked`}</strong><span>{entry.error || `${entry.requests} feed request${entry.requests === 1 ? '' : 's'} · ${entry.newMatches} new match${entry.newMatches === 1 ? '' : 'es'}${entry.delivered ? ` · ${entry.delivered} sent` : ''}${entry.warning ? ` · ${entry.warning}` : ''}`}</span><ScanCoverage feeds={entry.feedCoverage} /></div>
                     <time dateTime={entry.finishedAt}><b>{entry.source === 'automatic' ? 'Auto' : entry.source === 'page' ? 'Page' : 'Manual'}</b>{formatScanTime(entry.finishedAt)}</time>
                   </li>
                 ))}

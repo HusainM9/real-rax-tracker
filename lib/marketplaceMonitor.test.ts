@@ -53,6 +53,43 @@ beforeEach(() => {
 })
 
 describe('marketplace monitor', () => {
+  it('inherits the default price and rarity limits for Rare Jack Eichel target auctions', async () => {
+    const eichelRule: MarketplaceAlertRule = {
+      ...baseRule, sport: 'nhl', season: 2027, entityScope: 'ownedPlayers', itemType: 'bulk',
+      players: [{ entityId: 8478403, name: 'Jack Eichel' }],
+      rarities: [], pricePerRatingMax: 25, targetPriceLegendaryOrBelow: true,
+    }
+    mocks.realGetJson.mockResolvedValue({ listings: [
+      { ...bulkListing, id: 'eichel-rare', sport: 'nhl', season: 2027, entityId: 8478403,
+        value: 100, rarity: 3, minBidPrice: 2000, buyNowPrice: 2500 },
+      { ...bulkListing, id: 'eichel-epic', sport: 'nhl', season: 2027, entityId: 8478403,
+        value: 100, rarity: 4, minBidPrice: 2000, buyNowPrice: 2500 },
+      { ...bulkListing, id: 'eichel-over-limit', sport: 'nhl', season: 2027, entityId: 8478403,
+        value: 100, rarity: 3, minBidPrice: 2000, buyNowPrice: 2700 },
+    ] })
+    const result = await scanMarketplaceAlerts({ owner: 'fixture-user', rules: [eichelRule], context })
+    expect(result.notifications.map(n => n.listingId)).toEqual(['eichel-rare', 'eichel-epic'])
+    expect(result.notifications[0]).toMatchObject({ maxPricePerRating: 25, targetPricePerRating: 25, rarity: 'Rare' })
+  })
+
+  it('reports NHL feed coverage and returned seasons separately from aggregate counts', async () => {
+    mocks.realGetJson.mockImplementation(async (_path, _context, query) => ({ listings:
+      query.sport === 'nhl' ? [{ ...bulkListing, id: 'old-season', sport: 'nhl', season: 2026 }]
+        : [bulkListing, { ...bulkListing, id: 'nfl-2' }],
+    }))
+    const result = await scanMarketplaceAlerts({ owner: 'fixture-user', context,
+      rules: [baseRule, { ...baseRule, id: 'nhl', sport: 'nhl', season: 2027,
+        players: [{ entityId: 8478403, name: 'Jack Eichel' }] }],
+    })
+    expect(result.checkedListings).toBe(3)
+    expect(result.feedCoverage).toEqual([
+      { sport: 'nfl', season: 2026, entityId: null, checkedListings: 2, requests: 1,
+        matches: 2, returnedSeasons: [2026], rejected: false, incomplete: false },
+      { sport: 'nhl', season: 2027, entityId: 8478403, checkedListings: 1, requests: 1,
+        matches: 0, returnedSeasons: [2026], rejected: false, incomplete: false },
+    ])
+  })
+
   it('sends NHL 2027 and the five selected player IDs at the HTTP boundary even with an old FC name', async () => {
     const { realGetJson } = await vi.importActual<typeof import('./realApi')>('./realApi')
     const requested: { path: string; query: Record<string, string>; method: string; redirect?: string }[] = []

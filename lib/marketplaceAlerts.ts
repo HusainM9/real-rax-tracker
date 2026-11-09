@@ -13,6 +13,18 @@ export const MARKETPLACE_RARITY_API_VALUES = {
 } as const
 
 export type MarketplaceRarity = (typeof MARKETPLACE_RARITIES)[number]
+/** Controlled feed metadata, never upstream response bodies or private URLs. */
+export type MarketplaceFeedCoverage = {
+  sport: string
+  season: number
+  entityId: number | null
+  checkedListings: number
+  requests: number
+  matches: number
+  returnedSeasons: number[]
+  rejected: boolean
+  incomplete: boolean
+}
 export type MarketplaceRarityApiValue = (typeof MARKETPLACE_RARITY_API_VALUES)[MarketplaceRarity]
 export type MarketplaceEntityScope = 'all' | 'player' | 'team' | 'ownedPlayers' | 'ownedTeams'
 export type MarketplaceItemType = 'all' | 'cards' | 'serial' | 'bulk'

@@ -67,6 +67,8 @@ beforeEach(() => {
   })
   mocks.scanMarketplaceAlerts.mockReset().mockResolvedValue({
     notifications: [{ id: 'notification-1' }], checkedListings: 10, requests: 1,
+    feedCoverage: [{ sport: 'nhl', season: 2027, entityId: 8478403, checkedListings: 10,
+      requests: 1, matches: 1, returnedSeasons: [2027], rejected: false, incomplete: false }],
   })
   mocks.resolveRealApiConfig.mockReset().mockReturnValue({ baseUrl: 'https://web.realapp.com' })
 })
@@ -122,10 +124,12 @@ describe('hosted marketplace monitor endpoint', () => {
       'husain',
       expect.objectContaining({
         checkedListings: 10, requests: 1, newMatches: 1,
+        feedCoverage: [expect.objectContaining({ sport: 'nhl', checkedListings: 10, matches: 1 })],
         delivered: 1, deliveryChannel: 'discord', error: null,
       }),
     )
     expect(mocks.releaseMarketplaceScanLease).toHaveBeenCalledWith('scan-lease')
+    expect(mocks.acquireMarketplaceScanLease).toHaveBeenCalledWith({ waitForCooldown: true, signal: expect.any(AbortSignal) })
   })
 
   it('acknowledges an overlapping scheduler delivery without starting another scan', async () => {

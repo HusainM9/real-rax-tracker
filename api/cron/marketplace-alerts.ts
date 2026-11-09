@@ -136,6 +136,7 @@ async function runMarketplaceScan(
         deliveryChannel: delivery.channel,
         error: null,
         warning: [scan.warning, deliveryWarning].filter(Boolean).join(' ') || null,
+        feedCoverage: scan.feedCoverage,
       })
       completed.push({
         owner,
@@ -218,7 +219,7 @@ async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'The Real marketplace session is not configured.' }, { status: 503 })
   }
 
-  const lease = await acquireMarketplaceScanLease()
+  const lease = await acquireMarketplaceScanLease({ waitForCooldown: true, signal: request.signal })
   if (!lease) {
     return Response.json({
       ok: true,

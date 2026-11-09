@@ -1840,6 +1840,12 @@
 
 .marketplace-scan-log li.failed .marketplace-scan-log-dot { background: #da7777; }
 
+.marketplace-scan-log li > div > .marketplace-scan-coverage {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: #b4b4ae;
+}
+
 .marketplace-scan-log li > div {
   display: grid;
   min-width: 0;

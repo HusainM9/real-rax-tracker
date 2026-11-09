@@ -4,6 +4,7 @@ import {
   marketplaceListingMatchesRule,
   type MarketplaceAlertNotification,
   type MarketplaceAlertRule,
+  type MarketplaceFeedCoverage,
   type MarketplaceListing,
 } from './marketplaceAlerts.js'
 import { saveNewMarketplaceNotifications } from './marketplaceAlertStore.js'
@@ -94,6 +95,7 @@ type GroupScanResult = {
   requests: number
   rejected: boolean
   incomplete: boolean
+  returnedSeasons: number[]
 }
 
 async function scanGroup(
@@ -103,6 +105,7 @@ async function scanGroup(
 ): Promise<GroupScanResult> {
   const candidates: MarketplaceAlertNotification[] = []
   const checkedIds = new Set<string>()
+  const returnedSeasons = new Set<number>()
   let beforeEndsAt: string | undefined
   let requests = 0
   let incomplete = false
@@ -139,6 +142,7 @@ async function scanGroup(
           requests,
           rejected: true,
           incomplete,
+          returnedSeasons: [...returnedSeasons].sort((a, b) => a - b),
         }
       }
       throw error
@@ -147,6 +151,8 @@ async function scanGroup(
     const listings = Array.isArray(response.listings) ? response.listings : []
     let newlyChecked = 0
     for (const listing of listings) {
+      const season = Number(listing.season)
+      if (Number.isInteger(season) && season >= 1900 && season <= 2200) returnedSeasons.add(season)
       const listingId = String(listing.id)
       if (!checkedIds.has(listingId)) {
         checkedIds.add(listingId)
@@ -176,6 +182,7 @@ async function scanGroup(
     requests,
     rejected: false,
     incomplete,
+    returnedSeasons: [...returnedSeasons].sort((a, b) => a - b),
   }
 }
 
@@ -216,6 +223,7 @@ export async function scanMarketplaceAlerts(options: {
   requests: number
   failedRequests: number
   warning: string | null
+  feedCoverage: MarketplaceFeedCoverage[]
 }> {
   const candidates: MarketplaceAlertNotification[] = []
   const checked = new Set<string>()
@@ -247,5 +255,16 @@ export async function scanMarketplaceAlerts(options: {
     requests,
     failedRequests: rejectedGroups,
     warning: warnings.join(' ') || null,
+    feedCoverage: groupResults.map((result, index) => ({
+      sport: groups[index].sport,
+      season: groups[index].season,
+      entityId: groups[index].filterEntityId ?? null,
+      checkedListings: result.checkedIds.length,
+      requests: result.requests,
+      matches: new Set(result.candidates.map(n => n.id)).size,
+      returnedSeasons: result.returnedSeasons,
+      rejected: result.rejected,
+      incomplete: result.incomplete,
+    })),
   }
 }

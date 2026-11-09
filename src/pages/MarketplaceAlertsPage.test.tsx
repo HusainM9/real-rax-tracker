@@ -11,6 +11,31 @@ vi.mock('../context/RaxDataContext', async () => {
 })
 vi.mock('../context/AccountAuthContext', () => ({ useAccountAuth: () => ({ username: 'fixture-user' }) }))
 
+it('shows NHL coverage separately and still displays historical aggregate-only logs', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  localStorage.clear()
+  const status = { startedAt: '2026-11-09T02:00:00Z', finishedAt: '2026-11-09T02:00:06Z',
+    checkedListings: 15, requests: 14, newMatches: 0, delivered: 0, deliveryChannel: null, error: null }
+  localStorage.setItem('rax-marketplace-alert-scan-log-v1', JSON.stringify([
+    { ...status, id: 'new', source: 'automatic', feedCoverage: [
+      { sport: 'nhl', season: 2027, entityId: 7, checkedListings: 0, requests: 1, matches: 0,
+        returnedSeasons: [], rejected: false, incomplete: false },
+      { sport: 'nhl', season: 2027, entityId: 8, checkedListings: 2, requests: 1, matches: 0,
+        returnedSeasons: [2026], rejected: false, incomplete: false },
+    ] },
+    { ...status, id: 'old', source: 'automatic' },
+  ]))
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<MarketplaceAlertsPage />))
+    const rows = container.querySelectorAll('.marketplace-scan-log li')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('NHL 2027 · 2 listings · 2 requests · 0 matches')
+    expect(rows[1].textContent).toContain('15 listings checked')
+  } finally { await act(async () => root.unmount()); localStorage.clear() }
+})
+
 it('restores the four-minute alerts UI without individual listings or provider requests on mount', async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
   const fetcher = vi.fn(() => { throw new Error('No network allowed') })
