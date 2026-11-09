@@ -99,7 +99,6 @@ import { isPlayerLikeCatalogPass, isPlayerPass, isUfcCatalogSport } from '../lib
 import { isLegendaryPlusRarity } from '../lib/rarityFilter'
 import { SPORTS, type RaxTrackerData, type Sport } from '../types/rax'
 
-const TOP_RANKING_RESULTS = 50
 const MONTH_BOOST_PAGE_SIZE = 10
 const RANKING_PAGE_SIZE = 25
 const DEFAULT_BUNDLE_SIZE = 3
@@ -263,6 +262,7 @@ export default function OptimizationPage() {
   const [rankStatus, setRankStatus] = useState('')
   const [recommendationRows, setRecommendationRows] = useState<PassRecommendationRow[]>([])
   const [rankResultsPage, setRankResultsPage] = useState(1)
+  const [rankResultsSport, setRankResultsSport] = useState<RankSportChoice>(ALL_SPORTS_RANK)
   const [recommendationBundle, setRecommendationBundle] = useState<PassRecommendationBundle | null>(
     null,
   )
@@ -328,9 +328,29 @@ export default function OptimizationPage() {
     bundleClaimInProgress ||
     iconic20ProfilesLoading
 
+  const rankResultSports = useMemo(() => {
+    const counts = new Map<Sport, number>()
+    for (const row of recommendationRows) counts.set(row.sport, (counts.get(row.sport) ?? 0) + 1)
+    return SPORTS.filter(sport => counts.has(sport)).map(sport => ({ value: sport, label: `${sport} (${counts.get(sport)})` }))
+  }, [recommendationRows])
+  const filteredRecommendationRows = useMemo(
+    () => rankResultsSport === ALL_SPORTS_RANK ? recommendationRows : recommendationRows.filter(row => row.sport === rankResultsSport),
+    [recommendationRows, rankResultsSport],
+  )
+  const overallRankByKey = useMemo(
+    () => new Map(recommendationRows.map((row, index) => [row.externalKey, index + 1])),
+    [recommendationRows],
+  )
+  const rankResultsPageTotal = pageCount(filteredRecommendationRows.length, RANKING_PAGE_SIZE)
+  const visibleRankResultsPage = Math.min(rankResultsPage, rankResultsPageTotal)
+  const paginatedRecommendationRows = useMemo(
+    () => paginate(filteredRecommendationRows, visibleRankResultsPage, RANKING_PAGE_SIZE),
+    [filteredRecommendationRows, visibleRankResultsPage],
+  )
+
   useEffect(() => {
     if (rankingInProgress) return
-    const missing = [...new Map([...recommendationRows, ...(recommendationBundle?.picks ?? [])]
+    const missing = [...new Map([...paginatedRecommendationRows, ...(recommendationBundle?.picks ?? [])]
       .filter((row) => !row.avatar?.trim()).map((row) => [row.externalKey, row])).values()]
     if (missing.length === 0) return
     const controller = new AbortController()
@@ -347,7 +367,7 @@ export default function OptimizationPage() {
       setProfileByKey((current) => new Map([...current].map(([key, profile]) => [key, hydrate(profile)])))
     }).catch(() => { /* Faces are optional and must never fail numerical rankings. */ })
     return () => controller.abort()
-  }, [recommendationRows, recommendationBundle, rankingInProgress])
+  }, [paginatedRecommendationRows, recommendationBundle, rankingInProgress])
 
   useEffect(() => {
     const assumeKeys = [
@@ -1353,8 +1373,8 @@ export default function OptimizationPage() {
   )
 
   const claimableRankingRows = useMemo(
-    () => recommendationRows.filter(isRecommendationRowClaimable),
-    [recommendationRows, profileByKey, rankAdjustments, data.cards],
+    () => filteredRecommendationRows.filter(isRecommendationRowClaimable),
+    [filteredRecommendationRows, profileByKey, rankAdjustments, data.cards],
   )
 
   const visibleBundlePicks = useMemo(
@@ -1382,33 +1402,23 @@ export default function OptimizationPage() {
     [claimableRankingRows, rankingClaimSelection],
   )
 
+  const claimableBundleIdentity = useMemo(
+    () => JSON.stringify(claimableBundlePicks.map(row => row.externalKey)),
+    [claimableBundlePicks],
+  )
   useEffect(() => {
-    if (!recommendationBundle) {
-      setBundleClaimSelection(new Set())
-      return
-    }
-    setBundleClaimSelection(
-      new Set(
-        recommendationBundle.picks
-          .filter(isRecommendationRowClaimable)
-          .map((row) => row.externalKey),
-      ),
-    )
-  }, [recommendationBundle, profileByKey, rankAdjustments, data.cards])
+    setBundleClaimSelection(new Set<string>(JSON.parse(claimableBundleIdentity)))
+  }, [claimableBundleIdentity])
 
+  // Only reset default selection when eligible identities change, not when
+  // optional faces finish loading or the user browses another results page.
+  const claimableRankingIdentity = useMemo(
+    () => JSON.stringify(recommendationRows.filter(isRecommendationRowClaimable).map(row => row.externalKey)),
+    [recommendationRows, profileByKey, rankAdjustments, data.cards],
+  )
   useEffect(() => {
-    if (recommendationRows.length === 0) {
-      setRankingClaimSelection(new Set())
-      return
-    }
-    setRankingClaimSelection(
-      new Set(
-        recommendationRows
-          .filter(isRecommendationRowClaimable)
-          .map((row) => row.externalKey),
-      ),
-    )
-  }, [recommendationRows, profileByKey, rankAdjustments, data.cards])
+    setRankingClaimSelection(new Set<string>(JSON.parse(claimableRankingIdentity)))
+  }, [claimableRankingIdentity])
 
   const toggleBundleClaimSelection = (externalKey: string) => {
     setBundleClaimSelection((current) => {
@@ -1546,7 +1556,7 @@ export default function OptimizationPage() {
         },
       )
 
-      setRecommendationRows(ranked.rows.slice(0, TOP_RANKING_RESULTS))
+      setRecommendationRows(ranked.rows)
       setRankResultsPage(1)
       setRecommendationBundle(bundle)
       setRecommendationMeta((prev) => ({
@@ -1570,7 +1580,7 @@ export default function OptimizationPage() {
           : rankSports.join(', ')
         : `${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''}`
       setRankStatus(
-        `Assumed ${label} at ${RECOMMENDATION_SIMULATED_RARITY} (${formatSignedRax(displayRaxValue(combinedNet))} combined net) — ranking only. Recalculated top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)} for ${sportLabel} · next ${bundle.picks.length} greedy pick${bundle.picks.length === 1 ? '' : 's'}.`,
+        `Assumed ${label} at ${RECOMMENDATION_SIMULATED_RARITY} (${formatSignedRax(displayRaxValue(combinedNet))} combined net) — ranking only. Recalculated ${ranked.rows.length} passes for ${sportLabel} · next ${bundle.picks.length} greedy pick${bundle.picks.length === 1 ? '' : 's'}.`,
       )
     } catch (error) {
       setRankAdjustments(prevAdjustments)
@@ -1614,6 +1624,7 @@ export default function OptimizationPage() {
     setRankStatus('')
     setRecommendationRows([])
     setRankResultsPage(1)
+    setRankResultsSport(ALL_SPORTS_RANK)
     setRecommendationBundle(null)
     setRecommendationMeta(null)
     setProfileByKey(new Map())
@@ -1748,7 +1759,7 @@ export default function OptimizationPage() {
         onProgress: setRankProgress,
       })
 
-      setRecommendationRows(ranked.rows.slice(0, TOP_RANKING_RESULTS))
+      setRecommendationRows(ranked.rows)
       setRankResultsPage(1)
       setRecommendationBundle(bundle)
       setRecommendationMeta({
@@ -1770,7 +1781,7 @@ export default function OptimizationPage() {
           : rankSports.join(', ')
         : `${rankSport}${selectedRankSeasonLabel ? ` ${selectedRankSeasonLabel}` : ''}`
       setRankStatus(
-        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · showing top ${Math.min(TOP_RANKING_RESULTS, ranked.rows.length)}${
+        `Ranked ${ranked.analyzedCount} pass${ranked.analyzedCount === 1 ? '' : 'es'} at ${RECOMMENDATION_SIMULATED_RARITY} for ${sportLabel} · ${ranked.rows.length} results available${
           excludedSportSeasons.length > 0
             ? ` · excluding ${excludedSportSeasons.map(formatExcludedSportSeason).join(', ')}`
             : ''
@@ -2148,17 +2159,18 @@ export default function OptimizationPage() {
     }
   }
 
-  const rankResultsPageTotal = pageCount(recommendationRows.length, RANKING_PAGE_SIZE)
-  const paginatedRecommendationRows = useMemo(
-    () => paginate(recommendationRows, rankResultsPage, RANKING_PAGE_SIZE),
-    [recommendationRows, rankResultsPage],
-  )
-
   useEffect(() => {
     if (rankResultsPage > rankResultsPageTotal) {
       setRankResultsPage(rankResultsPageTotal)
     }
   }, [rankResultsPage, rankResultsPageTotal])
+
+  useEffect(() => {
+    if (rankResultsSport !== ALL_SPORTS_RANK && !recommendationRows.some(row => row.sport === rankResultsSport)) {
+      setRankResultsSport(ALL_SPORTS_RANK)
+      setRankResultsPage(1)
+    }
+  }, [recommendationRows, rankResultsSport])
 
   const visibleMonthBoostRows = useMemo(
     () => monthBoostAllRows.slice(0, monthBoostVisibleCount),
@@ -3156,6 +3168,7 @@ export default function OptimizationPage() {
 
         {recommendationRows.length > 0 ? (
           <CollapsiblePanel
+            id="catalog-ranking-results"
             className="nested-panel"
             title="Ranking results"
             description="Top catalog passes by net claimable RAX. Click a row for detail below."
@@ -3163,6 +3176,17 @@ export default function OptimizationPage() {
             defaultOpen={false}
           >
           <>
+            <div className="sort-controls">
+              <ThemedSelect
+                label="Show sport"
+                ariaLabel="Filter ranking by sport"
+                value={rankResultsSport}
+                disabled={catalogAnalysisBusy}
+                onChange={value => { setRankResultsSport(value as RankSportChoice); setRankResultsPage(1) }}
+                options={[{ value: ALL_SPORTS_RANK, label: 'All sports' }, ...rankResultSports]}
+              />
+              <p className="import-hint">{filteredRecommendationRows.length} of {recommendationRows.length} ranked passes · overall rank positions</p>
+            </div>
             {recommendationMeta ? (
               <p className="import-hint">
                 Saved {new Date(recommendationMeta.calculatedAt).toLocaleString()} ·{' '}
@@ -3222,9 +3246,7 @@ export default function OptimizationPage() {
                     type="button"
                     disabled={catalogAnalysisBusy || claimableRankingRows.length === 0}
                     onClick={() =>
-                      setRankingClaimSelection(
-                        new Set(claimableRankingRows.map((row) => row.externalKey)),
-                      )
+                      setRankingClaimSelection(current => new Set([...current, ...claimableRankingRows.map(row => row.externalKey)]))
                     }
                   >
                     Select all
@@ -3232,8 +3254,12 @@ export default function OptimizationPage() {
                   <button
                     className="button"
                     type="button"
-                    disabled={catalogAnalysisBusy || rankingClaimSelection.size === 0}
-                    onClick={() => setRankingClaimSelection(new Set())}
+                    disabled={catalogAnalysisBusy || selectedClaimableRankingRows.length === 0}
+                    onClick={() => setRankingClaimSelection(current => {
+                      const next = new Set(current)
+                      for (const row of claimableRankingRows) next.delete(row.externalKey)
+                      return next
+                    })}
                   >
                     Clear
                   </button>
@@ -3259,8 +3285,8 @@ export default function OptimizationPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedRecommendationRows.map((row, index) => {
-                    const rankNumber = (rankResultsPage - 1) * RANKING_PAGE_SIZE + index + 1
+                  {paginatedRecommendationRows.map((row) => {
+                    const rankNumber = overallRankByKey.get(row.externalKey)
                     const claimable = isRecommendationRowClaimable(row)
                     const selected = rankingClaimSelection.has(row.externalKey)
                     const claimButton = recommendationClaimButtonProps(row)
@@ -3372,24 +3398,24 @@ export default function OptimizationPage() {
                 </tbody>
               </table>
             </div>
-            {recommendationRows.length > RANKING_PAGE_SIZE ? (
+            {filteredRecommendationRows.length > RANKING_PAGE_SIZE ? (
               <div className="table-pagination">
                 <button
                   className="button"
                   type="button"
-                  disabled={rankResultsPage <= 1}
+                  disabled={visibleRankResultsPage <= 1}
                   onClick={() => setRankResultsPage((page) => page - 1)}
                 >
                   Previous
                 </button>
                 <span>
-                  Page {rankResultsPage} of {rankResultsPageTotal} ·{' '}
-                  {recommendationRows.length} passes
+                  Page {visibleRankResultsPage} of {rankResultsPageTotal} ·{' '}
+                  {filteredRecommendationRows.length} passes
                 </span>
                 <button
                   className="button"
                   type="button"
-                  disabled={rankResultsPage >= rankResultsPageTotal}
+                  disabled={visibleRankResultsPage >= rankResultsPageTotal}
                   onClick={() => setRankResultsPage((page) => page + 1)}
                 >
                   Next
