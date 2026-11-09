@@ -4,6 +4,8 @@ import { safeImportFetch } from './safeImportFetch'
 import { catalogCandidatePassKindsForSport } from '../../lib/passKind'
 import { avatarByExternalKey, enrichCardsWithCatalogAvatars } from './realMedia'
 import { readResponseJson } from './readResponseJson'
+import { waitWithAbort } from '../../lib/abortablePromise'
+import { normalizeSportForSeasonWindow } from '../../lib/seasonClaimWindow'
 
 export { catalogCandidatePassKindsForSport }
 
@@ -363,6 +365,40 @@ export async function enrichCatalogProfilesWithAvatars<
   }
 }
 
+type SeasonYearsResult = { seasonYears: CatalogSeasonYearOption[]; storageConfigured: boolean }
+const seasonYearsCache = new Map<string, { expiresAt: number; result: SeasonYearsResult }>()
+const seasonYearsPending = new Map<string, Promise<SeasonYearsResult>>()
+
+async function catalogSeasonYearsForKind(sport: string, passKind: CatalogPassKind): Promise<SeasonYearsResult> {
+  const key = JSON.stringify([sport, passKind])
+  const cached = seasonYearsCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.result
+  seasonYearsCache.delete(key)
+  const existing = seasonYearsPending.get(key)
+  if (existing) return existing
+  const pending = (async () => {
+    const params = new URLSearchParams({ sport, passKind })
+    const response = await safeImportFetch(`/api/catalog/season-years?${params}`, {
+      // A single control changing sports must not cancel other season consumers.
+      signal: AbortSignal.timeout(30_000),
+    })
+    const data = await readResponseJson<Partial<SeasonYearsResult> & { error?: string }>(response)
+    if (!response.ok) throw new Error(data.error || `Catalog season years failed (${response.status}).`)
+    if (!Array.isArray(data.seasonYears) || data.seasonYears.some(option =>
+      !option || !Number.isInteger(option.seasonYear) || typeof option.seasonLabel !== 'string')) {
+      throw new Error('Catalog returned invalid season metadata.')
+    }
+    const result = { seasonYears: data.seasonYears, storageConfigured: data.storageConfigured !== false }
+    if (result.storageConfigured) {
+      seasonYearsCache.set(key, { expiresAt: Date.now() + 5 * 60_000, result })
+      while (seasonYearsCache.size > 64) seasonYearsCache.delete(seasonYearsCache.keys().next().value!)
+    }
+    return result
+  })().finally(() => seasonYearsPending.delete(key))
+  seasonYearsPending.set(key, pending)
+  return pending
+}
+
 export async function fetchCatalogSeasonYears(
   options: {
     sport: string
@@ -373,40 +409,20 @@ export async function fetchCatalogSeasonYears(
   seasonYears: CatalogSeasonYearOption[]
   storageConfigured: boolean
 }> {
+  signal?.throwIfAborted()
+  const sport = options.sport.trim() ? normalizeSportForSeasonWindow(options.sport) : ''
   const passKinds =
     options.passKind !== undefined
       ? [options.passKind]
-      : catalogCandidatePassKindsForSport(options.sport)
+      : catalogCandidatePassKindsForSport(sport)
 
-  const batches = await Promise.all(
-    passKinds.map(async (passKind) => {
-      const params = new URLSearchParams({
-        sport: options.sport,
-        passKind,
-      })
-      const response = await safeImportFetch(`/api/catalog/season-years?${params}`, { signal })
-      const data = await readResponseJson<{
-        seasonYears?: CatalogSeasonYearOption[]
-        storageConfigured?: boolean
-        error?: string
-      }>(response)
-
-      if (!response.ok) {
-        throw new Error(data.error || `Catalog season years failed (${response.status}).`)
-      }
-
-      return {
-        seasonYears: Array.isArray(data.seasonYears) ? data.seasonYears : [],
-        storageConfigured: data.storageConfigured !== false,
-      }
-    }),
-  )
+  const batches = await waitWithAbort(Promise.all(passKinds.map(passKind => catalogSeasonYearsForKind(sport, passKind))), signal)
 
   const byYear = new Map<number, CatalogSeasonYearOption>()
   for (const batch of batches) {
     for (const option of batch.seasonYears) {
       if (!byYear.has(option.seasonYear)) {
-        byYear.set(option.seasonYear, option)
+        byYear.set(option.seasonYear, { ...option })
       }
     }
   }

@@ -1277,16 +1277,20 @@ export async function listCatalogSeasonYears(options: {
 
   const passKind = options.passKind ?? 'player'
   const byLabel = new Map<string, number>()
+  let afterPair: { year: number; label: string } | undefined
 
-  for (let offset = 0; ; offset += MAX_CANDIDATES_PAGE) {
+  while (true) {
     const params = new URLSearchParams({
       select: 'season_year,season_label',
       sport: `eq.${sport}`,
       pass_kind: `eq.${passKind}`,
-      order: 'season_year.desc',
+      order: 'season_year.desc,season_label.desc',
       limit: String(MAX_CANDIDATES_PAGE),
-      offset: String(offset),
     })
+    if (afterPair) {
+      const label = `"${afterPair.label.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+      params.set('or', `(season_year.lt.${afterPair.year},and(season_year.eq.${afterPair.year},season_label.lt.${label}))`)
+    }
 
     const rows = await supabaseFetch<Array<{ season_year: number; season_label: string }>>(
       'meowbot_passes',
@@ -1307,6 +1311,13 @@ export async function listCatalogSeasonYears(options: {
     }
 
     if (rows.length < MAX_CANDIDATES_PAGE) break
+    // Every remaining copy of this raw pair would produce the same option.
+    // Seek past it, preserving other labels stored on the same raw year.
+    const last = rows[rows.length - 1]!
+    if (afterPair?.year === last.season_year && afterPair.label === last.season_label) {
+      throw new Error('Catalog season pagination did not advance.')
+    }
+    afterPair = { year: last.season_year, label: last.season_label }
   }
 
   const seasonYears = [...byLabel.entries()]
