@@ -35,12 +35,12 @@ const rule: MarketplaceAlertRule = {
 }
 
 describe('development marketplace simulation', () => {
-  it('uses the customized player and creates a matching no-bid bulk auction at the exact ratio', () => {
-    expect(simulateMarketplaceBulkAuction(rule, '2026-10-12T10:00:00.000Z')).toMatchObject({
+  it.each([{ sport: 'nfl', season: 2026 }, { sport: 'nhl', season: 2027 }])('previews a matching $sport auction using its catalog season', ({ sport, season }) => {
+    expect(simulateMarketplaceBulkAuction({ ...rule, sport, season }, '2026-10-12T10:00:00.000Z')).toMatchObject({
       ruleId: 'walker-alert',
       playerName: 'Kenneth Walker',
-      sport: 'nfl',
-      season: 2026,
+      sport,
+      season,
       price: 3400,
       rating: 85.7,
       numBids: 0,

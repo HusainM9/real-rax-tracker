@@ -17,6 +17,7 @@ export type MarketplaceRarity = (typeof MARKETPLACE_RARITIES)[number]
 export type MarketplaceFeedCoverage = {
   sport: string
   season: number
+  querySeason?: number
   entityId: number | null
   checkedListings: number
   requests: number
@@ -39,6 +40,11 @@ export function marketplaceApiSport(value: string): string {
   if (sport === 'cbb' || sport === 'ncaab' || sport === 'ncaabasketball') return 'ncaam'
   if (sport === 'fc') return 'soccer'
   return sport
+}
+
+/** NHL's Real feed uses the start year; the tracker stores the season end year. */
+export function marketplaceApiSeason(sport: string, catalogSeason: number): number {
+  return marketplaceApiSport(sport) === 'nhl' ? catalogSeason - 1 : catalogSeason
 }
 
 /** Generated names follow the selected sport; custom alert names stay unchanged. */
@@ -411,7 +417,7 @@ export function marketplaceListingMatchesRule(
   if (!rule.enabled || listing.status !== 'open') return false
   if (
     marketplaceApiSport(listing.sport ?? '') !== marketplaceApiSport(rule.sport) ||
-    Number(listing.season) !== rule.season
+    Number(listing.season) !== marketplaceApiSeason(rule.sport, rule.season)
   ) return false
   if (!listingMatchesEntity(rule, listing)) return false
 

@@ -1,6 +1,7 @@
 import {
   createMarketplaceNotification,
   marketplaceApiSport,
+  marketplaceApiSeason,
   marketplaceListingMatchesRule,
   type MarketplaceAlertNotification,
   type MarketplaceAlertRule,
@@ -125,7 +126,7 @@ async function scanGroup(
           listingType: 'userpassfull',
           prestige: 'all',
           rarity: 'all',
-          season: group.season,
+          season: marketplaceApiSeason(group.sport, group.season),
           sport: group.sport,
           beforeEndsAt,
         },
@@ -258,6 +259,7 @@ export async function scanMarketplaceAlerts(options: {
     feedCoverage: groupResults.map((result, index) => ({
       sport: groups[index].sport,
       season: groups[index].season,
+      querySeason: marketplaceApiSeason(groups[index].sport, groups[index].season),
       entityId: groups[index].filterEntityId ?? null,
       checkedListings: result.checkedIds.length,
       requests: result.requests,

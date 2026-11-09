@@ -203,6 +203,13 @@ describe('marketplace listing matching', () => {
     )).toBe(true)
   })
 
+  it('matches NHL start-year listings against the catalog end-year without accepting another season', () => {
+    const nhlRule = { ...rule, sport: 'nhl', season: 2027 }
+    expect(marketplaceListingMatchesRule(nhlRule, { ...listing, sport: 'nhl', season: 2026 })).toBe(true)
+    expect(marketplaceListingMatchesRule(nhlRule, { ...listing, sport: 'nhl', season: 2025 })).toBe(false)
+    expect(marketplaceListingMatchesRule(nhlRule, { ...listing, sport: 'nhl', season: 2027 })).toBe(false)
+  })
+
   it('handles player, team, owned, and all entity scopes', () => {
     const teamListing = { ...listing, entityType: 'team', entityId: 88, teamId: 88 }
     expect(marketplaceListingMatchesRule({ ...rule, entityScope: 'team', entityId: 88 }, teamListing)).toBe(true)
