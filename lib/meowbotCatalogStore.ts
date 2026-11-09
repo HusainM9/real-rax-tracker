@@ -575,16 +575,28 @@ export async function searchCatalogPasses(options: {
   }
 
   const limit = Math.min(Math.max(options.limit ?? 24, 1), MAX_SEARCH_LIMIT)
-  const search = `*${query.replace(/\*/g, ' ')}*`
+  const name = query.replace(/\*/g, ' ')
+  const exactName = name.replace(/[\\%_]/g, '\\$&')
+  const search = `*${name}*`
   const params = new URLSearchParams({
     select:
       'external_key,entity_id,pass_kind,sport,season_year,season_label,name,rarity_label,avatar,has_earnings,total_base_rax,source_updated_at,cached_at,meowbot_daily_earnings(count)',
     or: `(name.ilike.${search},sport.ilike.${search},season_label.ilike.${search})`,
-    order: 'name.asc',
+    order: 'name.asc,external_key.asc',
     limit: String(limit),
   })
 
-  const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params })
+  // Reserve slots for exact names before the database limits substring matches.
+  // Sorting an already-limited broad result cannot recover crowded-out players.
+  const exactParams = new URLSearchParams(params)
+  exactParams.delete('or')
+  exactParams.set('name', `ilike.${exactName}`)
+  const passRows = await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params: exactParams })
+  if (passRows.length < limit) {
+    params.set('name', `not.ilike.${exactName}`)
+    params.set('limit', String(limit - passRows.length))
+    passRows.push(...await supabaseFetch<SupabasePassRow[]>('meowbot_passes', { params }))
+  }
   const { items } = dedupeCatalogPassSummaries(passRows.map(fromPassRow))
   const missingTotalKeys = items
     .filter((item) => item.rowCount > 0 && item.totalBaseRax <= 0)
