@@ -5,9 +5,17 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +25,22 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - name: Verify complete and disjoint test selection
+        run: npm run test:partition
       - name: Tests outside the deployment gate
         run: npm run test:ci:remaining
+        env:
+          RAX_TEST_REPORT_FILE: .superpowers/test-results/remaining.xml
       - name: Deployment gate, type-check and production build
         run: npm run build
+        env:
+          RAX_TEST_REPORT_FILE: .superpowers/test-results/safety.xml
+      - name: Preserve test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: .superpowers/test-results/*.xml
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

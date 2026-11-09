@@ -14,6 +14,10 @@
     "seed:catalog": "node scripts/seed-meowbot-catalog.mjs",
     "test": "vitest run",
     "test:ci:remaining": "node scripts/test-ci-remaining.mjs",
+    "test:unit": "vitest run --project unit",
+    "test:ui": "vitest run --project ui",
+    "test:integration": "vitest run --project integration",
+    "test:partition": "node scripts/test-suite-partition.mjs",
     "bench:collection": "node scripts/benchmark-collection.mjs"
   },
   "devDependencies": {

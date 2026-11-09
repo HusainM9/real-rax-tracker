@@ -20,5 +20,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "middleware.ts", "lib", "api"]
+  "include": ["src", "middleware.ts", "lib", "api", "tests/integration", "tests/setup", "vitest.config.ts"]
 }

@@ -43,6 +43,10 @@ Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Nev
 | `npm run lint` | Run strict TypeScript checks |
 | `npm test` | Run the Vitest suite once |
 | `npm test -- src/lib/claimOptimizer.test.ts` | Run relevant tests while iterating |
+| `npm run test:unit` | Run existing Node suites with their compatibility service fakes |
+| `npm run test:ui` | Run existing jsdom suites with their compatibility service fakes |
+| `npm run test:integration` | Run actual application services with only outbound effects simulated |
+| `npm run test:partition` | Verify that discovered cases run once across the CI remainder and mandatory gate |
 | `npm run test:ci:remaining` | CI complement of the mandatory build gate; not a replacement for full validation |
 | `npm run build` | Type-check and create the production bundle in `dist/` |
 | `npm run preview` | Preview the production bundle locally |
@@ -53,6 +57,12 @@ Copy [`.env.example`](.env.example) to `.env.local` for local configuration. Nev
 GitHub Actions runs the CI remainder, then `npm run build`, whose prebuild runs the mandatory safety/runtime tests. Together these cover the full suite once; build also type-checks, so CI does not repeat standalone lint. `npm test` remains the simple full-suite command for local final validation.
 
 Tests default to native Node. Browser-dependent files opt into jsdom using `// @vitest-environment jsdom`; offline network denial applies to both environments. Keep Real-500, Edge redirect, authentication, data-preservation and calculation/ranking regressions. During development run the relevant files; at completion run the full suite and before release the gated build. No live Real scraping is part of these checks.
+
+`vitest.config.ts` discovers every test file into one named project. Tests under `tests/integration/` use only the shared offline network guard; they do not inherit application-service substitutes. The existing `unit` and `ui` projects retain `src/testing/offlineSetup.ts`, which explicitly substitutes the request-safety store, KV boundary, and error journal for compatibility with the unchanged suites. These labels describe execution setup, not a claim that all current Node tests are isolated units. Existing per-file jsdom annotations remain supported.
+
+Test configuration does not import the application Vite config or load local environment files. Integration tests supply synthetic configuration and simulate external HTTP only. Their storage response fixtures verify SDK serialization and application wiring; they do not execute Redis/Lua or prove real Redis concurrency. New tests must reject unexpected outbound effects, and integration tests should not mock internal application services.
+
+CI verifies actual full/gate/remainder discovery before execution, preserving repeated test-title occurrences and rejecting missing cases, overlapping selection, missing gate files, and files assigned to multiple projects. It retains separate remaining/gate JUnit reports, cancels superseded runs, and keeps the existing workflow triggers. Local full-suite and release-gate requirements are unchanged. See [the protected contracts](docs/testing-contracts.md), [the audit](docs/test-system-audit-2026-11-09.md), and [implementation ledger](docs/superpowers/plans/2026-11-09-test-infrastructure.md).
 
 See [the codebase review](docs/codebase-review.md) for measured import/calculation results, remaining correctness and data-safety findings, and benchmark privacy/limitations. Private benchmark fixtures stay in ignored `.benchmarks/` and must not be published.
 

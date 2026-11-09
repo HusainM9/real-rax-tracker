@@ -1,0 +1,30 @@
+# Protected test contracts
+
+The November 9 infrastructure migration preserves every existing test file and assertion. This map identifies the main owners of the rules that must survive later restructuring. Similar assertions at different layers can catch different failures; these entries do not authorize removing secondary checks.
+
+| Contract | Main existing owners | Failure the checks must catch |
+| --- | --- | --- |
+| Only an actual Real HTTP 500 creates a persistent endpoint-family block | `lib/guardedUpstreamFetch.test.ts`, `lib/real500Policy.test.ts`, `lib/requestSafetyStore.test.ts` | Retrying confirmed 500s, bypassing a family by account/query, losing known UFC or legacy confirmed history, or converting an unknown/non-500 record into a ban |
+| Non-Real failures remain scoped to the failed operation | `lib/noRetryKv.test.ts`, `lib/catalogRequestSafety.test.ts`, `src/lib/browserFailureScope.test.ts`, `src/lib/safeImportFetch.test.ts` | Automatic internal-storage retries, a permanent browser/API latch, or a storage/catalog/notification failure being classified as Real |
+| Server redirects are Edge compatible and never followed | `lib/guardedUpstreamFetch.test.ts` | Reintroducing `redirect: 'error'`, honoring caller `follow`, leaking redirect destinations, or treating a redirect as a confirmed Real 500 |
+| Consumers preserve terminal Real metadata and partial data | `api/import/_real-passes.test.ts`, `api/import/_real-earnings.test.ts`, `lib/realEarningsBackfill.test.ts`, `src/lib/usernameImportRecovery.test.ts`, `src/lib/realEarningsImport.test.ts` | Fallback/retry after confirmed Real 500, hiding failed passes as empty success, or discarding prior successful rows |
+| Authentication, private access, rate limits, and storage recovery | `lib/accountAuth.test.ts`, `lib/authCookie.test.ts`, `lib/adminAuth.test.ts`, `lib/loginRateLimit.test.ts`, `tests/safety/account/login.test.ts`, `src/pages/SignIn.test.tsx` | Unauthorized access, accepting invalid sessions, changing account protections, retrying failed login automatically, or leaving forms spinning |
+| Cloud saves and independent account changes remain protected | `lib/accountProfileSave.test.ts`, `src/lib/accountDataMerge.test.ts`, `src/context/RaxDataContext.test.tsx`, `lib/cloudSyncCompression.test.ts` | Losing independent changes, overwriting competing content, advancing revisions incorrectly, recreating deleted data, or damaging compressed payloads |
+| All calculation and ranking regressions remain | `src/lib/claimOptimizer.test.ts`, `src/lib/importScenario.test.ts`, `src/lib/rankingParity.test.ts`, `src/lib/golfOverlapParity.test.ts`, `src/lib/passRecommendation.test.ts`, `src/lib/plannedPasses.test.ts` | Altering claim/Pro/overlap calculations, greedy ordering, filtering, historical-season behavior, or cancellation |
+| Packs uses explicit import evidence and the existing reset convention | `src/lib/packTracker.test.ts`, `src/lib/dailyPacks.test.ts`, `src/pages/PlanPacksPage.test.tsx`, `src/context/RaxDataContext.test.tsx`, `api/import/_pack-ratings.test.ts` | Background ownership/profile scans, losing established evidence, changing 7am America/New_York reset behavior or NHL season conventions, or restoring account avatars |
+| Marketplace keeps its established cadence and routing | `lib/marketplaceMonitor.test.ts`, `lib/marketplaceAlerts.test.ts`, `tests/safety/account/marketplace-scan.test.ts`, `tests/safety/cron/marketplace-alerts-handler.test.ts` | Weakening the four-minute gate/overlap protection or changing NHL year translation, rule matching, and notification handling |
+| Retired features remain retired with no network work | `tests/safety/account/earnings-retired.test.ts`, `api/account/_marketplace-disabled.test.ts`, `api/cron/_snapshot-earnings.test.ts`, `src/App.test.tsx`, `src/pages/PreviewPerformancePage.test.tsx` | Reviving old handlers/jobs/UI, changing compatibility responses, or sending requests from retired/forced routes and the CPU-only lab |
+| Runtime imports and outbound boundaries remain guarded | `scripts/server-esm.test.mjs`, `scripts/audit-request-safety.test.mjs`, `src/testing/offlineSetup.test.ts`, `scripts/audit-request-safety.mjs` | Native ESM load failures, unapproved request/SDK entrypoints, or unmocked fetch in tests |
+| Error evidence is controlled and redacted | `lib/operationalErrorTypes.test.ts`, `lib/operationalErrorStore.test.ts`, `lib/operationalErrorCapture.test.ts`, `lib/migrateOperationalErrors.test.ts`, `tests/safety/admin/errors.test.ts`, `src/lib/browserErrorCapture.test.ts` | Exposing private request/response content, losing retained history, duplicating/recursively reporting events, or inventing confirmed-500 evidence |
+
+## New infrastructure checks
+
+`scripts/test-projects.test.mjs` checks automatic file ownership, browser annotation handling, and integration separation. `scripts/test-suite-partition.test.mjs` checks case multiplicity, omitted/extra cases, overlapping execution, empty discovery, absent mandatory files, and files assigned to multiple projects. The CLI validates the actual full, mandatory, and remaining Vitest discoveries.
+
+`tests/integration/account.test.ts` exercises the real journal/official SDK, credential verification, session validation, account read, private-site gate, and recovery after a single lost storage response. Internal services are not mocked. Only synthetic outbound storage responses are supplied, and unexpected destinations/commands fail.
+
+## Evidence boundaries
+
+The original account-save tests check Lua construction and adapter outcomes; the new account integration tests still do not execute Lua or Redis concurrency. That semantic check remains a separate increment. Node ESM and simulated Edge fetch constraints have distinct scopes. There is no claim here of a live provider request, production login/save, deployed runtime verification, or browser end-to-end coverage.
+
+No schedule, Real protection, application calculation, security policy, saved data, or release command is changed by this migration. The complete baseline inventory remains in [the audit](test-system-audit-2026-11-09.md).
