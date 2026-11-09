@@ -18,3 +18,11 @@ The pass search performs one bounded saved-catalog read if exact names fill the 
 The query uses the documented [PostgREST filtering operators](https://docs.postgrest.org/en/stable/references/api/tables_views.html) and [PostgreSQL pattern escaping](https://www.postgresql.org/docs/current/functions-matching.html).
 
 No live catalog search, application API call or Real request was run. Verification uses synthetic saved-catalog rows; it does not establish which names/seasons are currently stored in production. No saved data, schedules, retired features, authentication or Real-500 protection changed, and the port-5175 copy stayed stopped.
+
+## Production release
+
+Source `db5d0f480a7a9d4f560a604c017339dad306d145` was committed and pushed on `codex/performance-phase-two`. Production deployment `dpl_3a9TmBKnpUGntPGdwzZ4q2XUYXti` is **READY**, with canonical and team aliases assigned; its recorded source and required `npm run build` command match the verified release.
+
+The hosted build passed the mandatory 284 tests in 37 files, the 222-module request audit, native ESM loading, TypeScript and production bundling. Three canonical static requests verified security headers and matching entry/Optimization asset hashes. Those frontend assets are unchanged because this fix is in the shared server search; deployment source identity and offline integration regressions provide the server-change evidence. No production catalog/API search was invoked.
+
+Private access and other firewall rules were verified unchanged. The existing unsafe-host rule was advanced to the verified deployment, retaining canonical/team access and denying older deployment hosts. No application API or Real request was made during release verification. This release record is a subsequent documentation-only commit; no second deployment is needed.
