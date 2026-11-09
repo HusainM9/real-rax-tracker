@@ -148,7 +148,7 @@ Keep mutation/extra diagnostics on demand initially; introduce no new scheduled 
 
 Track time to the first useful failure, total CI wall time on the same runner, unexpected-request failures, flaky outcomes, critical branch gaps, and whether selected realistic mutations are detected. Test count is descriptive. A lower count matters only when it represents less duplication or maintenance with equivalent protection.
 
-The next decision is whether to adopt the incremental structure above. Detailed implementation steps should follow that direction choice; this proposal does not change test admission or release policy.
+The owner selected the incremental structure and authorized its first implementation phase, preserving every original test file. See [the implementation ledger](superpowers/plans/2026-11-09-test-infrastructure.md) and [release record](test-infrastructure-release-2026-11-09.md). Additional increments remain separate; the audit does not change test admission or release policy.
 
 ## File inventory
 
@@ -328,4 +328,3 @@ The appendix groups every discovered file by primary responsibility. Times are t
 | File | Cases | Body ms | Gate |
 | --- | ---: | ---: | --- |
 | [src/lib/rankingParity.test.ts](../src/lib/rankingParity.test.ts) | 37 | 8,116 |  |
-

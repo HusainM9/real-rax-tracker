@@ -79,3 +79,5 @@ This first implementation pass delivers the independent infrastructure and bound
 ## Release authorization
 
 The owner subsequently requested "commit and deploy" on November 9. That authorizes committing and releasing this verified first phase on the current branch. The earlier no-commit/no-deployment restriction describes the completed implementation pass; preservation of all original tests, application logic, safety rules, data, and schedules remains in force.
+
+Source `41d106bd56676097e836fa3edebb34030b884437` was committed, pushed, and deployed as `dpl_73yyPVPuDk4SeLAYcLj3PKCz2wVs`, READY with production aliases. Fresh local full-suite/partition/build checks and the hosted mandatory gate passed. Static hashes, security headers, private access, and preservation of other firewall rules were verified. See [the release record](../../test-infrastructure-release-2026-11-09.md) for evidence and scope.
